@@ -61,7 +61,7 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     else
         files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo Makefile)
     fi
-    if printf '%s\n' "$files" | grep -qE '^(schema/|scripts/|ui/|desktop/|web/|graph-kit$|Makefile$)'; then
+    if printf '%s\n' "$files" | grep -qE '^(schema/|scripts/|ui/|desktop/|web/|graph-kit$|Makefile$|\.github/workflows/desktop-|deploy/hub/)'; then
         regression_changed=1
     fi
     # The HTTP contract gate (~1 s): schemas, generators, the OpenAPI overlay and

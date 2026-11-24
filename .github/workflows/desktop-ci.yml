@@ -16,7 +16,8 @@ on:
       - 'extension/**'
       - 'schema/design/**'
       - 'graph-kit'
-      - '.github/workflows/desktop-ci.yml'
+      - '.github/workflows/desktop-*.yml'
+      - 'deploy/hub/**'
   pull_request:
     paths:
       - 'desktop/**'
@@ -25,7 +26,8 @@ on:
       - 'extension/**'
       - 'schema/design/**'
       - 'graph-kit'
-      - '.github/workflows/desktop-ci.yml'
+      - '.github/workflows/desktop-*.yml'
+      - 'deploy/hub/**'
 
 concurrency:
   group: desktop-ci-${{ github.ref }}
@@ -53,7 +55,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       # The Graph screen's System page imports graph-kit's web source
       # (graph-kit/web), so vite needs the submodule. Only that one:
@@ -61,7 +63,7 @@ jobs:
       - name: Check out graph-kit submodule
         run: git submodule update --init graph-kit
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -82,7 +84,7 @@ jobs:
           rustup default stable
           cargo --version
 
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             ~/.cargo/registry
@@ -167,3 +169,13 @@ jobs:
       - name: cargo test (lib)
         working-directory: desktop/src-tauri
         run: cargo test --locked --lib
+
+      # The bundled core as the release stages it (pinned Node, production deps), then its dependency check and smoke.
+      - name: Stage and smoke-test the bundled core
+        if: runner.os == 'Linux'
+        env:
+          LLMIDE_STAGE_RELEASE: '1'
+        run: |
+          node desktop/scripts/stage-core.mjs
+          node desktop/scripts/check-core-deps.mjs
+          node desktop/scripts/smoke-core.mjs
