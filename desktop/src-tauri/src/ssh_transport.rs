@@ -269,7 +269,10 @@ pub trait ForwardChild: Send {
 }
 
 /// Production runner: the system `ssh`, found through PATH like the existing key-only runner.
-pub struct SystemSshExec;
+pub struct SystemSshExec {
+    /// The session record that remembers the forward's pid for the next run's stale-forward reap.
+    pub session_file: std::path::PathBuf,
+}
 
 impl SshExec for SystemSshExec {
     fn run(
@@ -283,7 +286,7 @@ impl SshExec for SystemSshExec {
     }
 
     fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>> {
-        Ok(Box::new(spawn_program("ssh", args, askpass)?))
+        Ok(Box::new(spawn_program("ssh", args, askpass, &self.session_file)?))
     }
 
     fn spawn_stdio(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn StdioChild>> {
@@ -359,6 +362,7 @@ fn drain_to_sink(mut pipe: impl Read + Send + 'static) {
 /// The production forward child. Its stderr is drained by a detached thread so ssh never blocks on a full pipe.
 struct SystemForwardChild {
     child: Child,
+    session_file: std::path::PathBuf,
 }
 
 impl ForwardChild for SystemForwardChild {
@@ -375,6 +379,7 @@ impl ForwardChild for SystemForwardChild {
         // An error here means the child has already exited, which is the state `kill` is meant to reach.
         let _ = self.child.kill();
         let _ = self.child.wait();
+        crate::ssh_session::clear_forward(&self.session_file, self.child.id());
     }
 }
 
@@ -403,7 +408,7 @@ fn exit_code(status: ExitStatus) -> i32 {
 /// Builds the child command with a scrubbed environment. `env_clear` first, then only the terminal
 /// shell's allowlist (no API keys, no loader or start-up hooks), then the askpass variables. The
 /// askpass variables come last because they are the only ones this module adds on purpose.
-fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> Command {
+pub(crate) fn child_command(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> Command {
     let mut command = Command::new(program);
     command.args(args).env_clear();
     for (key, value) in ssh_child_env(askpass) {
@@ -441,7 +446,7 @@ const WAIT_POLL: Duration = Duration::from_millis(10);
 /// block the caller forever (a stuck remote command holds the ssh channel open). The pipes are drained by
 /// reader threads, the child is polled against the deadline, and on expiry it is killed and reaped, so no ssh
 /// process is left behind. stderr is captured for the caller and never logged here.
-fn run_program(
+pub(crate) fn run_program(
     program: &str,
     args: &[String],
     stdin: Option<&[u8]>,
@@ -516,14 +521,22 @@ fn timed_out() -> std::io::Error {
 }
 
 /// Starts `program` without waiting: no stdin, stdout discarded, stderr drained.
-fn spawn_program(program: &str, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<SystemForwardChild> {
+fn spawn_program(
+    program: &str,
+    args: &[String],
+    askpass: Option<&AskpassGrant>,
+    session_file: &Path,
+) -> std::io::Result<SystemForwardChild> {
     let mut command = child_command(program, args, askpass);
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     let mut child = command.spawn()?;
     if let Some(stderr) = child.stderr.take() {
         drain_to_sink(stderr);
     }
-    Ok(SystemForwardChild { child })
+    if let Some(spec) = args.windows(2).find(|w| w[0] == "-L").map(|w| &w[1]) {
+        crate::ssh_session::record_forward(session_file, child.id(), spec);
+    }
+    Ok(SystemForwardChild { child, session_file: session_file.to_path_buf() })
 }
 
 #[cfg(test)]
@@ -859,7 +872,7 @@ mod tests {
 
         #[test]
         fn forward_child_kill() {
-            let mut child = spawn_program("/bin/sh", &sh("exec sleep 30"), None).unwrap();
+            let mut child = spawn_program("/bin/sh", &sh("exec sleep 30"), None, &std::env::temp_dir().join("llmide-no-session.json")).unwrap();
             assert_eq!(child.try_exited(), None);
             child.kill();
             assert!(child.try_exited().is_some());

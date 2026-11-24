@@ -157,8 +157,9 @@ pub async fn remote_ssh_server_uninstall(
 /// The production [`Deps`]: the system ssh, ssh-keyscan, the native dialog, the loopback health probe, the bundle
 /// lookup, the secret store and the session file under the desktop data dir.
 pub(crate) fn production_deps() -> Result<Deps, FsError> {
+    let session_file = session_file()?;
     Ok(Deps {
-        exec: Arc::new(SystemSshExec),
+        exec: Arc::new(SystemSshExec { session_file: session_file.clone() }),
         scan: Arc::new(|endpoint: &SshEndpoint| keyscan(endpoint)),
         ask: Arc::new(|shown: &str, key_type: &str, fingerprint: &str| ask_host_key(shown, key_type, fingerprint)),
         health: Arc::new(|port: u16| core_host::health_nonce(port, HEALTH_TIMEOUT)),
@@ -166,7 +167,7 @@ pub(crate) fn production_deps() -> Result<Deps, FsError> {
         keygen: Arc::new(|path: &Path| keygen(path)),
         version: VERSION.to_string(),
         secrets_payload: Arc::new(secrets_payload),
-        session_file: session_file()?,
+        session_file,
     })
 }
 

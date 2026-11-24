@@ -107,6 +107,16 @@ struct SessionRecord {
     nonce: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending: Option<String>,
+    /// The `ssh -N -L` child this desktop last started, so a later run can reap it after a crash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    forward: Option<ForwardRecord>,
+}
+
+/// A forward's process id and its `-L` spec. The pid alone is never enough to act on, because pids are recycled.
+#[derive(Serialize, Deserialize, Clone)]
+struct ForwardRecord {
+    pid: u32,
+    spec: String,
 }
 
 impl SessionRecord {
@@ -117,6 +127,7 @@ impl SessionRecord {
             user: endpoint.user.clone(),
             nonce: nonce.to_string(),
             pending: pending.map(str::to_string),
+            forward: None,
         }
     }
 
@@ -171,6 +182,7 @@ pub(crate) fn connect_with(
     // Read locally before any ssh call. Every connect needs it: it decides whether the server's release matches this app.
     let bundle_sha = bundle_sha256(input.bundle)?;
     // Picked before any ssh call, so a machine with no free port changes nothing on the server.
+    reap_stale_forward(input.session_file);
     let local_port = pick_port()
         .ok_or_else(|| herr("SSH_NO_LOCAL_PORT", "no local port in 3456..=3459 is free for the forward"))?;
     let link = Link { exec, endpoint: input.endpoint, known_hosts, password: input.password };
@@ -543,6 +555,56 @@ fn restore_record(path: &Path, before: Option<SessionRecord>) {
     }
 }
 
+/// Notes the running forward in the session record. Best effort: no record yet means nothing to attach it to.
+pub(crate) fn record_forward(path: &Path, pid: u32, spec: &str) {
+    if let Some(mut record) = read_session(path) {
+        record.forward = Some(ForwardRecord { pid, spec: spec.to_string() });
+        let _ = save_record(path, &record);
+    }
+}
+
+/// Forgets the forward `pid`, when it is still the recorded one.
+pub(crate) fn clear_forward(path: &Path, pid: u32) {
+    if let Some(mut record) = read_session(path).filter(|r| r.forward.as_ref().is_some_and(|f| f.pid == pid)) {
+        record.forward = None;
+        let _ = save_record(path, &record);
+    }
+}
+
+/// True when `ps_command` (the output of `ps -o command= -p <pid>`) is an `ssh` carrying exactly this `-L` spec.
+/// A recycled pid runs some other program, and a different ssh has a different spec, so neither matches.
+fn is_recorded_forward(spec: &str, ps_command: &str) -> bool {
+    let tokens: Vec<&str> = ps_command.split_whitespace().collect();
+    let is_ssh = tokens.first().is_some_and(|t| t.rsplit('/').next() == Some("ssh"));
+    is_ssh && tokens.windows(2).any(|w| w[0] == "-L" && w[1] == spec)
+}
+
+/// Stops a forward left behind by a crash, so its local port is free again. Runs before the port is picked.
+#[cfg(unix)]
+fn reap_stale_forward(session_file: &Path) {
+    let Some(mut record) = read_session(session_file) else { return };
+    let Some(forward) = record.forward.take() else { return };
+    let ps = std::process::Command::new("ps").args(["-o", "command=", "-p", &forward.pid.to_string()]).output();
+    let ours = ps.is_ok_and(|o| o.status.success() && is_recorded_forward(&forward.spec, &String::from_utf8_lossy(&o.stdout)));
+    // Pid 0 and 1 would signal a process group or init; a real forward is never either.
+    if let (true, Ok(pid @ 2..)) = (ours, i32::try_from(forward.pid)) {
+        // SAFETY: plain signal calls on a pid just checked to be our own ssh forward.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        let gone = (0..20).any(|_| {
+            std::thread::sleep(Duration::from_millis(100));
+            (unsafe { libc::kill(pid, 0) }) != 0
+        });
+        if !gone {
+            unsafe { libc::kill(pid, libc::SIGKILL) };
+        }
+    }
+    let _ = save_record(session_file, &record);
+}
+
+// shortcut: no stale-forward reap on Windows, add a tasklist/taskkill check if users report SSH_NO_LOCAL_PORT there
+#[cfg(not(unix))]
+fn reap_stale_forward(_session_file: &Path) {}
+
 fn read_session(path: &Path) -> Option<SessionRecord> {
     let text = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&text).ok()
@@ -657,6 +719,35 @@ pub fn bundle_for(version: &str) -> Option<String> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+
+    const SPEC: &str = "127.0.0.1:3456:127.0.0.1:3460";
+
+    #[test]
+    fn only_our_own_ssh_forward_is_recognised() {
+        let ours = format!("ssh -N -a -x -o BatchMode=yes -L {SPEC} alice@example.com");
+        assert!(is_recorded_forward(SPEC, &ours));
+        assert!(is_recorded_forward(SPEC, &format!("/usr/bin/ssh -N -L {SPEC} alice@example.com\n")));
+        // A recycled pid now runs something else, or a different ssh, or nothing.
+        assert!(!is_recorded_forward(SPEC, "/usr/bin/vim notes.txt"));
+        assert!(!is_recorded_forward(SPEC, &format!("vim -L {SPEC}")));
+        assert!(!is_recorded_forward(SPEC, "ssh -N -L 127.0.0.1:3457:127.0.0.1:3460 alice@example.com"));
+        assert!(!is_recorded_forward(SPEC, "ssh alice@example.com"));
+        assert!(!is_recorded_forward(SPEC, ""));
+    }
+
+    #[test]
+    fn a_forward_is_recorded_and_cleared_only_by_its_own_pid() {
+        let scratch = Scratch::new("forward-record");
+        let ep = key_endpoint();
+        write_session(&scratch.session, &ep, "nonce").unwrap();
+        record_forward(&scratch.session, 4242, SPEC);
+        assert_eq!(read_session(&scratch.session).unwrap().forward.unwrap().pid, 4242);
+        clear_forward(&scratch.session, 1);
+        assert!(read_session(&scratch.session).unwrap().forward.is_some(), "another pid leaves the record");
+        clear_forward(&scratch.session, 4242);
+        assert!(read_session(&scratch.session).unwrap().forward.is_none());
+        assert_eq!(read_session(&scratch.session).unwrap().nonce, "nonce");
+    }
     use super::*;
     use crate::remote::temp_ssh_dir;
     use crate::ssh_server_scripts::{INSTALL, PROBE, ROLLBACK, START, STATUS, STOP};

@@ -10,8 +10,7 @@
 //! `DeployRunner` and a fake `HealthProbe`, so CI contacts no host.
 
 use std::collections::HashMap;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::time::Duration;
 use std::sync::{Mutex, OnceLock};
 
 use base64::Engine as _;
@@ -20,6 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
+use crate::ssh_transport::run_program;
 use crate::remote::{
     prepare, require_confirmed_host_key, ssh_args_known, temp_ssh_dir, write_known_hosts,
     ConfirmedHostKey, PreparedTarget, RawOutput, SshTarget,
@@ -89,40 +89,39 @@ pub fn verified_known_host_line(scan: &str, target: &PreparedTarget, key: &Confi
 /// fingerprint, and `StrictHostKeyChecking=yes` then refuses any other key at connect time.
 pub struct SystemDeploy;
 
+const SCAN_DEADLINE: Duration = Duration::from_secs(60);
+/// Every stage gets the long deadline: an install or upload can take many minutes, and a stage killed half way is
+/// worse than a slow one. The deadline only ends a server that never answers.
+const STAGE_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// A deadline is its own error, so the UI can say the server was slow rather than that ssh is missing.
+fn io_error(code: &'static str, what: &str, e: std::io::Error) -> FsError {
+    if e.kind() == std::io::ErrorKind::TimedOut {
+        herr("SSH_TIMEOUT", format!("{what} did not finish in time"))
+    } else {
+        herr(code, format!("could not run {what}: {e}"))
+    }
+}
+
 impl DeployRunner for SystemDeploy {
     fn run(&self, target: &PreparedTarget, command: &str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
         let key = require_confirmed_host_key(target)?;
         let dir = temp_ssh_dir("ssh-deploy")?;
         let run = (|| {
-            let scan = Command::new("ssh-keyscan")
-                .args(["-T", "10", "-p", &target.port.to_string(), "-t", &key.key_type, &target.host])
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .output()
-                .map_err(|e| herr("host_key_unavailable", format!("could not run ssh-keyscan: {e}")))?;
-            let scan_text = String::from_utf8_lossy(&scan.stdout);
-            let line = verified_known_host_line(&scan_text, target, &key).ok_or_else(|| {
+            let scan = run_program(
+                "ssh-keyscan",
+                &["-T".into(), "10".into(), "-p".into(), target.port.to_string(), "-t".into(), key.key_type.clone(), target.host.clone()],
+                None,
+                None,
+                SCAN_DEADLINE,
+            )
+            .map_err(|e| io_error("host_key_unavailable", "ssh-keyscan", e))?;
+            let line = verified_known_host_line(&scan.stdout, target, &key).ok_or_else(|| {
                 herr("host_key_changed", "the server's host key does not match the fingerprint you confirmed; test again and compare it")
             })?;
             let known = write_known_hosts(&dir, &line)?;
-            let mut cmd = Command::new("ssh");
-            cmd.args(ssh_args_known(target, command, &known, false))
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            if stdin.is_some() { cmd.stdin(Stdio::piped()); } else { cmd.stdin(Stdio::null()); }
-            let mut child = cmd.spawn().map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")))?;
-            if let Some(bytes) = stdin {
-                let mut pipe = child.stdin.take().ok_or_else(|| herr("ssh_failed", "the ssh input pipe is unavailable"))?;
-                pipe.write_all(bytes).map_err(|e| herr("ssh_failed", format!("could not send the stage input: {e}")))?;
-                drop(pipe);
-            }
-            let out = child.wait_with_output().map_err(|e| herr("ssh_failed", format!("could not read the ssh result: {e}")))?;
-            Ok(RawOutput {
-                code: out.status.code(),
-                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-            })
+            run_program("ssh", &ssh_args_known(target, command, &known, false), stdin, None, STAGE_DEADLINE)
+                .map_err(|e| io_error("ssh_failed", "the system ssh command", e))
         })();
         let _ = std::fs::remove_dir_all(&dir);
         run

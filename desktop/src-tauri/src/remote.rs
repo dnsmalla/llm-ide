@@ -20,7 +20,6 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -184,17 +183,7 @@ pub struct SystemSsh;
 
 impl Runner for SystemSsh {
     fn run(&self, args: &[String]) -> std::io::Result<RawOutput> {
-        let output = Command::new("ssh")
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()?;
-        Ok(RawOutput {
-            code: output.status.code(),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        })
+        crate::ssh_transport::run_program("ssh", args, None, None, std::time::Duration::from_secs(60))
     }
 }
 
@@ -342,38 +331,39 @@ pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path
         target.port.to_string(),
         "-i".to_string(),
         target.key_path.clone(),
+        // A user's `ControlMaster auto` must not reuse a connection that skipped the pinned known_hosts.
+        "-o".to_string(),
+        "ControlMaster=no".to_string(),
+        "-o".to_string(),
+        "ControlPath=none".to_string(),
         format!("{}@{}", target.user, target.host),
         command.to_string(),
     ]
 }
 
-/// A private temp directory for one SSH child (a known_hosts file, never secrets). Best effort mode
-/// 0700 on Unix; the file itself carries no secret (it is a public host key).
+/// A private temp directory for one SSH child (a known_hosts file, never secrets). The name has a random
+/// suffix and the directory is created fresh (0700 on Unix), so a pre-made path is refused, not reused.
 pub fn temp_ssh_dir(label: &str) -> Result<PathBuf, FsError> {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("llmide-{label}-{}-{nanos}", std::process::id()));
-    std::fs::create_dir_all(&dir).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
+    let mut random = [0u8; 8];
+    getrandom::fill(&mut random).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
+    let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
+    let dir = std::env::temp_dir().join(format!("llmide-{label}-{}-{suffix}", std::process::id()));
+    let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
-    }
+    std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+    builder.create(&dir).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
     Ok(dir)
 }
 
-/// Write a one-line known_hosts file (0600) for the confirmed host key.
+/// Write a one-line known_hosts file (0600) for the confirmed host key. An existing file or symlink is refused.
 pub fn write_known_hosts(dir: &Path, line: &str) -> Result<PathBuf, FsError> {
     let path = dir.join("known_hosts");
-    std::fs::write(&path, format!("{line}\n"))
-        .map_err(|e| herr("known_hosts_failed", format!("could not write the temporary known_hosts: {e}")))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-    }
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let written = options.open(&path).and_then(|mut file| std::io::Write::write_all(&mut file, format!("{line}\n").as_bytes()));
+    written.map_err(|e| herr("known_hosts_failed", format!("could not write the temporary known_hosts: {e}")))?;
     Ok(path)
 }
 
@@ -395,7 +385,13 @@ pub fn execute<R: Runner>(target: &PreparedTarget, runner: &R) -> Result<SshTest
     let args = ssh_args_known(target, REMOTE_COMMAND, &known, true);
     let output = runner
         .run(&args)
-        .map_err(|e| herr("ssh_missing", format!("could not run the system ssh command: {e}")));
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::TimedOut {
+                herr("SSH_TIMEOUT", "the server did not answer in time")
+            } else {
+                herr("ssh_missing", format!("could not run the system ssh command: {e}"))
+            }
+        });
     let _ = std::fs::remove_dir_all(&dir);
     let output = output?;
     if output.code != Some(0) {
@@ -744,9 +740,20 @@ mod tests {
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("UserKnownHostsFile=/tmp/llmide-known-hosts-test")));
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("GlobalKnownHostsFile=")));
         for flag in ["-a", "-x"] { assert!(args.contains(&flag.to_string()), "{flag}"); }
-        for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no"] {
+        for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "ControlMaster=no", "ControlPath=none"] {
             assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == opt), "{opt}");
         }
+    }
+
+    #[test]
+    fn the_temp_dir_and_known_hosts_refuse_something_pre_made() {
+        let dir = temp_ssh_dir("refuse-test").unwrap();
+        assert_ne!(dir, temp_ssh_dir("refuse-test").unwrap(), "names must not repeat");
+        let path = write_known_hosts(&dir, "host key").unwrap();
+        assert_eq!(write_known_hosts(&dir, "other").unwrap_err().code, "known_hosts_failed");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "host key\n");
+        assert!(std::fs::DirBuilder::new().create(&dir).is_err(), "create must not accept an existing directory");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
