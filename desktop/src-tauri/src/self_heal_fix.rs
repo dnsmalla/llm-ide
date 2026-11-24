@@ -237,6 +237,11 @@ pub fn verify_in(main: &Path, dir: &Path, run_id: &str, timeout_secs: u64) -> Re
     }
     // Before the verify run, which borrows dependencies into the worktree and may write build output.
     let has_changes = !staged_patch(&wt, false)?.is_empty();
+    // Nothing to propose: `make regression` (up to 90 minutes) would only re-test the base commit. `passed` with
+    // `has_changes: false` reads downstream as "the agent left no change", never as a failed regression.
+    if !has_changes {
+        return Ok(Verified { batch, passed: true, timed_out: false, has_changes, reverted, output: String::new() });
+    }
     let script = main.join("scripts").join("self-heal-verify.sh");
     if !script.is_file() {
         return Err("scripts/self-heal-verify.sh is missing from the source checkout".into());
@@ -460,11 +465,27 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn no_change_skips_the_verify_run() {
+        // The verify script would fail: it must not run at all when the agent changed nothing.
+        let (main, dir) = checkout("nochange", 1);
+        let p = prepare_in(&main, &dir, RUN, "batch").unwrap();
+        std::fs::write(PathBuf::from(&p.worktree_path).join("Makefile"), "regression:\n\t@echo edited\n").unwrap();
+        let v = verify_in(&main, &dir, RUN, 60).unwrap();
+        assert!(v.passed && !v.has_changes && !v.timed_out, "{v:?}");
+        assert_eq!(v.output, "", "make regression was not run");
+        assert_eq!(v.reverted, vec!["Makefile".to_string()], "a verifier-only edit is reverted and is no change");
+        remove_in(&main, &dir, RUN).unwrap();
+        let _ = std::fs::remove_dir_all(main.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_failed_verify_is_reported_and_remove_cleans_up() {
         let (main, dir) = checkout("fail", 1);
         let p = prepare_in(&main, &dir, RUN, "batch").unwrap();
+        std::fs::write(PathBuf::from(&p.worktree_path).join("extension/server.mjs"), "export const v = 3;\n").unwrap();
         let v = verify_in(&main, &dir, RUN, 60).unwrap();
-        assert!(!v.passed && !v.has_changes && v.reverted.is_empty(), "{v:?}");
+        assert!(!v.passed && v.has_changes && v.reverted.is_empty(), "{v:?}");
         assert_eq!(v.batch, "batch");
         remove_in(&main, &dir, RUN).unwrap();
         assert!(!Path::new(&p.worktree_path).exists());
