@@ -108,6 +108,13 @@ fn valid_out(out: &str) -> bool {
         && out.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/'))
 }
 
+/// `dir` with symlinks resolved, or an error when it lands outside the project (a symlinked `system/loop-runs/<id>`).
+fn confine(root: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let real = dir.canonicalize().map_err(|e| format!("cannot resolve the graph output folder: {e}"))?;
+    let root = root.canonicalize().map_err(|e| format!("cannot resolve the project folder: {e}"))?;
+    if real.starts_with(&root) { Ok(real) } else { Err("the graph output folder is outside the project".into()) }
+}
+
 /// `graph-kit code` arguments. A Loop run (`light`) passes `--no-calls`: call edges are most of a large graph
 /// and the Loop never reads them, while the Graph screen keeps the full graph.
 fn code_args(scan: &str, out: &str, light: bool) -> Vec<String> {
@@ -131,6 +138,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Optio
         None => root.join("system").join("graph"),
     };
     std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out.unwrap_or("system/graph")))?;
+    let out_dir = confine(&root, &out_dir)?;
     let explicit = match target.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
             let p = crate::fs_ops::resolve_existing(&root, t).map_err(|e| e.message)?;
@@ -222,6 +230,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Optio
     // One graph per mode: a memory graph never replaces the code graph. Write a sibling then rename so
     // a reader never sees half a graph.
     let partial = dest.with_extension("json.partial");
+    let _ = std::fs::remove_file(&partial); // a planted symlink here is removed, never followed
     std::fs::write(&partial, text.as_bytes()).map_err(|e| format!("cannot write {rel}: {e}"))?;
     std::fs::rename(&partial, &dest).map_err(|e| format!("cannot install {rel}: {e}"))?;
     Ok(GraphGenerated { path: rel, nodes, edges })
@@ -288,9 +297,13 @@ pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target:
             if Instant::now() >= deadline { return Err("a graph generation is still running".into()); }
             std::thread::sleep(Duration::from_millis(100));
         }
-        let result = generate(&app, &mode, target.as_deref(), out.as_deref());
-        RUNNING.store(false, Ordering::SeqCst);
-        result
+        // Cleared on drop, so a panic inside `generate` cannot wedge every later run.
+        struct Running;
+        impl Drop for Running {
+            fn drop(&mut self) { RUNNING.store(false, Ordering::SeqCst); }
+        }
+        let _running = Running;
+        generate(&app, &mode, target.as_deref(), out.as_deref())
     }).await.map_err(|e| format!("graph task failed: {e}"));
     result?
 }
@@ -311,6 +324,21 @@ pub fn graph_cancel() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn an_output_folder_symlinked_out_of_the_project_is_refused() {
+        let base = std::env::temp_dir().join(format!("llmide-confine-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, outside) = (base.join("p"), base.join("outside"));
+        std::fs::create_dir_all(root.join("system/loop-runs")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("system/loop-runs/r1")).unwrap();
+        assert!(confine(&root, &root.join("system/loop-runs/r1")).is_err());
+        std::fs::create_dir_all(root.join("system/loop-runs/r2")).unwrap();
+        assert!(confine(&root, &root.join("system/loop-runs/r2")).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn each_mode_has_its_own_project_relative_graph() {
