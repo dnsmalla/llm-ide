@@ -2397,7 +2397,6 @@ dependencies = [
  "base64 0.22.1",
  "ctrlc",
  "getrandom 0.3.4",
- "ignore",
  "keyring",
  "libc",
  "llmide-workspace-core",

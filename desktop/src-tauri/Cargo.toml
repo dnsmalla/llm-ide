@@ -1,7 +1,7 @@
 [package]
 name = "llmide-desktop"
 version = "0.0.0"
-description = "LLM-IDE Desktop Tauri PoC (throwaway)"
+description = "LLM-IDE Desktop (Tauri host)"
 edition = "2021"
 rust-version = "1.90"
 resolver = "3"
@@ -38,7 +38,6 @@ libc = "=0.2.191"
 portable-pty = "=0.9.0"
 getrandom = "=0.3.4"
 # Explorer host (S-C): file watching (CC0-1.0), gitignore matching (MIT/Unlicense), OS trash (MIT).
-ignore = "=0.4.35"
 trash = "=5.4.0"
 sha2 = "=0.10.9"
 # Remote hub: pinned TLS for the loopback proxy (same rustls already in the lock via ureq).
