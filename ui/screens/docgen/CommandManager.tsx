@@ -1,6 +1,6 @@
 // Saved Doc Gen / Visual commands: the project's command files, editable and deletable through the core.
-import { useId, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { StatusBanner, useDialogFocus } from "@llmide/ui-kit";
 import type { Failure } from "./errors.ts";
 import type { DocCommand } from "./model.ts";
 
@@ -16,6 +16,8 @@ export interface CommandManagerProps {
 
 export function CommandManager({ commands, busy, error, onSave, onDelete, onClose, initialEditing = null }: CommandManagerProps): ReactNode {
   const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(dialogRef);
   const [editing, setEditing] = useState<string | "new" | null>(initialEditing);
   const [confirm, setConfirm] = useState<string | null>(null);
   const current = editing && editing !== "new" ? commands.find((c) => c.id === editing) ?? null : null;
@@ -30,7 +32,7 @@ export function CommandManager({ commands, busy, error, onSave, onDelete, onClos
   const valid = name.trim() !== "" && instruction.trim() !== "";
   return (
     <div className="dg-dialog-wrap">
-      <div className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dg-bar"><h2 id={titleId} className="dg-h2">Commands</h2><button type="button" className="dg-btn" onClick={onClose}>Close</button></div>
         {error && <StatusBanner severity="error" message={<>{error.message}</>} />}
         {editing === null ? (

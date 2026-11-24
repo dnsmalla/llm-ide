@@ -1,7 +1,7 @@
 // Template manager: project templates are files in the project (written through the core); kit built-ins are copied
 // into the project on first use, so every template listed here can be edited or deleted.
-import { useId, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { useId, useRef, useState, type ReactNode } from "react";
+import { StatusBanner, useDialogFocus } from "@llmide/ui-kit";
 import type { Failure } from "./errors.ts";
 import { settlePick, type PickedTemplateFile } from "./template-file.ts";
 import { MAX_SECTIONS, type DocTemplate } from "./model.ts";
@@ -29,6 +29,8 @@ export function parseSections(text: string): string[] {
 
 export function TemplateManager({ templates, busy, error, onSave, onDelete, onClose, pickFile, initialEditing = null }: TemplateManagerProps): ReactNode {
   const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(dialogRef);
   const [editing, setEditing] = useState<string | "new" | null>(initialEditing);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -59,7 +61,7 @@ export function TemplateManager({ templates, busy, error, onSave, onDelete, onCl
   };
   return (
     <div className="dg-dialog-wrap">
-      <div className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <div ref={dialogRef} className="dg-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="dg-bar">
           <h2 id={titleId} className="dg-h2">
             Templates

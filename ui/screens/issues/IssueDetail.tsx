@@ -1,7 +1,8 @@
 // The read-only issue detail dialog, shared by the Issues board and the Gantt's row details (the Mac's
 // RepoIssueDetailSheet, read side). It also shows the schedule overlay's dates and edits them with the Gantt's
 // ScheduleEditor. Comments, settings and close use the core's issue routes for GitHub and GitLab.
-import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useDialogFocus } from "@llmide/ui-kit";
 import { issueNumber, issueOpenUrl, openedAgo, type Issue } from "./issues-model.ts";
 import { DETAIL_NESTED_HINT, issueDatesView, localDatesNote, readIssueSchedule, type Schedule } from "../gantt/gantt-model.ts";
 import { normalizeBase, readRepoConfig } from "../settings/repo-config.ts";
@@ -118,6 +119,8 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
 
   useEffect(() => { void loadSchedule(); }, [loadSchedule]);
 
+  const panelRef = useRef<HTMLElement | null>(null);
+  useDialogFocus(panelRef);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -168,7 +171,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
 
   return (
     <div className="iss-detail-backdrop" role="presentation" onClick={onClose}>
-      <section className="iss-detail" role="dialog" aria-modal="true" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
+      <section ref={panelRef} className="iss-detail" role="dialog" aria-modal="true" aria-label="Issue details" onClick={(e) => e.stopPropagation()}>
         <header className="iss-detail-head">
           <div className="iss-grow">
             <h2>{issueNumber(issue)} {issue.title}</h2>

@@ -2,6 +2,7 @@
 // (tokens + aliases + component styles) and set data-theme via applyTheme().
 export { THEMES, DEFAULT_THEME_ID, isThemeId, applyTheme, type ThemeId } from "./theme";
 export * from "./icons";
+export { useDialogFocus } from "./components/useDialogFocus";
 export { Chip } from "./components/Chip";
 export { EditorTabBar, tabAccessibleName, tabKeyTarget, type EditorTab } from "./components/EditorTabBar";
 export { FileTreeRow, type GitStatus } from "./components/FileTreeRow";

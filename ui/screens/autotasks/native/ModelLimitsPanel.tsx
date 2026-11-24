@@ -1,6 +1,7 @@
 // Model & Limits: the per-user model chain and its caps, read from and saved to the server (/kb/usage/*). The runner
 // reads the same chain through /kb/usage/resolve before each run, so a cap set here applies to desktop runs.
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useDialogFocus } from "@llmide/ui-kit";
 import { core } from "../../shell/runtime";
 import { limitsBody, meterText, moveRow, providersToSave, type ChainRow, type RateSnapshot, type Summary, type SummaryRow, type UsageUnit, type UsageWindow } from "./usage.ts";
 
@@ -41,6 +42,8 @@ export function ModelLimitsPanel({ onClose, embedded = false }: { onClose: () =>
     } finally { setBusy(false); }
   };
   useEffect(() => { void load(); }, []);
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(dialogRef);
 
   const markDirty = (provider: string) => setDirty((d) => new Set(d).add(provider));
   const edit = (provider: string, index: number, patch: Partial<ChainRow>) => {
@@ -107,7 +110,7 @@ export function ModelLimitsPanel({ onClose, embedded = false }: { onClose: () =>
   if (embedded) return <div className="atn-limits-embed">{body}</div>;
   return (
     <div className="atn-modal" role="dialog" aria-modal="true" aria-labelledby="atn-limits-title">
-      <div className="atn-modal-card atn-limits">
+      <div ref={dialogRef} className="atn-modal-card atn-limits">
         <header><h2 id="atn-limits-title">Model &amp; Limits</h2><span className="atn-spacer" /><button type="button" className="atn-icon" aria-label="Close model limits" onClick={onClose}>×</button></header>
         {body}
       </div>
