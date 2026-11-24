@@ -65,6 +65,9 @@ const STOP_WAIT: Duration = Duration::from_secs(1);
 /// `/health` never answers.
 const MAX_FORWARD_FAILURES: u32 = 5;
 
+/// Consecutive attempts that could not reach the server at all; about ten minutes at the 15 s backoff cap.
+const MAX_UNREACHABLE_ATTEMPTS: u32 = 40;
+
 const STOPPED_CODE: &str = "SSH_LINK_STOPPED";
 const CORE_STOPPED_CODE: &str = "SSH_CORE_STOPPED";
 const CORE_STOPPED_MESSAGE: &str = "The server core is not running. Connect again to start it.";
@@ -74,6 +77,8 @@ const FORWARD_FAILED_CODE: &str = "SSH_FORWARD_FAILED";
 const FORWARD_FAILED_MESSAGE: &str = "The local port for this server is in use. Quit the other program and connect again.";
 const UNRESPONSIVE_CODE: &str = "SSH_CORE_UNRESPONSIVE";
 const UNRESPONSIVE_MESSAGE: &str = "The server core is not answering. Stop the server and connect again.";
+const UNREACHABLE_CODE: &str = "SSH_UNREACHABLE";
+const UNREACHABLE_MESSAGE: &str = "The server could not be reached for about ten minutes. Reconnect when it is back.";
 
 /// What the link reports to the app. Carries no secret and no ssh output.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -387,8 +392,10 @@ fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<
     let mut attempt: u32 = 0;
     // One streak of failed reattaches, of either kind. A streak that mixes the two still ends, so the link never
     // retries forever. An attempt that could not reach the server's STATUS says nothing about the local port or the
-    // core, so it starts the streak again. The give-up code is the silent one only when every failure was silent.
+    // core, so it starts that streak again and counts toward its own, longer unreachable budget instead.
+    // The give-up code is the silent one only when every failure was silent.
     let mut failures: u32 = 0;
+    let mut unreachable: u32 = 0;
     let mut all_silent = true;
     loop {
         if sup.shared.is_stopped() {
@@ -405,8 +412,14 @@ fn reconnect(sup: &Supervision<'_>, pause: &mut dyn FnMut(Pause)) -> Option<Box<
             Err(Attempt::Retry) => {
                 failures = 0;
                 all_silent = true;
+                unreachable += 1;
+                if unreachable >= MAX_UNREACHABLE_ATTEMPTS {
+                    sup.shared.set_state(LinkState::Failed { code: UNREACHABLE_CODE, message: UNREACHABLE_MESSAGE.to_string() });
+                    return None;
+                }
             }
             Err(failed @ (Attempt::ForwardRetry | Attempt::Unresponsive)) => {
+                unreachable = 0;
                 failures += 1;
                 all_silent &= matches!(failed, Attempt::Unresponsive);
                 if failures >= MAX_FORWARD_FAILURES {
@@ -701,7 +714,7 @@ mod tests {
             observed.pauses.push(pause);
             observed.states.push(link.state());
             observed.urls.push(link.url());
-            if waits > 40 {
+            if waits > 100 {
                 link.stop();
                 return;
             }
@@ -886,6 +899,20 @@ mod tests {
         let expected: Vec<&str> = (0..5).flat_map(|_| ["status", "forward"]).collect();
         assert_eq!(fake.names(), expected, "no forward is spawned after the fifth failure");
         assert!(exits.iter().all(|handle| handle.kill_count() == 1), "each failed forward is killed once");
+    }
+
+    #[test]
+    fn an_unreachable_server_ends_as_ssh_unreachable_after_forty_attempts() {
+        let first = Handle::new();
+        let fake = FakeExec::new((0..40).map(|_| ssh_error(TIMED_OUT)).collect());
+        let silent = |_: u16| None;
+        let (link, observed) = drive(&fake, None, first.forward(), &silent, |_, seen| {
+            if seen.pauses.len() == 1 {
+                first.exited.store(true, Ordering::SeqCst);
+            }
+        });
+        assert!(matches!(link.state(), LinkState::Failed { code: "SSH_UNREACHABLE", .. }), "{:?}", link.state());
+        assert_eq!(observed.backoffs().len(), 40, "no forty-first attempt");
     }
 
     #[test]
