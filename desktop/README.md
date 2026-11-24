@@ -20,4 +20,3 @@ The spike/bench commands (`ping`, `bench*`, `autobench_mode`, `*_override`, `sse
 build (`npm run check:security:product`, run by `npm run build` and `scripts/build-desktop-mac.sh`, enforces it).
 
 Requirements: Node 22+, Rust 1.90+ (required by `tauri` 2.12; tested on stable 1.99).
-The Rust lockfile (`src-tauri/Cargo.lock`) is resolved for Rust 1.84.

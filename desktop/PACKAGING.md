@@ -206,8 +206,7 @@ reachable for the current launch, so the host must store a security-scoped bookm
 entries rely on normal filesystem access.
 
 **Tray and notifications** (`src-tauri/src/tray.rs`, `src-tauri/src/notify.rs`). Tauri `tray-icon` feature plus
-`tauri-plugin-notification` 2.8.1 (2.5+ require
-tauri 2.12), used from Rust only: no `notification:*` permission is granted and `check-capabilities` forbids it.
+`tauri-plugin-notification` 2.8.1 (pinned), used from Rust only: no `notification:*` permission is granted and `check-capabilities` forbids it.
 Tray menu: backend status (+ "Recording"), approvals waiting (opens Chat or the inbox), Show window, the active
 project (label), Start/Stop live capture (macOS), Pause/Resume sync, Quit; left-click toggles the window. The count
 also shows beside the menu-bar icon (macOS, Linux) and in the tooltip (Windows). Close-to-tray is off by default
