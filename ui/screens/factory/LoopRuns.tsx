@@ -60,6 +60,8 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
     let alive = true;
     // A slow read must not stack with the next 5 s tick: overlapping refreshes could land out of order.
     let inFlight = false;
+    // A finished run's record never changes: read it once per effect (a run still "running" is re-read every tick).
+    const records = new Map<string, Record<string, unknown> | null>();
     const refresh = (): void => {
       if (inFlight) return;
       inFlight = true;
@@ -72,7 +74,12 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
         const names = loop ? loop.config.stages.filter((s) => s.enabled).map((s) => s.name) : [];
         setSteps(names);
         const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
-        const loaded = await Promise.all(shown.map((r) => loadRunRecord(fs, r.id, r.startedAt).catch(() => null)));
+        const loaded = await Promise.all(shown.map(async (r) => {
+          if (records.has(r.id)) return records.get(r.id)!;
+          const rec = await loadRunRecord(fs, r.id, r.startedAt).catch(() => null);
+          if (r.statusCode !== "running" && rec !== null) records.set(r.id, rec);
+          return rec;
+        }));
         if (!alive) return;
         setError(null);
         setCards(shown.map((run, i) => {
