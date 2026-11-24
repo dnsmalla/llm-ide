@@ -783,6 +783,7 @@ pub(crate) fn exit_cleanup(app: &tauri::AppHandle) {
     #[cfg(feature = "spike")]
     sse_replay::stop();
     graph_gen::graph_cancel();
+    repo_clone::cancel_for_exit();
 }
 
 #[cfg(test)]

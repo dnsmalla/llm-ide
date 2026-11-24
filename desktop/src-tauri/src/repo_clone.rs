@@ -17,8 +17,14 @@ use serde_json::{json, Value};
 
 use crate::workspace_backend::{self, Connector, Remote};
 
-/// The local command has no cancel control, so its flag is never set. The SSH helper is the one that cancels.
-static NEVER_CANCELLED: AtomicBool = AtomicBool::new(false);
+/// The local clone's cancel flag. No UI control sets it; only `cancel_for_exit` does, so a clone does not outlive
+/// the app. The SSH helper has its own cancel.
+static LOCAL_CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Stops a running local clone (git is killed and the partial folder removed by the core). Called on app exit.
+pub(crate) fn cancel_for_exit() {
+    LOCAL_CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 /// `grant` is the server's single-use clone grant. It is used only in SSH mode, where the helper redeems it for the
 /// saved token; local mode ignores it because the Mac's own git credentials are used there.
@@ -54,8 +60,9 @@ pub async fn repo_clone(
 /// Clones into `<root>/code/`. A destination that is already a clone of the same repository is returned as the
 /// result, so the caller records its path; any other refusal (another repository there, a bad URL) stands.
 fn local_clone(root: &Path, req: &CloneRequest, git: &Path) -> Result<CloneResult, String> {
+    LOCAL_CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
     match plan(root, req) {
-        Ok(clone_plan) => run(&clone_plan, req.token.as_ref(), &NEVER_CANCELLED, git),
+        Ok(clone_plan) => run(&clone_plan, req.token.as_ref(), &LOCAL_CANCEL, git),
         Err(refusal) => adopt_existing(root, req, git).ok_or(refusal),
     }
 }
