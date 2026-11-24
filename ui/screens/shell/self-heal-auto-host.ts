@@ -2,6 +2,7 @@
 // the Loop run manager for "a Loop run is busy", the shared host adapter for the fix run, and the host's
 // `self_heal` notification. Started by the Shell's Self-Heal effect; does nothing until the host says this build records.
 import { AUTO_CHECK_MS, autoTickOnce, loadAutoConfig, loadAutoState, saveAutoState, type AutoDeps } from "../settings/self-heal-auto";
+import { decodeIncidents } from "../settings/self-heal-model";
 import { runSelfHealFix } from "../settings/self-heal-run";
 import type { CoreClient } from "./core";
 import { notifyUser } from "./notify/notify";
@@ -13,10 +14,8 @@ const FIRST_CHECK_MS = 60_000;
 
 /** Ids of the incidents that need a person (status needsHuman). */
 async function needsHumanIds(core: Pick<CoreClient, "request">): Promise<Set<string>> {
-  const body = await core.request<{ incidents?: unknown }>("/kb/self-heal/incidents");
-  const list = Array.isArray(body?.incidents) ? body.incidents : [];
-  const ids = list.flatMap((i) => (i && typeof i === "object" && (i as { status?: unknown }).status === "needsHuman" && typeof (i as { id?: unknown }).id === "string" ? [(i as { id: string }).id] : []));
-  return new Set(ids);
+  const list = decodeIncidents(await core.request<unknown>("/kb/self-heal/incidents"));
+  return new Set(list.filter((i) => i.status === "needsHuman").map((i) => i.id));
 }
 
 /** Starts the checks; returns the stop function. A check never overlaps the previous one. */

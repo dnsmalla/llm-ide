@@ -79,7 +79,8 @@ export function dayKey(now: Date): string {
 
 /** Whether today's run should start now: on, not run today, at or past the time, and not waiting. */
 export function isDue(config: AutoConfig, state: AutoState, now: Date): boolean {
-  if (!config.enabled || state.lastRunDay === dayKey(now) || now.getTime() < state.waitUntil) return false;
+  // `>=`, not `===`: after moving west, "today" can be a day the run already used (YYYY-MM-DD sorts as dates).
+  if (!config.enabled || state.lastRunDay >= dayKey(now) || now.getTime() < state.waitUntil) return false;
   const [h, m] = (TIME.test(config.time) ? config.time : DEFAULT_TIME).split(":").map(Number);
   return now.getHours() * 60 + now.getMinutes() >= h * 60 + m;
 }

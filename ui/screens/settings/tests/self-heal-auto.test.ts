@@ -147,3 +147,7 @@ test("autoRunInProgress is true only while the automatic run runs, also when it 
   await autoTickOnce(bad.d);
   assert.equal(autoRunInProgress(), false);
 });
+
+test("a day already run in a time zone further east is not run again after moving west", () => {
+  assert.equal(isDue(on, { ...fresh, lastRunDay: "2026-11-25" }, at(24, 13, 0)), false);
+});
