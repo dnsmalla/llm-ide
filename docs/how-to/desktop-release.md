@@ -33,7 +33,19 @@ publishes; shipping a signed Windows installer on a tag release needs a workflow
 
 ## 2. One-time setup
 
-Add these as repository secrets (GitHub, Settings, Secrets and variables, Actions).
+### The protected environment (do this first)
+
+Signed jobs run in the GitHub environment `desktop-release`. Without this setup the name protects nothing:
+GitHub creates an empty, unprotected environment on first use.
+
+1. GitHub, Settings, Environments, New environment: `desktop-release`.
+2. Required reviewers: yourself. Every signed run then waits for your approval twice (preflight, then the builds).
+3. Deployment branches and tags: Selected, with `main` and the tag pattern `desktop-v*`.
+4. Add the secrets below as **environment secrets** of `desktop-release`, not repository secrets. A workflow
+   changed on another branch then cannot read them.
+
+An unsigned dry run uses no environment and no secret.
+
 
 | Secret | What | Needed for |
 |---|---|---|
@@ -47,8 +59,6 @@ Add these as repository secrets (GitHub, Settings, Secrets and variables, Action
 | `DESKTOP_UPDATER_PRIVATE_KEY` | Updater private key (file content) | Every signed run |
 | `DESKTOP_UPDATER_KEY_PASSWORD` | Its password | Every signed run |
 | `DESKTOP_WIN_AZURE_CLIENT_ID`, `..._CLIENT_SECRET`, `..._TENANT_ID`, `DESKTOP_WIN_SIGN_ENDPOINT`, `..._SIGN_ACCOUNT`, `..._SIGN_PROFILE` | Azure Artifact Signing | Only a dry run with `windows_signed`. Tag releases never need them |
-
-The seven `MAC_*` secrets are the same ones `mac-release.yml` uses. If the Mac release already works, you add nothing.
 
 "Every signed run" means a tag push, or a manual run with `signed=true`. The preflight job fails before any
 build if one is missing.

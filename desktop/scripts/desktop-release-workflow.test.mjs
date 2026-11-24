@@ -156,3 +156,12 @@ test('final review: the frontend SBOM reads the lockfile only, and Windows signi
   assert.match(y, /npm sbom --prefix desktop --omit dev --package-lock-only/);
   assert.match(y, /WIN_SIGNED: \$\{\{ inputs\.windows_signed == true && inputs\.signed == true \}\}/);
 });
+
+test('supply chain: every action is pinned by commit, signed jobs wait for the protected environment, Rust is pinned', () => {
+  const y = rel();
+  for (const m of y.matchAll(/uses: (\S+)/g)) assert.match(m[1], /@[0-9a-f]{40}$/, `${m[1]} is not pinned by SHA`);
+  // preflight and bundle read secrets; an unsigned dry run resolves to no environment.
+  assert.equal(y.match(/environment: \$\{\{ \(startsWith\(github\.ref, 'refs\/tags\/desktop-v'\) \|\| inputs\.signed == true\) && 'desktop-release' \|\| '' \}\}/g)?.length, 2);
+  assert.match(y, /RUST_VERSION: '\d+\.\d+\.\d+'/);
+  assert.doesNotMatch(y, /rustup (toolchain install|default) stable/);
+});
