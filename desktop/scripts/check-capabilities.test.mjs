@@ -18,6 +18,10 @@ test('wildcard, core:default and fs permissions fail', () => {
     assert.ok(check(c).length, bad);
   }
 });
+test('a permission listed twice in one file fails', () => {
+  const c = ok(); c.capabilities['a.json'].permissions.push('allow-ping');
+  assert.deepEqual(check(c), ['a.json: permission allow-ping is listed more than once']);
+});
 test('ungranted or undeclared command fails', () => {
   const a = ok(); a.capabilities['a.json'].permissions.pop();
   assert.ok(check(a).some((p) => p.includes('core_status')));

@@ -96,6 +96,7 @@ export function check({ libRs, buildRs, capabilities, cargoToml, updaterRs, prod
     if (cap.remote) problems.push(`${file}: remote URL scope is not allowed`);
     if (cap.local === false) problems.push(`${file}: local must stay true`);
     if (!(cap.windows ?? []).every((w) => w === 'main') || !cap.windows?.length) problems.push(`${file}: windows must be exactly ["main"]`);
+    for (const perm of new Set((cap.permissions ?? []).filter((x, i, all) => all.indexOf(x) !== i))) problems.push(`${file}: permission ${perm} is listed more than once`);
     for (const perm of cap.permissions ?? []) {
       if (typeof perm !== 'string') { problems.push(`${file}: scoped/object permission needs review`); continue; }
       if (perm.includes('*')) problems.push(`${file}: wildcard permission ${perm}`);
