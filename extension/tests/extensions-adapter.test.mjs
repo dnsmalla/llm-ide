@@ -80,8 +80,9 @@ async function turn(s, steps, { mode = 'execute', model = MODEL, answer, over = 
 }
 const calls = () => (fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().split('\n').filter(Boolean) : []);
 const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-async function waitGone(pid) {
-  for (let i = 0; i < Math.ceil(60 * loadFactor()) && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 50));
+// baseMs is the idle-machine allowance; it is scaled by load like every other budget here.
+async function waitGone(pid, baseMs = 3000) {
+  for (let i = 0; i < Math.ceil((baseMs / 50) * loadFactor()) && alive(pid); i += 1) await new Promise((r) => setTimeout(r, 50));
   return !alive(pid);
 }
 
@@ -332,13 +333,20 @@ test('a result that carries a fence marker cannot close the data frame early', a
 test('a server that never completes the handshake is abandoned at the connect timeout and its process is killed', async () => {
   const pidFile = world.file('hang.pid');
   const script = `require('fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setInterval(() => {}, 1000);`;
+  const connectMs = Math.round(budget(400));
   const t0 = Date.now();
   const conn = await client.connectMcpServers({ hang: { command: process.execPath, args: ['-e', script] } },
-    { deps: { limits: { connectMs: 400 } } });
+    { deps: { limits: { connectMs } } });
   assert.deepEqual(conn.statuses, [{ name: 'hang', status: 'failed', toolCount: 0, reason: 'timeout' }]);
-  assert.ok(Date.now() - t0 >= 400, 'not abandoned before the connect timeout');
-  assert.ok(Date.now() - t0 < budget(5000));
-  assert.ok(await waitGone(Number(fs.readFileSync(pidFile, 'utf8'))), 'the hung process was killed');
+  assert.ok(Date.now() - t0 >= connectMs, 'not abandoned before the connect timeout');
+  // connectMs, then the SDK's close (stdin closed + 2 s before SIGTERM) which is not load-scaled.
+  assert.ok(Date.now() - t0 < connectMs + budget(5000));
+  // The pid file is written by a second Node cold start (launcher, then child), so it can lag under load.
+  const pidDeadline = Date.now() + budget(5000);
+  while (!fs.existsSync(pidFile) && Date.now() < pidDeadline) await new Promise((r) => setTimeout(r, 50));
+  assert.ok(fs.existsSync(pidFile), 'the hung child never wrote its pid file');
+  // Covers the SDK close sequence (stdin close + 2 s, SIGTERM + up to 2 s before SIGKILL) with margin.
+  assert.ok(await waitGone(Number(fs.readFileSync(pidFile, 'utf8')), 5000), 'the hung process was killed');
   await conn.close();
 });
 
