@@ -19,10 +19,12 @@ const many = {};
 for (const m of rs.slice(rs.indexOf('pub fn body'), rs.indexOf('/// The category switch'))
   .matchAll(/Kind::(\w+)( if many)? => (?:format!\()?"([^"]+)"/g)) (m[2] ? many : one)[wire[m[1]]] = m[3];
 const HOST_ONLY = ['update_ready', 'core_down'];
+// A webview kind the host never pushes (notify.rs `pushes`): Self-Heal is a debug-build developer tool.
+const NEVER_PUSHED = ['self_heal'];
 
 test('the push kinds are the notifier webview kinds, never a host-only one', () => {
-  assert.equal(Object.keys(one).length, 13, 'notify.rs parsed');
-  assert.deepEqual([...PUSH_KINDS].sort(), Object.values(wire).filter((k) => !HOST_ONLY.includes(k)).sort());
+  assert.equal(Object.keys(one).length, 14, 'notify.rs parsed');
+  assert.deepEqual([...PUSH_KINDS].sort(), Object.values(wire).filter((k) => !HOST_ONLY.includes(k) && !NEVER_PUSHED.includes(k)).sort());
   assert.deepEqual([...COUNTED].sort(), Object.keys(many).sort());
   for (const k of HOST_ONLY) assert.equal(isPushKind(k), false, k);
   for (const bad of ['', 'Approval_chat', 'approval_chat ', '__proto__', null, 3]) assert.equal(isPushKind(bad), false, String(bad));

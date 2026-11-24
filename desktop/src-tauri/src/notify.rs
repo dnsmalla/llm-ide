@@ -46,6 +46,8 @@ pub enum Kind {
     SyncAttention,
     UpdateReady,
     CoreDown,
+    /// Self-Heal's daily automatic run produced a fix or an incident needs a person (debug builds only).
+    SelfHeal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,10 +60,10 @@ pub enum Group {
 }
 
 impl Kind {
-    pub const ALL: [Kind; 13] = [
+    pub const ALL: [Kind; 14] = [
         Kind::ApprovalChat, Kind::ApprovalJob, Kind::LoopDone, Kind::LoopFailed, Kind::AutoTaskDone, Kind::AutoTaskFailed,
         Kind::GraphDone, Kind::GraphFailed, Kind::DocGenDone, Kind::DocGenFailed, Kind::SyncAttention, Kind::UpdateReady,
-        Kind::CoreDown,
+        Kind::CoreDown, Kind::SelfHeal,
     ];
 
     pub fn wire(self) -> &'static str {
@@ -79,6 +81,7 @@ impl Kind {
             Kind::SyncAttention => "sync_attention",
             Kind::UpdateReady => "update_ready",
             Kind::CoreDown => "core_down",
+            Kind::SelfHeal => "self_heal",
         }
     }
 
@@ -109,6 +112,7 @@ impl Kind {
             Kind::SyncAttention => "settings:mobile",
             Kind::UpdateReady => "settings:updates",
             Kind::CoreDown => "settings:server",
+            Kind::SelfHeal => "settings:self-heal",
         }
     }
 
@@ -132,6 +136,7 @@ impl Kind {
             Kind::SyncAttention => "Sync needs your attention in Settings.".into(),
             Kind::UpdateReady => "An LLM-IDE update is available.".into(),
             Kind::CoreDown => "The LLM-IDE backend stopped. Open the app to restart it.".into(),
+            Kind::SelfHeal => "Self-Heal finished its daily run. Open Settings to review it.".into(),
         }
     }
 }
@@ -182,6 +187,12 @@ impl Gate {
         self.last.insert(kind, now);
         true
     }
+}
+
+/// Whether the paired phone / web app should hear about it: the user is away, and never for Self-Heal (a debug-build
+/// developer tool the core's push kinds do not carry).
+pub fn pushes(kind: Kind, focused: bool) -> bool {
+    !focused && kind != Kind::SelfHeal
 }
 
 /// The pending route, once, while it is fresh; a stale one is dropped.
@@ -250,7 +261,7 @@ fn fire(app: &AppHandle, kind: Kind, key: Option<&str>, count: u32) -> Outcome {
     if shown && !focused {
         *lock(&PENDING_ROUTE) = Some((kind.route(), now));
     }
-    Outcome { shown, push: !focused }
+    Outcome { shown, push: pushes(kind, focused) }
 }
 
 fn show(app: &AppHandle, kind: Kind, count: u32) -> Result<(), String> {
@@ -299,6 +310,16 @@ pub fn on_main_focused(app: &AppHandle) {
 mod tests {
     use super::*;
     use crate::prefs::NotifyPrefs;
+
+    #[test]
+    fn self_heal_is_a_webview_task_kind_that_is_never_pushed() {
+        assert_eq!(Kind::from_webview("self_heal"), Some(Kind::SelfHeal));
+        assert_eq!(Kind::SelfHeal.group(), Group::Tasks);
+        assert_eq!(Kind::SelfHeal.route(), "settings:self-heal");
+        assert!(!pushes(Kind::SelfHeal, false), "debug-only: the phone never hears about Self-Heal");
+        assert!(pushes(Kind::LoopDone, false));
+        assert!(!pushes(Kind::LoopDone, true), "the user is looking");
+    }
 
     #[test]
     fn every_kind_has_a_unique_wire_name() {

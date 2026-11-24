@@ -15,7 +15,7 @@ export const defaultInvoke: Invoke = (cmd, args) => (isHostAvailable() ? invokeH
 /** Kinds the webview may raise (`Kind::from_webview` in notify.rs; a test keeps both lists in step). */
 export const WEBVIEW_KINDS = [
   "approval_chat", "approval_job", "loop_done", "loop_failed", "autotask_done", "autotask_failed",
-  "graph_done", "graph_failed", "docgen_done", "docgen_failed", "sync_attention",
+  "graph_done", "graph_failed", "docgen_done", "docgen_failed", "sync_attention", "self_heal",
 ] as const;
 export type NotifyKind = (typeof WEBVIEW_KINDS)[number];
 export type TaskSource = "loop" | "autotask" | "graph" | "docgen";
