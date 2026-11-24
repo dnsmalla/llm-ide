@@ -272,11 +272,12 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     return chatApprovalStore.subscribeReveal(apply);
   }, [surface, setActiveId]);
   useEffect(() => {
+    if (state.phase === "streaming" || state.phase === "aborting") return; // the store holds the latest FINISHED reply
     const last = [...state.messages].reverse().find((m) => m.role === "assistant");
     if (!last || last.role !== "assistant") return;
     const text = last.parts.map((p) => (p.kind === "text" ? p.sealed.join("") + p.open : "")).join("").trim();
     if (text) chatOutputStore.set({ title: "Latest chat reply", text: text.slice(0, 80_000), at: Date.now() });
-  }, [state.messages]);
+  }, [state.messages, state.phase]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: readOnly ? "ask" : pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
   // A chat with no explicit model starts on the mode's default: cheap for Ask/Document/Review, strong for
