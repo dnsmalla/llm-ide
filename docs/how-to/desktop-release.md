@@ -46,7 +46,6 @@ GitHub creates an empty, unprotected environment on first use.
 
 An unsigned dry run uses no environment and no secret.
 
-
 | Secret | What | Needed for |
 |---|---|---|
 | `MAC_CERT_P12_BASE64` | Developer ID Application certificate, base64 | Every signed run |
