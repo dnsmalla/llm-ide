@@ -274,10 +274,10 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     return m;
   }, [items, live, records, worktrees, interrupted, interruptedStages, ship, projectRoot]);
   useEffect(() => {
-    if (!live.some((r) => r.state === "running" || r.state === "paused") && retryAt === null) return;
+    if (!active || (!live.some((r) => r.state === "running" || r.state === "paused") && retryAt === null)) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
-  }, [live, retryAt]);
+  }, [active, live, retryAt]);
 
   const board = useMemo(() => buildBoard(items, facts, nowMs, { intake: hasIntake ?? undefined, steps }), [items, facts, nowMs, hasIntake, steps]);
   // Open issues not on the board yet, keyed like a stored issue item so a started one becomes the same card.
