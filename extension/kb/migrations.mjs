@@ -33,6 +33,8 @@ const TABLE_RE = /^[a-z_][a-z0-9_]*$/;
 const JS_MIGRATIONS = new Map([
   [45, (db) => scrubReviewPayloadRows(db)],
   [46, (db) => migrateRetiredModelIds(db)],
+  // 0080 repairs 0043's double-encoded sections (SQLite >= 3.54), then re-runs the 0045 scrub on them.
+  [80, (db) => scrubReviewPayloadRows(db)],
 ]);
 
 // True when `sql` consists of exactly one effective statement and that

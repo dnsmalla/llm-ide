@@ -19,6 +19,7 @@ const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { handleKB } = await import('../routes/router.mjs');
+const { applyMigrations } = await import('../kb/migrations.mjs');
 
 const TOKEN = 'ghp_SUPERSECRETTOKENVALUE0123456789abcd';
 let U;
@@ -145,7 +146,7 @@ test('migration 0042 scrubs secrets from existing review payloads', () => {
   assert.equal(JSON.parse(raw).config.repo, 'a/b');
 });
 
-test('migration 0043 scrubs every secret-looking leaf under config and pr, idempotently', () => {
+test('migration 0043 (+ 0080 repair) scrubs every secret-looking leaf under config and pr, idempotently', () => {
   reset();
   const item = db.submitReview(U, {
     kind: 'dispatch', planId: 'plan1', title: 'legacy2',
@@ -159,13 +160,38 @@ test('migration 0043 scrubs every secret-looking leaf under config and pr, idemp
   const sql = fs.readFileSync(path.join(__dirname, '../kb/migrations/0043_scrub_review_secret_leaves.sql'), 'utf8');
   db.getDb().exec(sql);
   db.getDb().exec(sql); // idempotent
-  const raw = db.getDb().prepare('SELECT payload FROM review_items WHERE id = ?').get(item.id).payload;
+  const selectPayload = () => db.getDb().prepare('SELECT payload FROM review_items WHERE id = ?').get(item.id).payload;
+  // 0043 alone leaves keys outside config/pr untouched.
+  assert.equal(JSON.parse(selectPayload()).other.password, 'keep-outside-sections');
+  // On SQLite >= 3.54 0043 stores config/pr as JSON strings (subtype lost across its scalar subquery);
+  // 0080 re-types them. Run it through the real runner so the end state is version independent. The
+  // runner's JS scrub (the 0045 rule) also drops credential keys outside config/pr, so `other.password` goes.
+  db.getDb().prepare('DELETE FROM schema_migrations WHERE version = 80').run();
+  applyMigrations(db.getDb());
+  const raw = selectPayload();
   for (const v of ['pw1', 'cs1', 'ak1', 'gt1', 'pt1', 's1']) assert.ok(!raw.includes(v), v);
   const p = JSON.parse(raw);
   assert.deepEqual(p.config, { repo: 'a/b', draft: true, labels: ['x'], nested: { n: 1 } });
   assert.deepEqual(p.pr, { ghRepo: 'a/b', baseBranch: 'main' });
-  assert.equal(p.other.password, 'keep-outside-sections');
   assert.equal(p.target, 'github');
+});
+
+test('migration 0080 re-scrubs sections 0043 double-encoded, so keys only 0045 knows cannot survive', () => {
+  reset();
+  // 0043's key list has no auth/credential/bearer; on SQLite >= 3.54 it leaves config as a JSON string, which
+  // 0045's scrub skips. After 0080 re-types the string, the scrub must run again on the object.
+  const config = { repo: 'a/b', authorization: 'Bearer VAL_AUTH', credential: 'VAL_CRED', nested: { bearer: 'VAL_BEAR', ok: 1 } };
+  const pr = { ghRepo: 'a/b', oauth: 'VAL_OAUTH' };
+  const item = db.submitReview(U, { kind: 'dispatch', planId: 'plan1', title: 'legacy3', payload: { planId: 'plan1', target: 'github' }, guardrails: {} });
+  const doubleEncoded = JSON.stringify({ planId: 'plan1', target: 'github', config: JSON.stringify(config), pr: JSON.stringify(pr) });
+  db.getDb().prepare('UPDATE review_items SET payload = ? WHERE id = ?').run(doubleEncoded, item.id);
+  db.getDb().prepare('DELETE FROM schema_migrations WHERE version = 80').run();
+  applyMigrations(db.getDb());
+  const raw = db.getDb().prepare('SELECT payload FROM review_items WHERE id = ?').get(item.id).payload;
+  for (const v of ['VAL_AUTH', 'VAL_CRED', 'VAL_BEAR', 'VAL_OAUTH']) assert.ok(!raw.includes(v), v);
+  const p = JSON.parse(raw);
+  assert.deepEqual(p.config, { repo: 'a/b', nested: { ok: 1 } });
+  assert.deepEqual(p.pr, { ghRepo: 'a/b' });
 });
 
 test('held secrets expire after the TTL and are capped per user', async () => {
