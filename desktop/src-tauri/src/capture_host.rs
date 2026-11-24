@@ -401,7 +401,11 @@ pub async fn capture_recover_finish(id: String, title: String) -> Result<StopRes
     if !capture_store::valid_session_id(&id) {
         return Err("invalid_id: bad capture id".into());
     }
+    // One recovery at a time: a double click's second call then finds the partial gone ("not_found") instead of
+    // reading it too and writing a second `-2` note.
+    static RECOVER: std::sync::Mutex<()> = std::sync::Mutex::new(());
     tauri::async_runtime::spawn_blocking(move || {
+        let _one = RECOVER.lock().unwrap_or_else(|p| p.into_inner());
         let path = recover_path(&id)?;
         let r = capture_store::read_partial(&path)?;
         if r.rows.is_empty() {
