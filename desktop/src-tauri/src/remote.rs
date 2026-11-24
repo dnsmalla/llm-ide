@@ -183,7 +183,7 @@ pub struct SystemSsh;
 
 impl Runner for SystemSsh {
     fn run(&self, args: &[String]) -> std::io::Result<RawOutput> {
-        crate::ssh_transport::run_program("ssh", args, None, None, std::time::Duration::from_secs(60))
+        crate::ssh_transport::run_hub_program("ssh", args, None, std::time::Duration::from_secs(60))
     }
 }
 

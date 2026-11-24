@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
-use crate::ssh_transport::run_program;
+use crate::ssh_transport::run_hub_program;
 use crate::remote::{
     prepare, require_confirmed_host_key, ssh_args_known, temp_ssh_dir, write_known_hosts,
     ConfirmedHostKey, PreparedTarget, RawOutput, SshTarget,
@@ -108,10 +108,9 @@ impl DeployRunner for SystemDeploy {
         let key = require_confirmed_host_key(target)?;
         let dir = temp_ssh_dir("ssh-deploy")?;
         let run = (|| {
-            let scan = run_program(
+            let scan = run_hub_program(
                 "ssh-keyscan",
                 &["-T".into(), "10".into(), "-p".into(), target.port.to_string(), "-t".into(), key.key_type.clone(), target.host.clone()],
-                None,
                 None,
                 SCAN_DEADLINE,
             )
@@ -120,7 +119,9 @@ impl DeployRunner for SystemDeploy {
                 herr("host_key_changed", "the server's host key does not match the fingerprint you confirmed; test again and compare it")
             })?;
             let known = write_known_hosts(&dir, &line)?;
-            run_program("ssh", &ssh_args_known(target, command, &known, false), stdin, None, STAGE_DEADLINE)
+            // An upload streams its whole payload over stdin: allow a slow uplink (about 256 kbit/s) on top.
+            let deadline = STAGE_DEADLINE + Duration::from_secs(stdin.map_or(0, |bytes| bytes.len() as u64 / 32_768));
+            run_hub_program("ssh", &ssh_args_known(target, command, &known, false), stdin, deadline)
                 .map_err(|e| io_error("ssh_failed", "the system ssh command", e))
         })();
         let _ = std::fs::remove_dir_all(&dir);

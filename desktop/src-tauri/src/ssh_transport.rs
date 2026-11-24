@@ -453,7 +453,20 @@ pub(crate) fn run_program(
     askpass: Option<&AskpassGrant>,
     deadline: Duration,
 ) -> std::io::Result<RawOutput> {
-    let mut command = child_command(program, args, askpass);
+    run_command(child_command(program, args, askpass), stdin, deadline)
+}
+
+/// [`run_program`] for hub mode, which logs in with the user's own key: that key is often passphrase-protected
+/// and unlocked only in ssh-agent, so the agent socket is passed through. Forwarding the agent stays off (`-a`).
+pub(crate) fn run_hub_program(program: &str, args: &[String], stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
+    let mut command = child_command(program, args, None);
+    if let Some(socket) = std::env::var_os("SSH_AUTH_SOCK") {
+        command.env("SSH_AUTH_SOCK", socket);
+    }
+    run_command(command, stdin, deadline)
+}
+
+fn run_command(mut command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
     command
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
