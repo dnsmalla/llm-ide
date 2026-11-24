@@ -405,12 +405,18 @@ pub(crate) fn root_for(run_id: Option<&str>) -> Result<(PathBuf, PathBuf), Strin
 
 /// True when any `system/faults/**/*.md` is still marked `status: fixed`. The desktop's deterministic slice cannot
 /// re-ask the agent those questions, so it refuses rather than reporting a green sweep it never performed.
-fn has_fixed_faults(dir: &Path) -> bool {
+fn has_fixed_faults(dir: &Path, depth: usize) -> bool {
+    // Same limits as `walk_faults`: no symlinks (a loop would never end), bounded depth and file size. Too deep
+    // counts as "has fixed faults", because the sweep must refuse what it did not read.
+    if depth > 8 { return true; }
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     for e in entries.flatten() {
         let p = e.path();
-        if p.is_dir() { if has_fixed_faults(&p) { return true; } continue; }
+        let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
+        if meta.file_type().is_symlink() { continue; }
+        if meta.is_dir() { if has_fixed_faults(&p, depth + 1) { return true; } continue; }
         if p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("md")) != Some(true) { continue; }
+        if meta.len() > 2_000_000 { continue; }
         let text = std::fs::read_to_string(&p).unwrap_or_default();
         let head = text.split("\n---").next().unwrap_or("");
         if head.lines().any(|l| l.trim().eq_ignore_ascii_case("status: fixed")) { return true; }
@@ -419,7 +425,7 @@ fn has_fixed_faults(dir: &Path) -> bool {
 }
 
 fn run_regression(root: &Path) -> Result<StageRun, String> {
-    if has_fixed_faults(&root.join("system").join("faults")) {
+    if has_fixed_faults(&root.join("system").join("faults"), 0) {
         return Err("the Regression sweep has fixed faults to re-ask; the native regression/agent slice is not ported yet".into());
     }
     Ok(StageRun {
@@ -1525,6 +1531,20 @@ mod tests {
         let err = run_stage_gated_at(&root, Some((work.as_path(), "t5-reg")), "r1", Some("l1"), Some(10), &store, None).unwrap_err();
         assert!(err.contains("cannot run in a factory worktree"), "{err}");
         crate::loop_worktree::remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_loop_under_faults_does_not_hang_the_regression_check() {
+        let root = std::env::temp_dir().join(format!("llmide-faults-loop-{}", std::process::id()));
+        let faults = root.join("system").join("faults");
+        std::fs::create_dir_all(&faults).unwrap();
+        std::os::unix::fs::symlink(&faults, faults.join("again")).unwrap();
+        std::fs::write(faults.join("f.md"), "status: open\n---\n").unwrap();
+        assert!(!has_fixed_faults(&faults, 0));
+        std::fs::write(faults.join("g.md"), "status: fixed\n---\n").unwrap();
+        assert!(has_fixed_faults(&faults, 0));
         let _ = std::fs::remove_dir_all(&root);
     }
 }
