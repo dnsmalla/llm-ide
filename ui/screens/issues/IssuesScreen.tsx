@@ -24,6 +24,8 @@ import "./issues.css";
 import { readRepoConfig } from "../settings/repo-config.ts";
 import { IssueDetail, type IssueDetailDeps } from "./IssueDetail.tsx";
 
+const COLUMN_PAGE = 100;
+
 export interface IssuesReply {
   status: number;
   body: unknown;
@@ -184,6 +186,9 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
     : paging ? pagingNote({ stop: paging.stop, loaded: paging.issues.length, total: paging.total }) : "";
   const visible = useMemo(() => filterIssues(rows, scopeFilters), [rows, scopeFilters]);
   const columns = useMemo(() => columnsFor(visible), [visible]);
+  // Cards drawn per column (picked and the detail dialog work from the data, not the drawn cards); a new list or filter starts over.
+  const [shown, setShown] = useState<Record<string, number>>({});
+  useEffect(() => setShown({}), [visible]);
   const labels = useMemo(() => labelOptions(rows), [rows]);
   const closeDetail = useCallback(() => setSelected(null), []);
   // The dialog shows the row as the latest reload has it (by id), so a changed or closed issue is not a stale snapshot.
@@ -295,7 +300,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
             <section key={col.id} className="iss-col" aria-label={`${col.title} (${col.issues.length})`}>
               <h3 className="iss-col-title">{col.title} <span>{col.issues.length}</span></h3>
               <ul className="iss-cards">
-                {col.issues.map((i) => (
+                {col.issues.slice(0, shown[col.id] ?? COLUMN_PAGE).map((i) => (
                   <li key={i.id} className="iss-card">
                     {deps.sendToFactory ? <label className="iss-check"><input type="checkbox" className="iss-pick" checked={picked.has(i.id)} onChange={() => togglePick(i.id)} aria-label={`Select ${i.title} for the Factory`} /> Select</label> : null}
                     <button type="button" className="iss-card-title" onClick={() => setSelected(i)} title="Open issue details">
@@ -311,6 +316,9 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
                   </li>
                 ))}
               </ul>
+              {col.issues.length > (shown[col.id] ?? COLUMN_PAGE) ? (
+                <button type="button" className="iss-btn" onClick={() => setShown((m) => ({ ...m, [col.id]: (m[col.id] ?? COLUMN_PAGE) + COLUMN_PAGE }))}>Show {Math.min(COLUMN_PAGE, col.issues.length - (shown[col.id] ?? COLUMN_PAGE))} more</button>
+              ) : null}
             </section>
           ))}
         </div>
