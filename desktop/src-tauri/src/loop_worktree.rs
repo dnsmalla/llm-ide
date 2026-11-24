@@ -15,7 +15,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use serde::Serialize;
@@ -203,22 +202,17 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
-    let out = crate::loop_runner::git_command()
-        .args(crate::git::base_args())
-        .args(args)
+    let mut cmd = crate::loop_runner::git_command();
+    cmd.args(args)
         // A worktree checkout must not download Git LFS objects: credential helpers are off and there is no terminal,
         // so git-lfs would fail asking for a username. The run works with the pointer files instead.
         .env("GIT_LFS_SKIP_SMUDGE", "1")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .current_dir(crate::fsutil::plain_path(dir))
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| format!("cannot run git: {e}"))?;
-    if !out.status.success() {
-        let err = String::from_utf8_lossy(&out.stderr);
-        return Err(format!("git {} failed: {}", args.first().copied().unwrap_or(""), err.lines().next().unwrap_or("unknown error")));
+        .env("GIT_TERMINAL_PROMPT", "0");
+    let out = crate::loop_runner::run_git_guarded(dir, cmd)?;
+    if out.code != Some(0) {
+        return Err(format!("git {} failed: {}", args.first().copied().unwrap_or(""), out.stderr.lines().next().unwrap_or("unknown error")));
     }
-    Ok(out.stdout)
+    Ok(out.stdout.into_bytes())
 }
 
 fn worktrees_dir(project: &Path) -> PathBuf {

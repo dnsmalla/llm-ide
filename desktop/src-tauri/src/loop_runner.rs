@@ -576,11 +576,35 @@ pub fn strip_git_env(c: &mut Command) {
     }
 }
 
-/// `git` with the inherited repo overrides removed.
+/// `git` with the inherited repo overrides removed and the same command-line config overrides the Explorer uses.
+/// Run it through `run_git_guarded` (or `guard_repo` first): the repo's own `.git/config` is untrusted.
 pub fn git_command() -> Command {
     let mut c = Command::new("git");
     strip_git_env(&mut c);
+    c.args(crate::git::base_args());
     c
+}
+
+/// Wall-clock limit for one Loop git call: long enough for a worktree checkout of a big tree, never unbounded.
+const GIT_DEADLINE: Duration = Duration::from_secs(30 * 60);
+
+/// Refuses a repository whose `.git/config` is not on workspace-core's allowlist (`core.fsmonitor`, filters, ...):
+/// git would run that program. Same check as the Explorer.
+pub(crate) fn guard_repo(dir: &Path) -> Result<(), String> {
+    crate::git::check_repo(dir).map_err(|e| {
+        if e.code == "untrusted_repo_config" {
+            format!("This repository's git settings run programs, so Loop will not run git in it. ({})", e.message)
+        } else {
+            e.message
+        }
+    })
+}
+
+/// Runs a `git_command()` in `dir` after `guard_repo`, with a deadline. Success is exit code 0.
+pub(crate) fn run_git_guarded(dir: &Path, mut cmd: Command) -> Result<crate::remote::RawOutput, String> {
+    guard_repo(dir)?;
+    cmd.current_dir(crate::fsutil::plain_path(dir));
+    crate::ssh_transport::run_command(cmd, None, GIT_DEADLINE).map_err(|e| format!("cannot run git: {e}"))
 }
 
 /// The host-controlled shell helper for Self-Heal's fixed `scripts/self-heal-verify.sh` run. It is NOT a Loop entry
@@ -757,11 +781,16 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
         if p.is_empty() || rel.is_absolute() || rel.components().any(|c| matches!(c, std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_))) {
             return Err(format!("unsafe path: {p}"));
         }
+        // Git metadata (`.git/index`, a worktree's `.git` pointer) is never the agent's to delete or restore.
+        if llmide_workspace_core::fs::deny_git_rel(&p.replace('\\', "/")).is_err() {
+            return Err(format!("unsafe path: {p}"));
+        }
     }
-    let listed = git_command().arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).args(["ls-files", "-z", "--"]).args(paths).output()
-        .map_err(|e| format!("cannot run git ls-files: {e}"))?;
-    if !listed.status.success() { return Err("git ls-files failed; nothing was reverted".into()); }
-    let tracked: HashSet<String> = String::from_utf8_lossy(&listed.stdout).split('\0').map(|s| s.to_string()).collect();
+    let mut ls = git_command();
+    ls.arg("--literal-pathspecs").args(["ls-files", "-z", "--"]).args(paths);
+    let listed = run_git_guarded(work, ls)?;
+    if listed.code != Some(0) { return Err("git ls-files failed; nothing was reverted".into()); }
+    let tracked: HashSet<String> = listed.stdout.split('\0').map(|s| s.to_string()).collect();
     let (tracked_paths, untracked): (Vec<&String>, Vec<&String>) = paths.iter().partition(|p| tracked.contains(p.as_str()));
     let created: HashSet<&str> = created.iter().map(|s| s.as_str()).collect();
     let canon_work = work.canonicalize().map_err(|e| format!("cannot resolve the worktree: {e}"))?;
@@ -776,11 +805,11 @@ pub fn revert_paths_in(work: &Path, paths: &[String], created: &[String]) -> Res
     }
     if !tracked_paths.is_empty() {
         let mut cmd = git_command();
-        cmd.arg("--literal-pathspecs").arg("-C").arg(crate::fsutil::plain_path(work)).arg("checkout").arg("--");
+        cmd.arg("--literal-pathspecs").arg("checkout").arg("--");
         for p in &tracked_paths { cmd.arg(p.as_str()); }
-        let out = cmd.output().map_err(|e| format!("cannot run git checkout: {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
+        let out = run_git_guarded(work, cmd)?;
+        if out.code != Some(0) {
+            let err = &out.stderr;
             return Err(format!("git checkout failed: {}", err.lines().next().unwrap_or("unknown error")));
         }
     }
@@ -836,10 +865,11 @@ const MAX_CHANGED_PATHS: usize = 20_000;
 /// back exactly as the agent run reports them). Both sides of a rename/copy are listed. Errors when git cannot answer
 /// or the list is too long, so a caller never reads "unknown" as "clean" (the revert snapshot depends on that).
 pub fn changed_paths_in(work: &Path) -> Result<Vec<String>, String> {
-    let out = git_command().arg("-C").arg(crate::fsutil::plain_path(work)).args(["status", "--porcelain", "-z"]).output()
-        .map_err(|e| format!("cannot run git status: {e}"))?;
-    if !out.status.success() { return Err("git status failed; the changed paths are unknown".into()); }
-    parse_porcelain_z(&String::from_utf8_lossy(&out.stdout))
+    let mut st = git_command();
+    st.args(["status", "--porcelain", "-z"]);
+    let out = run_git_guarded(work, st)?;
+    if out.code != Some(0) { return Err("git status failed; the changed paths are unknown".into()); }
+    parse_porcelain_z(&out.stdout)
 }
 
 /// Parses `git status --porcelain -z` output into sorted, unique paths. Split from `changed_paths_in` so a
@@ -1191,6 +1221,35 @@ mod tests {
         for want in ["my file.txt", "a -> b.txt", "日本.txt", "new.txt", "old.txt"] {
             assert!(got.iter().any(|p| p == want), "{want} missing from {got:?}");
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A repo whose config makes git run a program is refused before git starts: the marker must not appear.
+    #[cfg(unix)]
+    #[test]
+    fn loop_git_refuses_a_repo_config_that_runs_a_program() {
+        let dir = repo("fsmonitor");
+        let marker = dir.join("ran.marker");
+        let hook = dir.join("hook.sh");
+        std::fs::write(&hook, format!("#!/bin/sh\ntouch '{}'\n", marker.display())).unwrap();
+        git(&dir, &["config", "core.fsmonitor", hook.to_str().unwrap()]);
+        let e = changed_paths_in(&dir).unwrap_err();
+        assert!(e.contains("Loop will not run git"), "{e}");
+        assert!(revert_paths_in(&dir, &["a.txt".to_string()], &[]).unwrap_err().contains("Loop will not run git"));
+        assert!(!marker.exists(), "the fsmonitor program ran");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn revert_refuses_git_metadata_paths() {
+        let dir = repo("gitmeta");
+        std::fs::create_dir_all(dir.join("sub/.git")).unwrap();
+        std::fs::write(dir.join("sub/.git/config"), "x").unwrap();
+        for p in [".git/index", ".git", "sub/.git/config", ".GIT/index"] {
+            let e = revert_paths_in(&dir, &[p.to_string()], &[p.to_string()]).unwrap_err();
+            assert_eq!(e, format!("unsafe path: {p}"));
+        }
+        assert!(dir.join(".git/index").exists() && dir.join("sub/.git/config").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

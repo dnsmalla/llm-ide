@@ -466,7 +466,7 @@ pub(crate) fn run_hub_program(program: &str, args: &[String], stdin: Option<&[u8
     run_command(command, stdin, deadline)
 }
 
-fn run_command(mut command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
+pub(crate) fn run_command(mut command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
     command
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())

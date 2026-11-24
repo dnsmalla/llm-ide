@@ -92,7 +92,7 @@ fn read_small(path: &Path) -> Option<String> {
 }
 
 /// Resolves and validates every git directory git would read for `root`.
-fn check_repo(root: &Path) -> R<()> {
+pub fn check_repo(root: &Path) -> R<()> {
     let dotgit = root.join(".git");
     let meta = match std::fs::symlink_metadata(&dotgit) {
         Ok(m) => m,

@@ -81,9 +81,9 @@ pub fn protected(path: &str) -> bool {
 }
 
 fn git(dir: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>, String> {
+    crate::loop_runner::guard_repo(dir)?;
     let mut cmd = crate::loop_runner::git_command();
-    cmd.args(crate::git::base_args())
-        .args(args)
+    cmd.args(args)
         .current_dir(crate::fsutil::plain_path(dir))
         .stdin(if input.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
