@@ -17,6 +17,8 @@ export const LIST_PAGE = 2000;
 export const HEAD_BATCH = 200;
 export const HEAD_BYTES = 2048;
 export const HEAD_CONCURRENCY = 3;
+/** Header batches republish the whole record list at most this often (a 50k scan is ~250 batches). */
+export const HEAD_PUBLISH_MS = 250;
 
 export type RootStatus = "unknown" | "loading" | "ready" | "none" | "error";
 
@@ -98,6 +100,7 @@ export class LibraryStore {
   private readonly search: SearchController | null;
   private gen = 0;
   private disposed = false;
+  private headTimer: ReturnType<typeof setTimeout> | null = null;
   private pending: string[] = [];
   private pendingSet = new Set<string>();
   private inflight = 0;
@@ -425,6 +428,10 @@ export class LibraryStore {
   }
 
   private stopHeads(): void {
+    if (this.headTimer !== null) {
+      clearTimeout(this.headTimer);
+      this.headTimer = null;
+    }
     this.pending = [];
     this.pendingSet = new Set();
     this.headsDone = 0;
@@ -464,12 +471,29 @@ export class LibraryStore {
     }
     // Everything asked for counts as done, read or not, so progress always completes.
     this.headsDone += batch.length;
-    if (changed) this.publish(this.state.listing.loaded);
-    else this.patch({ heads: { done: this.headsDone, total: this.headsTotal } });
+    if (changed && this.pending.length === 0 && this.inflight === 0) this.publish(this.state.listing.loaded);
+    else {
+      this.patch({ heads: { done: this.headsDone, total: this.headsTotal } });
+      if (changed) this.publishSoon(gen);
+    }
     this.pump(gen);
   }
 
+  /** Coalesces header-driven publishes; any other publish (or stopHeads) supersedes the pending one. */
+  private publishSoon(gen: number): void {
+    if (this.headTimer !== null) return;
+    this.headTimer = setTimeout(() => {
+      this.headTimer = null;
+      if (gen === this.gen && !this.disposed) this.publish(this.state.listing.loaded);
+    }, HEAD_PUBLISH_MS);
+    (this.headTimer as { unref?: () => void }).unref?.();
+  }
+
   private publish(loaded: number, extra?: { listingDone?: boolean; selectedGone?: boolean }): void {
+    if (this.headTimer !== null) {
+      clearTimeout(this.headTimer);
+      this.headTimer = null;
+    }
     const records = [...this.byRel.values()];
     const { hidden, showHidden } = this.state;
     const counts = countBySection(records.filter((r) => isVisible(r.rel, hidden, showHidden)));

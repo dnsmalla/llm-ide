@@ -56,6 +56,19 @@ test("the list is usable after the first page, before heads finish; heads arrive
   assert.ok(host.calls.heads >= 5000 / HEAD_BATCH);
 });
 
+test("header batches publish coalesced, and the last batch flushes at once", async () => {
+  const host = new FakeHost();
+  for (let i = 0; i < 5000; i++) host.add(`source/meetings/2026/10/n${String(i).padStart(5, "0")}.md`, meetingText(i));
+  const s = mk(host);
+  await s.init();
+  const v0 = s.getSnapshot().version;
+  await settle(s);
+  const snap = s.getSnapshot();
+  assert.ok(host.calls.heads >= 5000 / HEAD_BATCH);
+  assert.ok(snap.version - v0 <= 3, `expected few publishes, got ${snap.version - v0}`);
+  assert.equal(snap.records.every((r) => r.headRead), true);
+});
+
 test("prioritize moves visible rows to the front of the head queue", async () => {
   const host = new FakeHost();
   for (let i = 0; i < 2000; i++) host.add(`m/n${String(i).padStart(5, "0")}.md`, meetingText(i));
