@@ -513,7 +513,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          then, retries a rejected first push with --force-with-lease pinned to that MR's head), and a new POST /kb/loop/sync-base
 //          { worktree, branch, provider, repo, base } → { base, commit } fetches origin/<base> with the user's git credentials. A re-ship of a loop's branch
 //          pushes a new fast-forward commit and updates the open draft MR (`reused: true`); a closed MR gets a new draft.
-const SERVER_API_VERSION = 157;
+//   v158 — POST /kb/self-heal/runs accepts `auto: true`, additive: the desktop's daily automatic run. Its triage passes
+//          over `uncaught` incidents (text that can come from outside the app) and leaves them new for a manual run.
+const SERVER_API_VERSION = 158;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

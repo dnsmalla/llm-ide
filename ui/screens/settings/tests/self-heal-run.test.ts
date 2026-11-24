@@ -93,3 +93,12 @@ test("decodeStart refuses a malformed run; reset aborts a run by id and removes 
   assert.equal((f.bodies[OUTCOME] as { aborted: boolean }).aborted, true);
   await assert.rejects(resetSelfHealRun(f.client, f.sh, "nope"));
 });
+
+test("an automatic run asks the core to leave uncaught errors for a manual run", async () => {
+  const manual = fakes({ start: { runId: null, incidentIds: [], batch: null } });
+  await runSelfHealFix(manual.client, manual.sh);
+  assert.deepEqual(manual.bodies["/kb/self-heal/runs"], { repoRoot: "/src/llm-ide" });
+  const auto = fakes({ start: { runId: null, incidentIds: [], batch: null } });
+  await runSelfHealFix(auto.client, auto.sh, undefined, { auto: true });
+  assert.deepEqual(auto.bodies["/kb/self-heal/runs"], { repoRoot: "/src/llm-ide", auto: true });
+});

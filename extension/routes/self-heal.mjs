@@ -9,7 +9,8 @@
 //                                                                       open fix run produced, is skipped)
 //   POST   /kb/self-heal/incidents/:id/ignore   { ignored }            mark one ignored (not while fixing or proposed)
 //   DELETE /kb/self-heal/incidents              { deleted }            remove all but fixing / proposed
-//   POST   /kb/self-heal/runs                   { runId, incidentIds, batch }  start the user's one fix run
+//   POST   /kb/self-heal/runs                   { runId, incidentIds, batch }  start the user's one fix run (`auto: true`
+//                                                                       = the daily schedule: skips AUTO_SKIPPED_CATEGORIES)
 //   POST   /kb/self-heal/runs/:id/outcome       { proposed }           the run's result; ends it
 //   POST   /kb/self-heal/runs/:id/resolve       { updated }            the user applied or discarded its proposal
 import { randomUUID } from 'node:crypto';
@@ -29,6 +30,11 @@ import {
 export const MAX_BATCH = 50;
 export const DEFAULT_PER_RUN = 5;
 export const MAX_PER_RUN = 20;
+/**
+ * What an automatic run (`auto: true`, the desktop's daily schedule) never picks: uncaught errors can carry text from
+ * outside the app (a server answer, a file name), and nobody looked at the list before an unattended run.
+ */
+export const AUTO_SKIPPED_CATEGORIES = Object.freeze(['uncaught']);
 /** A run that never posts its outcome (the page reloaded, the app quit) frees itself after this (the Mac's 4 h window). */
 export const RUN_LEASE_MS = 4 * 60 * 60 * 1000;
 const BODY_MAX = 4 * 1024 * 1024;
@@ -179,12 +185,15 @@ export async function handleSelfHealRoute(req, res, { env = process.env } = {}) 
     if (!Number.isInteger(max) || max < 1 || max > MAX_PER_RUN) {
       return fail(res, 400, 'VALIDATION_FAILED', `max must be an integer from 1 to ${MAX_PER_RUN}`);
     }
+    if (body.auto !== undefined && typeof body.auto !== 'boolean') {
+      return fail(res, 400, 'VALIDATION_FAILED', 'auto must be a boolean');
+    }
     const open = activeRun(userId);
     if (open) return fail(res, 409, 'RUN_ACTIVE', 'A Self-Heal run is already in progress', { runId: open.runId });
     // The Loop agent accepts a worktree only of an allow-listed repo: refuse before the host makes one.
     const real = trustedRepo(userId, repoRoot);
     if (!real) return fail(res, 409, 'REPO_NOT_ALLOWED', 'Add the source checkout under Settings → Repositories first');
-    const picked = triageIncidents(userId, max);
+    const picked = triageIncidents(userId, max, { skipCategories: body.auto === true ? AUTO_SKIPPED_CATEGORIES : [] });
     if (picked.length === 0) {
       send(res, 200, { runId: null, incidentIds: [], batch: null });
       return true;

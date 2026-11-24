@@ -143,3 +143,13 @@ test('history: a down agent or an aborted run records nothing, and a discarded p
   store.resolveProposal(u, P().branch, false);
   assert.deepEqual([store.listIncidents(u)[0].status, store.listIncidents(u)[0].history], ['ignored', []]);
 });
+
+test('an automatic run can skip categories: they stay new for a manual run', () => {
+  const u = mkUser();
+  const uncaught = store.recordIncident(u, { source: 'ui', category: 'uncaught', message: 'TypeError: x is undefined' });
+  store.recordIncident(u, { source: 'ui', category: 'uncaught', message: 'TypeError: x is undefined' });
+  rec(u, 'Error: real bug');
+  assert.deepEqual(store.triageIncidents(u, 5, { skipCategories: ['uncaught'] }).map((i) => i.message), ['Error: real bug']);
+  assert.equal(store.listIncidents(u).find((i) => i.id === uncaught.id).status, 'new', 'left for a manual run, not ignored');
+  assert.deepEqual(store.triageIncidents(u, 5).map((i) => i.id), [uncaught.id]);
+});

@@ -108,7 +108,8 @@
           "required": ["repoRoot"],
           "properties": {
             "repoRoot": { "type": "string", "description": "the source checkout, absolute; must be exactly a root on the user's repo allow-list" },
-            "max": { "type": "integer", "description": "1-20, default 5" }
+            "max": { "type": "integer", "description": "1-20, default 5" },
+            "auto": { "type": "boolean", "description": "the desktop's daily automatic run: uncaught incidents are left new for a manual run (v158)" }
           }
         }
       },

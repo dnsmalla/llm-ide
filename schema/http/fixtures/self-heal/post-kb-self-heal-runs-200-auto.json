@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/self-heal/runs",
+  "status": 200,
+  "description": "The desktop's daily automatic run (v158): only uncaught incidents are new, and an automatic run leaves them for a manual run.",
+  "request": {
+    "body": {
+      "repoRoot": "/Users/dev/llm-ide",
+      "auto": true
+    }
+  },
+  "response": {
+    "runId": null,
+    "incidentIds": [],
+    "batch": null
+  }
+}

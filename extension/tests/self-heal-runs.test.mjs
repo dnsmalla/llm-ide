@@ -50,7 +50,7 @@ let gammaId;
 test('start: proof first, then validation, then the repo allow-list; nothing new means no run', async () => {
   let r = await call('POST', RUNS, { repoRoot: repo }, { proof: null });
   assert.deepEqual([r.status, r.body.error.code], [403, 'HOST_PROOF_REQUIRED']);
-  for (const b of [{}, { repoRoot: 'relative/path' }, { repoRoot: repo, max: 0 }, { repoRoot: repo, max: 21 }, { repoRoot: repo, max: 2.5 }]) {
+  for (const b of [{}, { repoRoot: 'relative/path' }, { repoRoot: repo, max: 0 }, { repoRoot: repo, max: 21 }, { repoRoot: repo, max: 2.5 }, { repoRoot: repo, auto: 'yes' }]) {
     r = await call('POST', RUNS, b);
     assert.deepEqual([r.status, r.body.error.code], [400, 'VALIDATION_FAILED'], JSON.stringify(b));
   }

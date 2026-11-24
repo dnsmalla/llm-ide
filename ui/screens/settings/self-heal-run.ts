@@ -70,10 +70,11 @@ export function agentProblem(r: CoreResponse): string | null {
   return `The agent run failed (${code}).`;
 }
 
-export async function runSelfHealFix(client: CoreClient, sh: SelfHealHost, onStep: (s: RunStep) => void = () => undefined): Promise<RunResult> {
+/** `auto`: the daily automatic run; the core then leaves uncaught errors for a manual run (nobody saw the list). */
+export async function runSelfHealFix(client: CoreClient, sh: SelfHealHost, onStep: (s: RunStep) => void = () => undefined, opts: { auto?: boolean } = {}): Promise<RunResult> {
   onStep("starting");
   const repoRoot = await sh.source();
-  const start = decodeStart(await call(client, "POST", "/kb/self-heal/runs", { repoRoot }));
+  const start = decodeStart(await call(client, "POST", "/kb/self-heal/runs", opts.auto ? { repoRoot, auto: true } : { repoRoot }));
   if (start.runId === null) return { proposed: 0, message: "No new incidents to fix." };
   const runId = start.runId;
   const outcome: Outcome = { ...EMPTY };

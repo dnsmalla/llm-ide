@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 157
+  x-api-version: 158
 servers:
   - url: "https://{host}"
     variables:
@@ -14826,6 +14826,9 @@ paths:
                 max:
                   type: "integer"
                   description: "1-20, default 5"
+                auto:
+                  type: "boolean"
+                  description: "the desktop's daily automatic run: uncaught incidents are left new for a manual run (v158)"
       responses:
         "200":
           description: "OK"

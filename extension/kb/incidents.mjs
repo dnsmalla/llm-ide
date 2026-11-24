@@ -110,9 +110,10 @@ export function reopenOrphanedIncidents() {
 /**
  * Plan B triage (the Mac's SelfHealBatch.select): up to `max` `new` incidents, most frequent first. An environmental
  * one met on the way is ignored with its reason so it never returns to triage; a picked one moves to `fixing`, so no
- * second run can pick it. One transaction.
+ * second run can pick it. A category in `skipCategories` is passed over and stays `new` (the daily automatic run
+ * leaves `uncaught` for a manual run). One transaction.
  */
-export function triageIncidents(userId, max) {
+export function triageIncidents(userId, max, { skipCategories = [] } = {}) {
   requireUser(userId);
   const db = getDb();
   return db.transaction(() => {
@@ -120,9 +121,11 @@ export function triageIncidents(userId, max) {
       .all(userId);
     const ignore = db.prepare("UPDATE self_heal_incidents SET status = 'ignored', note = ? WHERE user_id = ? AND id = ?");
     const fix = db.prepare("UPDATE self_heal_incidents SET status = 'fixing' WHERE user_id = ? AND id = ?");
+    const skip = new Set(skipCategories);
     const picked = [];
     for (const r of rows) {
       if (picked.length >= max) break;
+      if (skip.has(r.category)) continue;
       if (r.environmental) {
         ignore.run(`environment: ${r.environmental}`, userId, r.id);
         continue;

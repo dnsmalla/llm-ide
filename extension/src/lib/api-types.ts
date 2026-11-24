@@ -8738,6 +8738,8 @@ export type PostKbSelfHealRunsRequest = {
     repoRoot: string;
     /** 1-20, default 5 */
     max?: number;
+    /** the desktop's daily automatic run: uncaught incidents are left new for a manual run (v158) */
+    auto?: boolean;
   };
 };
 

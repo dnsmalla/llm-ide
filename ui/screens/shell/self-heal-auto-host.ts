@@ -37,7 +37,7 @@ export function startSelfHealAuto(d: {
     ready: d.ready,
     loopBusy: () => (liveRuns?.().length ?? 0) > 0,
     needsHuman: () => needsHumanIds(d.core),
-    run: () => runSelfHealFix(settingsClientFrom(d.core), createSelfHealHost(d)),
+    run: () => runSelfHealFix(settingsClientFrom(d.core), createSelfHealHost(d), undefined, { auto: true }),
     notify: () => notifyUser("self_heal"),
   };
   let stopped = false;
