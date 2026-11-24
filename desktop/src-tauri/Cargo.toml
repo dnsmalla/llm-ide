@@ -3,7 +3,7 @@ name = "llmide-desktop"
 version = "0.0.0"
 description = "LLM-IDE Desktop Tauri PoC (throwaway)"
 edition = "2021"
-rust-version = "1.88"
+rust-version = "1.90"
 resolver = "3"
 publish = false
 
@@ -18,16 +18,16 @@ name = "llmide_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "=2.6.3", features = [] }
+tauri-build = { version = "=2.7.6", features = [] }
 
 [dependencies]
-tauri = { version = "=2.11.6", features = ["tray-icon"] }
-tauri-plugin-notification = "=2.4.0"
+tauri = { version = "=2.12.7", features = ["tray-icon"] }
+tauri-plugin-notification = "=2.8.1"
 # OS URL scheme llmide:// (Chrome /launch-app redirect -> desktop section).
-tauri-plugin-deep-link = "=2.4.0"
+tauri-plugin-deep-link = "=2.6.3"
 # Signed auto-update (Ed25519/minisign, verified against the key in the release overlay); used from Rust only,
 # the webview gets update_status/update_check/update_install and no plugin permission. See updater.rs.
-tauri-plugin-updater = "=2.12.0"
+tauri-plugin-updater = "=2.14.1"
 # Host-run native folder dialog (no webview-facing dialog/fs permission); see PACKAGING.md.
 rfd = "=0.17.2"
 serde = { version = "=1.0.228", features = ["derive"] }
@@ -46,7 +46,7 @@ rustls = { version = "=0.23.46", default-features = false, features = ["ring", "
 webpki-roots = "=1.0.11"
 base64 = "=0.22.1"
 # Host-run link opening (S-E/S-G): strict URL parsing; already in the lock via tauri (MIT OR Apache-2.0).
-url = "=2.5.8"
+url = "=2.5.9"
 # Project search (S-H): linear-time matcher (MIT OR Apache-2.0); already in the lock via ignore.
 regex = "=1.13.1"
 # Tauri-free file, path and trash logic (desktop/workspace-core); the SSH workspace helper compiles the same crate.
