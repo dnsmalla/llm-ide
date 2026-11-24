@@ -557,3 +557,17 @@ test("a stream that drops with an approval parked leaves nothing counted for the
   assert.deepEqual(ctl.getState("a").pendingApprovals, [], "the turn is over: its approval can no longer be answered");
   assert.deepEqual(ctl.pendingApprovalCounts(), []);
 });
+
+test("opening many chats keeps at most MAX_IDLE_RUNTIMES; the active chat and one with a draft survive", async () => {
+  const { ctl, store } = make(fakeCore({ streams: [] }));
+  for (let i = 0; i < 12; i++) store.seed(`c${i}`, `Chat ${i}`);
+  await ctl.open("c0");
+  ctl.setView("c0", { draft: "unsent" });
+  for (let i = 1; i < 12; i++) await ctl.open(`c${i}`);
+  const kept = ["c0", ...Array.from({ length: 11 }, (_, i) => `c${i + 1}`)].filter((id) => ctl.runtimes.has(id));
+  assert.equal(ctl.runtimes.size, c.MAX_IDLE_RUNTIMES);
+  assert.ok(kept.includes("c0") && kept.includes("c11"));
+  assert.equal(ctl.getView("c0").draft, "unsent");
+  await ctl.open("c1"); // a dropped chat reloads from the store
+  assert.equal(ctl.getState("c1").phase, "idle");
+});

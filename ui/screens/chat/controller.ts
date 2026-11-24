@@ -102,6 +102,8 @@ interface Runtime {
 /** Micro-batching of stream events. */
 export const BATCH_MS = 12;
 export const BATCH_MAX = 64;
+/** Opened chats kept in memory; older idle ones reload from the store when reopened. */
+export const MAX_IDLE_RUNTIMES = 10;
 const RETRY_409_DELAYS = [400, 700, 1000, 1500];
 /** Consecutive failed re-attach attempts (no new event in between) before giving up. */
 const FOLLOW_DELAYS = [500, 1000, 2000, 4000];
@@ -131,11 +133,21 @@ export class ChatController {
   // --- accessors -----------------------------------------------------------------------------
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
-    if (!r) {
+    if (r) { if (this.runtimes.size > 1) { this.runtimes.delete(id); this.runtimes.set(id, r); } } // most recently used last
+    else {
       r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null, fullHistoryNext: false, partialPersisted: false, detached: false };
       this.runtimes.set(id, r);
+      this.evictIdle(id);
     }
     return r;
+  }
+  /** Keeps at most MAX_IDLE_RUNTIMES runtimes: drops the least recently used one that holds nothing but saved history. */
+  private evictIdle(keep: string): void {
+    for (const [id, r] of this.runtimes) {
+      if (this.runtimes.size <= MAX_IDLE_RUNTIMES) return;
+      const safe = id !== keep && r.loaded && (r.state.phase === "idle" || r.state.phase === "error") && r.queued.length === 0 && r.state.queue.length === 0 && r.state.pendingApprovals.length === 0 && r.view.draft.trim() === "";
+      if (safe) this.runtimes.delete(id); // no emit (forget() would): rt() can run during a render, and an idle runtime shows nothing new
+    }
   }
   getState(id: string): ChatState { return this.rt(id).state; }
   getView(id: string): ChatView { return this.rt(id).view; }
