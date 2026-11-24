@@ -98,8 +98,8 @@ jobs:
         run: npm ci
 
       # The end-to-end tests start the real core (needs better-sqlite3). Windows runners have no
-      # Visual Studio toolchain for the native build, and macOS is the first target: the suite is
-      # skipped there (LLMIDE_E2E=0 below) until the Windows pass.
+      # Visual Studio toolchain for the native build, so the suite is skipped there
+      # (LLMIDE_E2E=0 below) until the Windows pass.
       - name: Install extension dependencies (end-to-end core tests)
         if: runner.os != 'Windows'
         working-directory: extension

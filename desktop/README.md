@@ -11,7 +11,8 @@ cd desktop
 npm install            # exact-pinned deps; Tauri CLI is a dev dependency
 npm run dev            # frontend only, http://localhost:5173
 npm run tauri dev      # full app window (starts Vite via beforeDevCommand)
-npm run tauri build    # release bundle (LLM-IDE.app on macOS)
+node scripts/stage-core.mjs && npm run tauri build   # release bundle (LLM-IDE.app on macOS); build.rs refuses a release build without resources/core/STAGE.json
+                       # (macOS: ../scripts/build-desktop-mac.sh stages and builds)
 npm run tauri build -- --debug --bundles app   # faster debug .app
 npm run tauri dev -- --features spike          # + the Phase-0 spike/bench host commands (autobench, parity screenshots)
 ```

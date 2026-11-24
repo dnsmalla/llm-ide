@@ -1,7 +1,7 @@
 # Release the desktop app
 
 How to cut, check, publish and roll back a release of the Tauri desktop app (`desktop/`). It has its own
-tag train, `desktop-vX.Y.Z`, separate from the extension (`v*`) and the Mac app (`mac-v*`). The pipeline is
+tag train, `desktop-vX.Y.Z`, separate from the extension (`v*`). The pipeline is
 `.github/workflows/desktop-release.yml`; the update channel is moved by `.github/workflows/desktop-promote.yml`.
 Decisions behind it: [desktop-signing-decisions.md](desktop-signing-decisions.md).
 
@@ -92,11 +92,13 @@ gh workflow run desktop-release.yml -f signed=true -f windows_signed=true   # al
 An unsigned dry run makes no `latest.json` and no updater signatures. Only signed runs make them.
 Watch it with `gh run watch`. Files are in the run's artifacts.
 
-### Packaged smoke (tag-only)
+### Packaged smoke
 
-Every `desktop-release.yml` run installs the packaged app and launches it once (`smoke-app.mjs` starts the app,
-waits for the bundled core's `/health`, then exits; it also verifies the installed core files). That job is
-tag-only (`v*`) or manual — never a normal `main` push, because it builds four full bundles. The same checks run
+Every `desktop-release.yml` run (a `desktop-v*` tag or a manual dispatch) smoke-tests the packaged app
+(`smoke-app.mjs` starts the app, waits for the bundled core's `/health`, then exits). On Windows the job installs
+the NSIS setup, verifies the installed core files, smoke-tests and uninstalls; on macOS and Linux it runs the
+app from the bundle (`.app`, AppImage) without installing. It never runs on a normal `main` push, because it
+builds four full bundles. The same checks run
 locally against a built bundle:
 
 ```bash
