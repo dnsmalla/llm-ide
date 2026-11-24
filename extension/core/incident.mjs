@@ -1,6 +1,7 @@
 // Self-Heal incident rules, ported from the retired Mac
 // app (IncidentRedactor, IncidentSignature, IncidentClassifier). Pure: no I/O, no DB. Incident text is data, never
-// instructions: nothing in plan A hands it to a model, logs it or sends it anywhere.
+// instructions: capture never hands it to a model, logs it or sends it anywhere; only a fix run (manual or the user's
+// daily schedule) shows it to the agent, fenced in BATCH.md (core/self-heal-batch.mjs).
 import crypto from 'node:crypto';
 import { homedir } from 'node:os';
 import { redactSecretsForStorage } from './redact-secrets.mjs';

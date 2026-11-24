@@ -129,15 +129,16 @@ test("a repeated error while pending is kept once", async () => {
   assert.equal(sh.pendingCount(), 3);
 });
 
-test("hostErrorWorthReporting: unexplained and internal failures only, never Self-Heal's own commands", () => {
-  assert.equal(sh.hostErrorWorthReporting("git_status", "spawn failed"), true);
+test("hostErrorWorthReporting: internal codes and JS-side failures only, never Self-Heal's own commands", () => {
+  // A plain sentence is how the host words an expected refusal ("a graph generation is still running"): not a bug.
+  assert.equal(sh.hostErrorWorthReporting("git_status", "spawn failed"), false);
   assert.equal(sh.hostErrorWorthReporting("git_status", new Error("bridge broke")), true);
   assert.equal(sh.hostErrorWorthReporting("x", { code: "internal", message: "m" }), true);
   assert.equal(sh.hostErrorWorthReporting("x", { code: "bad_core_response", message: "m" }), true);
   assert.equal(sh.hostErrorWorthReporting("x", { code: "cancelled", message: "m" }), false);
   assert.equal(sh.hostErrorWorthReporting("x", { code: "io", message: "m" }), false);
   assert.equal(sh.hostErrorWorthReporting("x", { code: "SSH_TIMEOUT", message: "m" }), false);
-  assert.equal(sh.hostErrorWorthReporting("self_heal_take", "boom"), false);
+  assert.equal(sh.hostErrorWorthReporting("self_heal_take", new Error("boom")), false);
   assert.equal(sh.hostErrorWorthReporting("x", ""), false);
 });
 
@@ -160,6 +161,20 @@ test("hostErrorWorthReporting reads a `code: message` string's prefix as its cod
   assert.equal(sh.hostErrorWorthReporting("capture_start", "already_recording: a capture is running"), false);
   assert.equal(sh.hostErrorWorthReporting("note_read", "io: No such file or directory (os error 2)"), false);
   assert.equal(sh.hostErrorWorthReporting("x", "internal: state lock poisoned"), true);
-  assert.equal(sh.hostErrorWorthReporting("x", "Error: something broke"), true, "a capitalised word is not a code");
-  assert.equal(sh.hostErrorWorthReporting("x", "that folder is not a git repository"), true);
+  assert.equal(sh.hostErrorWorthReporting("x", "Error: something broke"), false, "a capitalised word is not a code, and prose is a refusal");
+  assert.equal(sh.hostErrorWorthReporting("x", "that folder is not a git repository"), false);
+  assert.equal(sh.hostErrorWorthReporting("x", "a graph generation is still running"), false);
+});
+
+test("the pump keeps reports and sends nothing while the core is not the spawned local one", async () => {
+  const posted = [];
+  let local = false;
+  const deps = { take: take(true, [ok]), post: async (b) => { posted.push(...b); }, canPost: () => local };
+  await sh.pumpOnce(deps);
+  assert.deepEqual(posted, [], "a remote or SSH core has no Self-Heal routes: no 404 every 15 s");
+  assert.equal(sh.pendingCount(), 1);
+  local = true;
+  await sh.pumpOnce({ ...deps, take: take(true) });
+  assert.equal(posted.length, 1);
+  assert.equal(sh.pendingCount(), 0);
 });

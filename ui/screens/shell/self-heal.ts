@@ -2,10 +2,11 @@
 // Debug desktop builds only: the host's `self_heal_take` answers `enabled: false` in a release build, and then
 // nothing is kept, posted or shown. In a debug build, every 15 s the pump:
 //   1. drains the host's reports (core stderr, panic records);
-//   2. adds the Chat and Loop errors this webview reported;
-//   3. posts them to the core, which redacts and stores them.
-// Incident text is data: it goes only to the core this app trusts and is never handed to a model. Pure apart from the
-// injected `take` and `post`, so it is tested with node.
+//   2. adds what this webview reported: Chat and Loop errors, any section's crash, uncaught errors and unexpected
+//      host-command failures;
+//   3. posts them to the core it spawned, which redacts and stores them.
+// Incident text is data: capture never hands it to a model. Only a Self-Heal fix run (Try to fix, or the daily run the
+// user turned on) shows it to the agent, fenced in BATCH.md. Pure apart from the injected deps, so it is tested with node.
 
 import { hostErrorCode, hostErrorText } from "./host-error.ts";
 
@@ -19,6 +20,8 @@ export interface IncidentReport {
 export interface PumpDeps {
   take: () => Promise<unknown>;
   post: (incidents: IncidentReport[]) => Promise<unknown>;
+  /** False while the core is not the one this app spawned (remote, SSH, adopted): only that core records incidents. */
+  canPost?: () => boolean;
 }
 
 export const PENDING_MAX = 100;
@@ -105,7 +108,11 @@ export function hostErrorWorthReporting(command: string, error: unknown): boolea
   // Many `Result<_, String>` commands put their code in the text (`io: …`, `already_recording: …`): read it the same way.
   const prefixed = typeof error === "string" ? /^([a-z][a-z_]*): /.exec(error.trim())?.[1] ?? "" : "";
   const code = hostErrorCode(error) || prefixed;
-  return code !== "" ? INTERNAL_HOST_CODES.has(code) : hostErrorText(error) !== "";
+  if (code !== "") return INTERNAL_HOST_CODES.has(code);
+  // An uncoded string is the host's own wording of an expected refusal (168 of them, e.g. "a graph generation is
+  // still running"): recording them filled the daily automatic run with non-bugs. A thrown Error is the bridge itself
+  // failing on this side, which is a bug.
+  return error instanceof Error && hostErrorText(error) !== "";
 }
 
 type ErrorTarget = Pick<EventTarget, "addEventListener" | "removeEventListener">;
@@ -148,6 +155,7 @@ export async function pumpOnce(deps: PumpDeps): Promise<void> {
   setEnabled(take.enabled);
   if (!take.enabled) return;
   keep(take.incidents);
+  if (deps.canPost && !deps.canPost()) return; // kept (newest PENDING_MAX) until the spawned core is back
   while (pending.length > 0) {
     const batch = pending.slice(0, BATCH_MAX);
     pending = pending.slice(batch.length);

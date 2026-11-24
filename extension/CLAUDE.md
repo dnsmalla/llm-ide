@@ -144,14 +144,14 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   - It is not a `FEATURE_ROUTE_GROUPS` entry, because an unset `LLMIDE_FEATURES` means all on.
 - **Capture (plan A)**:
   - The host turns the spawned core's stderr and panic records into reports.
-  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures, any section's crash (`section:<name>`), uncaught errors (`uncaught`) and unexpected host-command failures (`host:<command>`; expected refusal codes are filtered) and posts them to `POST /kb/self-heal/incidents`.
+  - The webview's pump (`ui/screens/shell/self-heal.ts`, `self_heal_take` every 15 s) adds Chat and Loop failures, any section's crash (`section:<name>`), uncaught errors (`uncaught`) and unexpected host-command failures (`host:<command>`: an internal error code or a JS-side failure only; coded refusals and the host's plain-sentence refusals are not recorded) and posts them to `POST /kb/self-heal/incidents` of the core the app spawned (nothing is sent to a remote, SSH or adopted core).
   - `kb/incidents.mjs` stores them in `self_heal_incidents` (migration 0067) after `core/incident.mjs` redacted and signed them.
   - **From Chat:** `/self-heal <what is wrong>` (alias `/heal`) records the user's description plus the chat's last exchange (as data) as a `ui` incident of category `chat report` and posts it at once (`reportChatProblem`, `ui/screens/chat/self-heal-report.ts`). The core never classes that category as an environment problem. It only records: the fix is still the manual Try to fix. A release build answers that Self-Heal is debug-only.
 - **Fix loop (plan B)**: Settings → Self-Heal → Try to fix (`ui/screens/settings/self-heal-run.ts`), or the same run once a day at the user's time when they turn on "Try to fix automatically every day" (`ui/screens/settings/self-heal-auto.ts`, started by the Shell through `ui/screens/shell/self-heal-auto-host.ts`; off by default, only while the app is open, waits while a Loop run or a manual run is busy, and notifies with the host's `self_heal` kind, which is never pushed). Apply is always the user's click.
   1. `POST /kb/self-heal/runs` (one run per user, 4 h in-memory lease) triages up to 5 `new` incidents and returns `.self-heal/BATCH.md` (`core/self-heal-batch.mjs`).
   2. The host adds a worktree of the source checkout under `<data dir>/self-heal/loop-worktrees/<run id>` (`self_heal_fix.rs`).
   3. One `POST /kb/loop/agent-run` edits the worktree.
-  4. The host reverts `Makefile`, `scripts/**`, `**/*.sh` and `**/package.json`, then runs the checkout's `scripts/self-heal-verify.sh` (`make regression`, 90 min).
+  4. The host reverts `Makefile`, `scripts/**`, `**/*.sh` and `**/package.json`, then runs the checkout's `scripts/self-heal-verify.sh` (`make regression`, 90 min). When the agent left no change, nothing is run: the result is `passed` with `hasChanges: false` ("the agent left no change").
   5. `POST /kb/self-heal/runs/:id/outcome` maps the verdicts.
   - Review / Apply (`git apply` of the reviewed patch, never a commit) / Discard end with `POST /kb/self-heal/runs/:id/resolve`.
   - The source checkout must be on the user's repo allow-list, and the Auto Tasks feature (which owns the Loop agent) must be on.

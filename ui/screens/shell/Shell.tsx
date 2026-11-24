@@ -198,6 +198,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     const stopPump = startSelfHealPump({
       take: () => invokeHost<unknown>("self_heal_take"),
       post: (incidents) => core.request("/kb/self-heal/incidents", { method: "POST", body: { incidents } }),
+      canPost: () => coreStatusStore.getSnapshot().status?.trust === "spawned",
     });
     // Errors no screen caught; reporting is a no-op until the host says this build records.
     const stopCapture = installGlobalErrorCapture(globalThis);
