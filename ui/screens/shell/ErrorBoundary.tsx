@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportAppError } from "./self-heal";
 
 interface Props {
   /** Section label for the message. */
@@ -27,6 +28,8 @@ export class SectionErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo): void {
     console.error(`[shell] ${this.props.name} crashed:`, error, info.componentStack);
+    // A section crash is a bug in that section: Self-Heal records it (debug builds; a no-op otherwise).
+    reportAppError(`section:${this.props.name}`, error, info.componentStack ?? undefined);
   }
 
   private reset = () => this.setState((s) => ({ error: null, attempt: s.attempt + 1 }));

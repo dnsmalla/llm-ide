@@ -9,6 +9,7 @@
 //    of importing `@tauri-apps/api` themselves, so tests can swap one bridge.
 
 import { decodePrefsView } from "./host-prefs.ts";
+import { hostErrorWorthReporting, reportAppError } from "./self-heal.ts";
 
 /** `ssh`: the core runs on a Linux server and is reached through the ssh port forward (see `link`). */
 export type CoreState = "starting" | "ready" | "restarting" | "failed" | "stopped" | "remote" | "ssh";
@@ -283,6 +284,8 @@ export async function invokeHost<T>(command: string, args?: Record<string, unkno
     if (record?.code === "no_project" && sshModeProvider() && !ownsItsRefusal(command)) {
       for (const listener of [...noProjectListeners]) listener();
     }
+    // Every host command passes here, so one check covers them all; expected refusals are filtered out.
+    if (hostErrorWorthReporting(command, e)) reportAppError(`host:${command}`, e);
     throw e;
   }
 }

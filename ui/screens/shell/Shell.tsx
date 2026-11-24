@@ -50,7 +50,7 @@ import { featureStore } from "./feature-store";
 import { disabledSectionText, isSectionEnabled, keepSectionNotice, type SectionNotice } from "./features";
 import { quickSwitchRows } from "./menu-model";
 import { coreApiWarning } from "./core-api-floor";
-import { startSelfHealPump } from "./self-heal";
+import { installGlobalErrorCapture, startSelfHealPump } from "./self-heal";
 declare const __FEATURE_AUTO_TASKS__: boolean | undefined;
 
 export interface ShellProps {
@@ -194,10 +194,16 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => {
     if (!shellHost.isAvailable()) return undefined;
     // Self-Heal (debug builds only): the host answers enabled: false in a release build and the pump stops.
-    return startSelfHealPump({
+    const stopPump = startSelfHealPump({
       take: () => invokeHost<unknown>("self_heal_take"),
       post: (incidents) => core.request("/kb/self-heal/incidents", { method: "POST", body: { incidents } }),
     });
+    // Errors no screen caught; reporting is a no-op until the host says this build records.
+    const stopCapture = installGlobalErrorCapture(globalThis);
+    return () => {
+      stopPump();
+      stopCapture();
+    };
   }, []);
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
 
