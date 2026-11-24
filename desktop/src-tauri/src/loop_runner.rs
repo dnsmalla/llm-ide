@@ -406,17 +406,17 @@ pub(crate) fn root_for(run_id: Option<&str>) -> Result<(PathBuf, PathBuf), Strin
 /// True when any `system/faults/**/*.md` is still marked `status: fixed`. The desktop's deterministic slice cannot
 /// re-ask the agent those questions, so it refuses rather than reporting a green sweep it never performed.
 fn has_fixed_faults(dir: &Path, depth: usize) -> bool {
-    // Same limits as `walk_faults`: no symlinks (a loop would never end), bounded depth and file size. Too deep
-    // counts as "has fixed faults", because the sweep must refuse what it did not read.
+    // Same limits as `walk_faults`: no symlinked folders (a loop would never end), bounded depth and file size.
+    // Too deep counts as "has fixed faults", because the sweep must refuse what it did not read.
     if depth > 8 { return true; }
     let Ok(entries) = std::fs::read_dir(dir) else { return false };
     for e in entries.flatten() {
         let p = e.path();
         let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
-        if meta.file_type().is_symlink() { continue; }
         if meta.is_dir() { if has_fixed_faults(&p, depth + 1) { return true; } continue; }
         if p.extension().and_then(|x| x.to_str()).map(|x| x.eq_ignore_ascii_case("md")) != Some(true) { continue; }
-        if meta.len() > 2_000_000 { continue; }
+        // A report that is not read (a symlink, or too large) counts as fixed, like a folder that is too deep.
+        if meta.file_type().is_symlink() || meta.len() > 2_000_000 { return true; }
         let text = std::fs::read_to_string(&p).unwrap_or_default();
         let head = text.split("\n---").next().unwrap_or("");
         if head.lines().any(|l| l.trim().eq_ignore_ascii_case("status: fixed")) { return true; }
@@ -1543,6 +1543,9 @@ mod tests {
         std::os::unix::fs::symlink(&faults, faults.join("again")).unwrap();
         std::fs::write(faults.join("f.md"), "status: open\n---\n").unwrap();
         assert!(!has_fixed_faults(&faults, 0));
+        std::os::unix::fs::symlink(faults.join("f.md"), faults.join("link.md")).unwrap();
+        assert!(has_fixed_faults(&faults, 0), "a symlinked report is not read, so the sweep must refuse");
+        std::fs::remove_file(faults.join("link.md")).unwrap();
         std::fs::write(faults.join("g.md"), "status: fixed\n---\n").unwrap();
         assert!(has_fixed_faults(&faults, 0));
         let _ = std::fs::remove_dir_all(&root);
