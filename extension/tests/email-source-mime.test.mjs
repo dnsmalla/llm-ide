@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRequire } from 'node:module';
 import { simpleParser } from 'mailparser';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
@@ -9,20 +8,24 @@ process.env.NODE_ENV = 'test';
 
 const { normalizeParsed } = await import('../connectors/email-source.mjs');
 
-// NOTE: both encoders are transitive dependencies of mailparser (not declared
-// in package.json). They are used only to PRODUCE fixture bytes; every fixture
-// is cross-checked with Node's built-in TextDecoder (an independent oracle), so
-// a bad fixture can never be mistaken for a mailparser decoding regression.
-const require = createRequire(import.meta.url);
-const Encoding = require('encoding-japanese');
-const iconv = require('iconv-lite');
+// NOTE: the ISO-2022-JP and Shift_JIS fixtures are fixed bytes, not produced by
+// an encoder library: the encoders were only transitive dependencies (hoisted
+// from imapflow, not declared in package.json), so a lockfile change could
+// break the test with MODULE_NOT_FOUND. Only these JIS/Shift_JIS fixtures are
+// cross-checked, by assertFixture against Node's built-in TextDecoder (an
+// independent oracle), so a wrong constant can never be mistaken for a
+// mailparser decoding regression. The UTF-8 fixtures are built inline.
+const hex = (str) => Buffer.from(str, 'hex');
+const JIS_SUBJECT = hex('1b244232713544244e35443b764f3f244b2444242424461b2842');
+const JIS_NAME = hex('1b24423b3345441b2842201b244242404f3a1b2842');
+const JIS_BODY = hex(
+  '1b2442242a40244f43244b244a24432446242a246a245e243921231b28420d0a' +
+  '1b24424c40467c244e446a4e6332713544244e35443b764f3f247236264d2d2437245e243921231b2842');
+const SJIS_SUBJECT = hex('89ef8b6382cc8b638e96985e82c982c282a282c4');
+const SJIS_BODY = hex(
+  '82a890a2986282c982c882c182c482a882e882dc82b781420d0a96be93fa82cc92e897e1' +
+  '89ef8b6382cc8b638e96985e82f08ba4974c82b582dc82b78142');
 
-function toJis(str) {
-  return Buffer.from(Encoding.convert(Encoding.stringToCode(str), { to: 'JIS', from: 'UNICODE' }));
-}
-function toSjis(str) {
-  return iconv.encode(str, 'Shift_JIS');
-}
 function assertFixture(label, bytes, expected) {
   assert.equal(new TextDecoder(label).decode(bytes), expected, `fixture for ${label} must round-trip`);
 }
@@ -41,9 +44,9 @@ async function parse(raw, uid = 7) {
 }
 
 test('ISO-2022-JP subject, From display name and 7bit body decode to Japanese', async () => {
-  const subject = toJis(SUBJECT_JA);
-  const name = toJis(FROM_NAME_JA);
-  const body = toJis(BODY_JA);
+  const subject = JIS_SUBJECT;
+  const name = JIS_NAME;
+  const body = JIS_BODY;
   assertFixture('iso-2022-jp', subject, SUBJECT_JA);
   assertFixture('iso-2022-jp', name, FROM_NAME_JA);
   assertFixture('iso-2022-jp', body, BODY_JA);
@@ -63,8 +66,8 @@ test('ISO-2022-JP subject, From display name and 7bit body decode to Japanese', 
 });
 
 test('Shift_JIS subject (B) and base64 body decode to Japanese', async () => {
-  const subject = toSjis(SUBJECT_JA);
-  const body = toSjis(BODY_JA);
+  const subject = SJIS_SUBJECT;
+  const body = SJIS_BODY;
   assertFixture('shift_jis', subject, SUBJECT_JA);
   assertFixture('shift_jis', body, BODY_JA);
   const raw =
