@@ -185,32 +185,47 @@ fn entry_exists(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok()
 }
 
-fn copy_tree(src: &Path, dst: &Path, depth: usize, budget: &mut usize) -> Result<(), String> {
+/// Where a failed copy went wrong: reading the cached/built source, or writing the destination (full disk, ...).
+#[derive(Debug)]
+enum CopyFail {
+    Source(String),
+    Dest(String),
+}
+
+impl CopyFail {
+    fn into_message(self) -> String {
+        match self {
+            CopyFail::Source(m) | CopyFail::Dest(m) => m,
+        }
+    }
+}
+
+fn copy_tree(src: &Path, dst: &Path, depth: usize, budget: &mut usize) -> Result<(), CopyFail> {
     if depth > MAX_DEPTH {
-        return Err("the environment folder is nested too deeply to copy".into());
+        return Err(CopyFail::Source("the environment folder is nested too deeply to copy".into()));
     }
     if *budget == 0 {
-        return Err("the environment folder has too many files to copy".into());
+        return Err(CopyFail::Source("the environment folder has too many files to copy".into()));
     }
     *budget -= 1;
-    let meta = std::fs::symlink_metadata(src).map_err(|e| format!("cannot read {}: {e}", src.display()))?;
+    let meta = std::fs::symlink_metadata(src).map_err(|e| CopyFail::Source(format!("cannot read {}: {e}", src.display())))?;
     let ft = meta.file_type();
     if ft.is_symlink() {
-        let target = std::fs::read_link(src).map_err(|e| format!("cannot read link {}: {e}", src.display()))?;
+        let target = std::fs::read_link(src).map_err(|e| CopyFail::Source(format!("cannot read link {}: {e}", src.display())))?;
         #[cfg(unix)]
         {
-            return std::os::unix::fs::symlink(&target, dst).map_err(|e| format!("cannot copy link {}: {e}", src.display()));
+            return std::os::unix::fs::symlink(&target, dst).map_err(|e| CopyFail::Dest(format!("cannot copy link {}: {e}", src.display())));
         }
         #[cfg(not(unix))]
         {
             let _ = target;
-            return Err(format!("{} is a link, which this platform cannot cache", src.display()));
+            return Err(CopyFail::Source(format!("{} is a link, which this platform cannot cache", src.display())));
         }
     }
     if ft.is_dir() {
-        std::fs::create_dir(dst).map_err(|e| format!("cannot create {}: {e}", dst.display()))?;
+        std::fs::create_dir(dst).map_err(|e| CopyFail::Dest(format!("cannot create {}: {e}", dst.display())))?;
         let mut names: Vec<std::ffi::OsString> = std::fs::read_dir(src)
-            .map_err(|e| format!("cannot list {}: {e}", src.display()))?
+            .map_err(|e| CopyFail::Source(format!("cannot list {}: {e}", src.display())))?
             .flatten()
             .map(|e| e.file_name())
             .collect();
@@ -218,20 +233,29 @@ fn copy_tree(src: &Path, dst: &Path, depth: usize, budget: &mut usize) -> Result
         for name in names {
             copy_tree(&src.join(&name), &dst.join(&name), depth + 1, budget)?;
         }
-        std::fs::set_permissions(dst, meta.permissions()).map_err(|e| format!("cannot set permissions on {}: {e}", dst.display()))?;
+        std::fs::set_permissions(dst, meta.permissions()).map_err(|e| CopyFail::Dest(format!("cannot set permissions on {}: {e}", dst.display())))?;
         return Ok(());
     }
     if ft.is_file() {
-        std::fs::copy(src, dst).map_err(|e| format!("cannot copy {}: {e}", src.display()))?;
+        std::fs::File::open(src).map_err(|e| CopyFail::Source(format!("cannot read {}: {e}", src.display())))?;
+        std::fs::copy(src, dst).map_err(|e| {
+            let msg = format!("cannot copy {}: {e}", src.display());
+            // The source opened fine, so only a full or over-quota disk is clearly the destination's fault.
+            if matches!(e.kind(), std::io::ErrorKind::StorageFull | std::io::ErrorKind::QuotaExceeded | std::io::ErrorKind::ReadOnlyFilesystem) {
+                CopyFail::Dest(msg)
+            } else {
+                CopyFail::Source(msg)
+            }
+        })?;
     }
     Ok(())
 }
 
 /// Copies one cached or built path. On macOS an APFS clone (`cp -c`) is tried first: it is near-instant and still an
 /// independent copy; any failure falls back to the plain copy above.
-fn copy_path(src: &Path, dst: &Path) -> Result<(), String> {
+fn copy_path(src: &Path, dst: &Path) -> Result<(), CopyFail> {
     if let Some(parent) = dst.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        std::fs::create_dir_all(parent).map_err(|e| CopyFail::Dest(format!("cannot create {}: {e}", parent.display())))?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -247,6 +271,43 @@ fn copy_path(src: &Path, dst: &Path) -> Result<(), String> {
         let _ = remove_any(dst);
     }
     result
+}
+
+/// Like `remove_any`, but first gives owner write+search permission to every directory under `p` so a tree copied
+/// with read-only modes can be deleted. Symlinks are never followed (and never chmod-ed); only real directories
+/// below `p` itself change mode. Callers pass paths inside the cache root only.
+fn remove_tree_forced(p: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    fn open_up(dir: &Path, depth: usize) {
+        use std::os::unix::fs::PermissionsExt;
+        if depth > MAX_DEPTH {
+            return;
+        }
+        let Ok(meta) = std::fs::symlink_metadata(dir) else { return };
+        if !meta.file_type().is_dir() {
+            return;
+        }
+        let mode = meta.permissions().mode();
+        if mode & 0o700 != 0o700 {
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(mode | 0o700));
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            open_up(&e.path(), depth + 1);
+        }
+    }
+    #[cfg(unix)]
+    open_up(p, 0);
+    #[cfg(not(unix))]
+    if let Ok(m) = std::fs::symlink_metadata(p) {
+        if m.is_dir() {
+            let mut perms = m.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            perms.set_readonly(false);
+            let _ = std::fs::set_permissions(p, perms);
+        }
+    }
+    remove_any(p)
 }
 
 fn remove_any(p: &Path) -> std::io::Result<()> {
@@ -362,6 +423,33 @@ fn read_origin(entry: &Path) -> Vec<String> {
 /// Copies the cached paths for `key` into `worktree`. `Ok(false)` is a miss. A path that already exists in the worktree
 /// is left alone. Text files that name the folder the environment was built in are pointed at `worktree`.
 pub(crate) fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &str) -> Result<bool, String> {
+    restore_classified(project, worktree, spec, key).map_err(|e| e.message().to_string())
+}
+
+/// Why a restore failed, so the caller only discards a cache entry that is itself at fault.
+#[derive(Debug)]
+enum RestoreError {
+    /// The worktree refused the restore (a symlinked parent): the entry is fine.
+    Worktree(String),
+    /// Writing into the worktree failed (full disk, ...): the entry is fine.
+    Write(String),
+    /// Reading the entry failed (corrupt or unreadable): the entry is bad.
+    Entry(String),
+}
+
+impl RestoreError {
+    fn message(&self) -> &str {
+        match self {
+            RestoreError::Worktree(m) | RestoreError::Write(m) | RestoreError::Entry(m) => m,
+        }
+    }
+
+    fn entry_is_bad(&self) -> bool {
+        matches!(self, RestoreError::Entry(_))
+    }
+}
+
+fn restore_classified(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &str) -> Result<bool, RestoreError> {
     let entry = cache_root(project).join(key);
     let files = entry.join("files");
     if !files.is_dir() || !spec.paths.iter().all(|p| entry_exists(&files.join(p))) {
@@ -379,20 +467,23 @@ pub(crate) fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key:
     pairs.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
     // Refuse before anything is written: a symlinked parent would send the copy outside the worktree.
     for rel in &spec.paths {
-        parent_link_free(worktree, rel)?;
+        parent_link_free(worktree, rel).map_err(RestoreError::Worktree)?;
     }
     let mut created: Vec<&String> = Vec::new();
-    let restored = (|| -> Result<(), String> {
+    let restored = (|| -> Result<(), RestoreError> {
         for rel in &spec.paths {
             let dst = worktree.join(rel);
             if entry_exists(&dst) {
                 continue;
             }
             created.push(rel);
-            copy_path(&files.join(rel), &dst)?;
+            copy_path(&files.join(rel), &dst).map_err(|e| match e {
+                CopyFail::Source(m) => RestoreError::Entry(m),
+                CopyFail::Dest(m) => RestoreError::Write(m),
+            })?;
             if !pairs.is_empty() {
                 let mut budget = MAX_ENTRIES;
-                rewrite_prefix(&dst, &pairs, 0, &mut budget)?;
+                rewrite_prefix(&dst, &pairs, 0, &mut budget).map_err(RestoreError::Write)?;
             }
         }
         Ok(())
@@ -401,7 +492,14 @@ pub(crate) fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key:
         // Never leave a half-restored environment that looks ready to the next prepare.
         return Err(match remove_created(worktree, &created) {
             Ok(()) => e,
-            Err(rm) => format!("{e} (and the partial restore could not be removed: {rm})"),
+            Err(rm) => {
+                let msg = format!("{} (and the partial restore could not be removed: {rm})", e.message());
+                match e {
+                    RestoreError::Worktree(_) => RestoreError::Worktree(msg),
+                    RestoreError::Write(_) => RestoreError::Write(msg),
+                    RestoreError::Entry(_) => RestoreError::Entry(msg),
+                }
+            }
         });
     }
     #[cfg(unix)]
@@ -429,7 +527,7 @@ pub(crate) fn save(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &s
             if !entry_exists(&src) {
                 return Err(format!("the setup command did not create {rel}"));
             }
-            copy_path(&src, &tmp.join("files").join(rel))?;
+            copy_path(&src, &tmp.join("files").join(rel)).map_err(CopyFail::into_message)?;
         }
         let meta = serde_json::json!({ "origins": path_variants(worktree) });
         std::fs::write(tmp.join("meta.json"), meta.to_string()).map_err(|e| format!("cannot write the cache entry: {e}"))
@@ -448,12 +546,12 @@ pub(crate) fn save(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &s
     Ok(())
 }
 
-/// Drops a cache key. When it cannot be deleted (unreadable folders), it is renamed out of the way so the key is
-/// free again; `prune` removes such `.tmp-` leftovers once they are stale.
+/// Drops a cache key. Read-only trees are made deletable first; only when it still cannot be deleted is it renamed out
+/// of the way so the key is free again, and `prune` retries removing such `.tmp-` leftovers once they are stale.
 fn evict(project: &Path, key: &str) {
     let root = cache_root(project);
     let entry = root.join(key);
-    if remove_any(&entry).is_ok() {
+    if remove_tree_forced(&entry).is_ok() {
         return;
     }
     let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -471,7 +569,7 @@ fn prune(root: &Path, keep: &str) {
         if name.starts_with(".tmp-") {
             let stale = std::time::SystemTime::now().duration_since(used).map(|d| d.as_secs() > 3600).unwrap_or(false);
             if stale {
-                let _ = remove_any(&path);
+                let _ = remove_tree_forced(&path);
             }
             continue;
         }
@@ -482,7 +580,7 @@ fn prune(root: &Path, keep: &str) {
     keys.sort_by_key(|(used, _)| std::cmp::Reverse(*used));
     for (i, (_, path)) in keys.iter().enumerate() {
         if i >= MAX_KEYS_KEPT && path.file_name().and_then(|n| n.to_str()) != Some(keep) {
-            let _ = remove_any(path);
+            let _ = remove_tree_forced(path);
         }
     }
 }
@@ -589,13 +687,17 @@ fn prepare_inner(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, time
     let key = cache_key(worktree, &spec)?;
     let short = key[..12].to_string();
     let mut note = String::new();
-    match restore(&project, worktree, &spec, &key) {
+    match restore_classified(&project, worktree, &spec, &key) {
         Ok(true) => return Ok(EnvPrepare::of("restored", format!("Environment restored from the cache ({short})."), Some(key))),
         Ok(false) => {}
-        Err(e) => {
+        Err(e) if e.entry_is_bad() => {
             // A bad entry would fail every later run with this key, so drop it and fall through to a normal miss.
             evict(&project, &key);
-            note = format!(" The cached environment ({short}) could not be restored and was discarded: {e}");
+            note = format!(" The cached environment ({short}) could not be restored and was discarded: {}", e.message());
+        }
+        Err(e) => {
+            // The worktree (symlinked parent, full disk) is at fault, not the entry: keep it for the next run.
+            note = format!(" The cached environment ({short}) could not be restored here and was kept: {}", e.message());
         }
     }
     let token = token.ok_or_else(|| "the environment setup needs a native host approval before it can run".to_string())?;

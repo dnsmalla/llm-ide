@@ -503,3 +503,56 @@ fn forgetting_a_worktree_drops_its_path_entry() {
     assert_ne!(crate::loop_runner::run_command_keyed(&wt, "envtool", Some(30), "k").unwrap().exit_code, Some(0));
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[cfg(unix)]
+#[test]
+fn evict_and_prune_remove_a_read_only_tree() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = temp("rotree");
+    let root = cache_root(&project);
+    let make = |dir: &Path| {
+        std::fs::create_dir_all(dir.join("files/.venv/sub")).unwrap();
+        std::fs::write(dir.join("files/.venv/sub/f"), "1").unwrap();
+        for d in ["files/.venv/sub", "files/.venv", "files"] {
+            std::fs::set_permissions(dir.join(d), std::fs::Permissions::from_mode(0o555)).unwrap();
+        }
+    };
+    let key = "a".repeat(64);
+    make(&root.join(&key));
+    evict(&project, &key);
+    assert!(!root.join(&key).exists(), "evict removed the read-only tree");
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0, "no .tmp-evicted leftover");
+
+    let stale = root.join(".tmp-evicted-old");
+    make(&stale);
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    // The folder's own mtime decides staleness when there is no meta.json.
+    std::fs::File::open(&stale).unwrap().set_modified(old).unwrap();
+    prune(&root, &"b".repeat(64));
+    assert!(!stale.exists(), "prune removed the stale read-only leftover");
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_worktree_symlinked_parent_does_not_evict_the_cache_entry() {
+    let setup = "mkdir -p web/node_modules";
+    let project = project_with(setup);
+    let s = EnvCacheSpec { key_files: vec!["requirements.txt".into()], setup: setup.into(), paths: vec!["web/node_modules".into()] };
+    let a = worktree(&project, "a", "x\n");
+    std::fs::create_dir_all(a.join("web/node_modules")).unwrap();
+    std::fs::write(a.join("web/node_modules/m"), "1").unwrap();
+    let key = cache_key(&a, &s).unwrap();
+    save(&project, &a, &s, &key).unwrap();
+    let marker = cache_root(&project).join(&key).join("files/web/node_modules/m");
+    assert!(marker.exists());
+
+    let b = worktree(&project, "b", "x\n");
+    let outside = temp("outside-keep");
+    std::os::unix::fs::symlink(&outside, b.join("web")).unwrap();
+    let err = restore_classified(&project, &b, &s, &key).unwrap_err();
+    assert!(matches!(err, RestoreError::Worktree(_)), "{err:?}");
+    assert!(!err.entry_is_bad());
+    assert!(marker.exists(), "the good entry stays");
+    let _ = std::fs::remove_dir_all(project);
+}
