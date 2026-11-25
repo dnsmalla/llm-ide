@@ -408,10 +408,21 @@ test("F4: a worktree run's test map reads its own graph snapshot, not the projec
   const s = stage({ id: "t1", name: "Test map", kind: "testMap", command: null, testOp: "map" });
   const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
   assert.match(r.output, /^1 function\(s\)/, "the run's own graph supplies the function");
-  assert.deepEqual(writes.map(([p]) => p), ["system/loop-worktrees/r1/llm-doc/loop/test/TEST-PLAN.md", "system/loop-worktrees/r1/llm-doc/loop/test/TEST-MAP.md", "system/loop-worktrees/r1/system/loop/test/TEST-MAP.json"]);
+  // Not the Test loop: the candidate list is computed, but only the Test loop owns (and writes) the step plan.
+  assert.deepEqual(writes.map(([p]) => p), ["system/loop-worktrees/r1/llm-doc/loop/test/TEST-MAP.md", "system/loop-worktrees/r1/system/loop/test/TEST-MAP.json"]);
   const md = writes.find(([p]) => p.endsWith("TEST-MAP.md"))[1];
   assert.match(md, /## Unit-test candidates\n\n- src\/a\.ts \(1 untested function\)/);
   assert.match(md, /## Refactor first/);
+});
+
+test("the Test loop's map stage writes the step plan first; its Test Map Check moves nothing to the finished file", async () => {
+  const graph = JSON.stringify({ files: [{ path: "src/a.ts", name: "a.ts", loc: 2, functions: [{ name: "run", line: 1 }] }], calls: [] });
+  const { fs, writes } = fakeWritableFs({ "system/loop-runs/r1/graph/graph-code.json": graph });
+  const { ctx } = ctxOf({ fs });
+  const s = stage({ id: "t1", name: "Test map", kind: "testMap", command: null, testOp: "map" });
+  await createStageDeps(ctx, { ...loopOf([s]), defaultKey: "test" }).runStage(s, []);
+  assert.equal(writes[0][0], "system/loop-worktrees/r1/llm-doc/loop/test/TEST-PLAN.md");
+  assert.match(writes[0][1], /### T1 src\/a\.ts \(status: todo\)/);
 });
 
 test("F5: a worktree run's artifact check does not accept a file that only exists in the main tree", async () => {

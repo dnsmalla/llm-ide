@@ -60,7 +60,7 @@ test("two todo batches that both pass are applied in one run", async () => {
   const { state, deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
   const out = await runRefactorBatches(config(ALL), deps, opts);
   assert.equal(out.passed, true);
-  assert.equal(out.statusSummary, "2 batches applied (R1, R2); plan complete: no todo batches left");
+  assert.equal(out.statusSummary, "2 batches applied (R1, R2)");
   assert.match(state.plan, /### R1 — R1 \(status: done\)/);
   assert.match(state.plan, /### R2 — R2 \(status: done\)/);
   assert.deepEqual(state.restores, []);
@@ -126,7 +126,7 @@ test("maxBatches defaults to the config's refactorBatchesPerRun and is clamped t
 test("batch 2 retakes the graph baseline before its batch stages, batch 1 does not", async () => {
   const { state, deps, opts } = fakeRun({ plan: TODO("R1") + "\n" + TODO("R2") });
   await runRefactorBatches(config(ALL), deps, opts);
-  assert.deepEqual(state.ran, ["test", "plan", "snap", "write", "apply", "test", "check", "snap", "write", "apply", "test", "check", "plan", "snap"], "the preflight Refactor Test leads");
+  assert.deepEqual(state.ran, ["test", "plan", "snap", "write", "apply", "test", "check", "snap", "write", "apply", "test", "check"], "the preflight Refactor Test leads");
 });
 
 test("a batch that passed but is still todo stops the run instead of applying it again", async () => {
@@ -257,7 +257,7 @@ test("a passing preflight Test Baseline runs before planning, and its stage lead
   const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
   const out = await runRefactorBatches(config([PLAN, SNAP, BASELINE, WRITE, APPLY, TEST, CHECK]), deps, opts);
   assert.equal(out.passed, true, out.statusSummary);
-  assert.equal(out.statusSummary, "1 batch applied (R1); plan complete: no todo batches left");
+  assert.equal(out.statusSummary, "1 batch applied (R1)");
   assert.equal(out.stages[0].stage.id, "baseline");
   assert.equal(out.stages.filter((s) => s.stage.id === "baseline").length, 2, "the preflight and the batch's own baseline");
   assert.deepEqual(state.ran.slice(0, 3), ["baseline", "plan", "snap"]);
@@ -268,7 +268,7 @@ test("a loop with no shell stage in the batch phase has no preflight: planning r
   const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
   const out = await runRefactorBatches(config([PLAN, SNAP, WRITE, APPLY, CHECK]), deps, opts);
   assert.equal(out.passed, true, out.statusSummary);
-  assert.deepEqual(state.ran, ["plan", "snap", "write", "apply", "check", "plan", "snap"]);
+  assert.deepEqual(state.ran, ["plan", "snap", "write", "apply", "check"]);
 });
 
 test("a failed rollback marks the batch blocked in the plan, whatever status it had reached", async () => {
@@ -320,10 +320,12 @@ test("refactor batch: a red Test Baseline after Test Write stays left todo even 
   assert.equal(out.stoppedAtLimit, true);
 });
 
-const REPLAN = (...ids) => (plan) => `${plan}\n${ids.map((id) => TODO(id)).join("\n")}`;
+// Only a plan divided into areas re-plans (a next area may open).
+const AREA = (id) => `${TODO(id)}- Area: a\n`;
+const REPLAN = (...ids) => (plan) => `${plan}\n${ids.map((id) => AREA(id)).join("\n")}`;
 
 test("when the plan runs out the planning stages run again and the run goes on into the new batches", async () => {
-  const { state, deps, opts } = fakeRun({ plan: TODO("R1"), replans: [REPLAN("R2", "R3")] });
+  const { state, deps, opts } = fakeRun({ plan: AREA("R1"), replans: [REPLAN("R2", "R3")] });
   const logs = [];
   const out = await runRefactorBatches(config(ALL), deps, { ...opts, maxBatches: 10, log: (l) => logs.push(l) });
   assert.equal(out.statusSummary, "3 batches applied (R1, R2, R3); plan complete: no todo batches left");
@@ -333,7 +335,7 @@ test("when the plan runs out the planning stages run again and the run goes on i
 });
 
 test("a re-plan that adds no batch ends the run, and is not repeated", async () => {
-  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const { state, deps, opts } = fakeRun({ plan: AREA("R1") });
   const out = await runRefactorBatches(config(ALL), deps, opts);
   assert.equal(state.plans, 2);
   assert.equal(out.passed, true);
@@ -344,23 +346,23 @@ test("no re-plan when the first plan had nothing to do, or the plan says all are
   const a = fakeRun({ plan: "### R1 — x (status: done)\n" });
   await runRefactorBatches(config(ALL), a.deps, a.opts);
   assert.equal(a.state.plans, 1);
-  const b = fakeRun({ plan: TODO("R1"), replans: [(p) => `All areas are done.\n${p}`] });
+  const b = fakeRun({ plan: AREA("R1"), replans: [(p) => `All areas are done.\n${p}`] });
   await runRefactorBatches(config(ALL), b.deps, b.opts);
   assert.equal(b.state.plans, 2);
-  const c = fakeRun({ plan: "All areas are done.\n" + TODO("R1") });
+  const c = fakeRun({ plan: "All areas are done.\n" + AREA("R1") });
   await runRefactorBatches(config(ALL), c.deps, c.opts);
   assert.equal(c.state.plans, 1, "the marker stops a re-plan");
 });
 
 test("the step limit counts across a re-plan", async () => {
-  const { state, deps, opts } = fakeRun({ plan: TODO("R1"), replans: [REPLAN("R2", "R3")] });
+  const { state, deps, opts } = fakeRun({ plan: AREA("R1"), replans: [REPLAN("R2", "R3")] });
   const out = await runRefactorBatches(config(ALL), deps, { ...opts, maxBatches: 2 });
   assert.equal(out.statusSummary, "2 batches applied (R1, R2); batch limit (2) reached");
   assert.equal(state.plans, 2);
 });
 
 test("a failed re-plan keeps the applied batches and the run passes", async () => {
-  const { deps, opts } = fakeRun({ plan: TODO("R1") });
+  const { deps, opts } = fakeRun({ plan: AREA("R1") });
   const run = deps.runStage;
   let plans = 0;
   deps.runStage = async (s) => (s.id === "plan" && ++plans === 2 ? { ok: false, output: "planner failed" } : run(s));
@@ -371,7 +373,18 @@ test("a failed re-plan keeps the applied batches and the run passes", async () =
 
 test("a re-plan skips the one-time Setup stage", async () => {
   const SETUP = stage("setup", { id: "setup", defaultKey: "refactor-setup", runOnce: true });
-  const { state, deps, opts } = fakeRun({ plan: TODO("R1") });
+  const { state, deps, opts } = fakeRun({ plan: AREA("R1") });
   await runRefactorBatches(config([SETUP, PLAN, SNAP, WRITE, APPLY, TEST, CHECK]), deps, opts);
   assert.equal(state.ran.filter((id) => id === "setup").length, 1);
+});
+
+test("a plan without areas never re-plans, and a run re-plans at most three times", async () => {
+  const flat = fakeRun({ plan: TODO("R1") });
+  const out = await runRefactorBatches(config(ALL), flat.deps, flat.opts);
+  assert.equal(flat.state.plans, 1);
+  assert.equal(out.statusSummary, "1 batch applied (R1)");
+  const many = fakeRun({ plan: AREA("R1"), replans: [REPLAN("R2"), REPLAN("R3"), REPLAN("R4"), REPLAN("R5")] });
+  const all = await runRefactorBatches(config(ALL), many.deps, { ...many.opts, maxBatches: 20 });
+  assert.equal(many.state.plans, 4, "the first plan and three re-plans");
+  assert.equal(all.statusSummary, "4 batches applied (R1, R2, R3, R4)");
 });

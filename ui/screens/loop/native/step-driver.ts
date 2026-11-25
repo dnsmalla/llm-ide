@@ -102,8 +102,22 @@ function markBlocked(r: StepRecipe, plan: string, id: string, reason: string, an
   return lines.join("\n");
 }
 
+/** Re-plans one run may make (each opens at most one more area). */
+const MAX_REPLANS = 3;
+
 /** The planner's end-of-roadmap marker, in the plan's first lines: nothing is left to re-plan. */
 const ALL_DONE = /^All areas are done\./m;
+
+/** The plan with step `id` set to `status` (any current status), and `line` added under its header when given. */
+function setStatus(r: StepRecipe, plan: string, id: string, status: string, line?: string): string {
+  const header = headerOf(r);
+  const lines = plan.split("\n");
+  const at = lines.findIndex((l) => header.exec(l)?.[1] === id);
+  if (at < 0) return plan;
+  lines[at] = lines[at].replace(/\(status:\s*\w+\)/, `(status: ${status})`);
+  if (line) lines.splice(at + 1, 0, line);
+  return lines.join("\n");
+}
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
@@ -176,14 +190,18 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
   // Planning stages again for a re-plan: the one-time dependency Setup and any runOnce stage already ran in this run.
   const replanStages = planning.filter((s) => !s.runOnce && !isSetupStage(s));
   let replanned = false;
+  let replans = 0;
 
   try {
   for (let k = 1; ; k++) {
     const planText = await opts.readPlan();
     if (planText === null) { note = "the plan file is missing after planning"; failed = true; break; }
     let todo = nextTodo(r, planText);
-    if (!todo && r.replanWhenDone && !replanned && applied.length + skipped.length > 0 && k <= max && !exhausted(remaining(costUsd)) && !ALL_DONE.test(planText.split("\n").slice(0, 6).join("\n"))) {
+    // Only a plan divided into areas has a next area to open, and at most MAX_REPLANS times a run: a planner that
+    // keeps finding one more batch must not re-plan (graph, test map, planner) until the step limit.
+    if (!todo && r.replanWhenDone && !replanned && replans < MAX_REPLANS && /^- Area:/m.test(planText) && applied.length + skipped.length > 0 && k <= max && !exhausted(remaining(costUsd)) && !ALL_DONE.test(planText.split("\n").slice(0, 6).join("\n"))) {
       replanned = true;
+      replans += 1;
       opts.log(`— re-planning: the plan has no todo ${r.nouns} left —`);
       await pauseBetween(deps, config.stageDelaySeconds);
       const re = await runNativeLoop({ ...config, ...remaining(costUsd), stages: replanStages }, deps);
@@ -226,6 +244,14 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
       redBefore = false;
       if (status === "done") { applied.push(todo.id); continue; }
       if (status === "skipped") { skipped.push(todo.id); continue; }
+      // Independent steps: a run that passed without marking its step (an edited prompt, a forgetful agent) must not
+      // stall every later run on the same step. It is written off as skipped and the run goes on.
+      if (r.blockById && status === "todo") {
+        const now = await opts.readPlan();
+        if (now !== null) await opts.writePlan(setStatus(r, now, todo.id, "skipped", "- Skipped: its run passed but did not mark the step"));
+        skipped.push(todo.id);
+        continue;
+      }
       // The batch passed but the plan does not say it was applied: stop rather than apply the same batch again.
       note = `${todo.id} is still ${status ?? "missing"} after its run; stopped`;
       failed = true;
@@ -260,7 +286,7 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
       // The plan lives in a state folder the restore does not revert: the agent may already have marked the step done.
       if (r.blockById) {
         const now = await opts.readPlan();
-        if (now !== null) await opts.writePlan(now.split("\n").map((line) => { const m = headerOf(r).exec(line); return m && m[1] === todo.id ? line.replace(/\(status:\s*\w+\)/, "(status: todo)") : line; }).join("\n"));
+        if (now !== null) await opts.writePlan(setStatus(r, now, todo.id, "todo"));
       }
       opts.log(`⊘ ${todo.id} rolled back to before the ${r.noun} and left todo: ${stageName} — ${reason}`);
       break;

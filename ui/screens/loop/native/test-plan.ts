@@ -58,7 +58,7 @@ const vendored = (path: string) => path.split("/").some((seg) => SKIP.has(seg));
 const areaOf = (path: string) => path.split("/").slice(0, -1).slice(0, 2).join("/") || "(root)";
 
 /** Merges the map into the previous plan (and finished-steps file); see the module header for the rules. */
-export function mergeTestPlan(previousText: string | null, map: TestMap, structure: TestStructure, doneText: string | null = null): TestPlanText {
+export function mergeTestPlan(previousText: string | null, map: TestMap, structure: TestStructure, doneText: string | null = null, moveFinished = true): TestPlanText {
   const prev = parse(previousText);
   const finished = parse(doneText);
   const known = new Map<string, Step>();
@@ -102,8 +102,14 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
   const todoAll = [...keep.filter((s) => s.status === "todo"), ...fresh];
   const score = new Map<string, number>();
   for (const s of todoAll) score.set(areaOf(s.path), (score.get(areaOf(s.path)) ?? 0) + 1 + (untested(s.path)?.fanIn ?? 0));
-  todoAll.sort((a, b) => (score.get(areaOf(b.path))! - score.get(areaOf(a.path))!) || areaOf(a.path).localeCompare(areaOf(b.path))
-    || (untested(b.path)?.fanIn ?? 0) - (untested(a.path)?.fanIn ?? 0) || a.path.localeCompare(b.path));
+  // An area that already has numbered steps keeps its place (its lowest ID), so finishing steps never lets another
+  // area overtake it; areas not started yet follow, ranked by score.
+  const started = new Map<string, number>();
+  for (const s of known.values()) started.set(areaOf(s.path), Math.min(started.get(areaOf(s.path)) ?? Infinity, s.id));
+  const rank = (path: string) => started.get(areaOf(path)) ?? Infinity;
+  const idOf = (s: Step) => (s.id === 0 ? Infinity : s.id);
+  todoAll.sort((a, b) => (rank(a.path) - rank(b.path) || 0) || (score.get(areaOf(b.path))! - score.get(areaOf(a.path))!) || areaOf(a.path).localeCompare(areaOf(b.path))
+    || (idOf(a) - idOf(b) || 0) || (untested(b.path)?.fanIn ?? 0) - (untested(a.path)?.fanIn ?? 0) || a.path.localeCompare(b.path));
   refactorFirst.sort((a, b) => b.loc - a.loc || a.path.localeCompare(b.path));
 
   const ended = keep.filter((s) => s.status !== "todo").sort((a, b) => a.id - b.id);
@@ -124,8 +130,9 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
   let room = LIVE_TODO_STEPS - todoAll.filter((s) => s.id !== 0).length;
   const listed = over ? todoAll.filter((s) => s.id !== 0 || room-- > 0) : todoAll;
   for (const s of listed) if (s.id === 0) s.id = nextId++;
-  const out = build(listed, over ? [] : ended);
-  const moved = over ? ended : [];
+  // Finished steps move out only at planning time: mid-run the driver must still find the step in flight in the live plan.
+  const moved = over && moveFinished ? ended : [];
+  const out = build(listed, moved.length ? [] : ended);
   const allDone = [...finished.steps, ...moved];
   const done = allDone.length ? ["# Test plan — finished steps", "", ...allDone.flatMap(render)] : null;
   return {
@@ -140,9 +147,9 @@ async function readText(fs: TestMapFs, path: string): Promise<string | null> {
 }
 
 /** Reads the previous plan, merges the map into it and writes TEST-PLAN.md (and TEST-PLAN-DONE.md when it holds steps). */
-export async function writeTestPlan(fs: TestMapFs, repoPrefix: string, map: TestMap, structure: TestStructure): Promise<TestPlanInfo> {
+export async function writeTestPlan(fs: TestMapFs, repoPrefix: string, map: TestMap, structure: TestStructure, moveFinished = true): Promise<TestPlanInfo> {
   const at = (p: string) => (repoPrefix ? `${repoPrefix}/${p}` : p);
-  const merged = mergeTestPlan(await readText(fs, at(TEST_PLAN_PATH)), map, structure, await readText(fs, at(TEST_PLAN_DONE_PATH)));
+  const merged = mergeTestPlan(await readText(fs, at(TEST_PLAN_PATH)), map, structure, await readText(fs, at(TEST_PLAN_DONE_PATH)), moveFinished);
   await ensureDir(fs, at(TEST_PLAN_PATH).split("/").slice(0, -1).join("/"));
   await fs.write(at(TEST_PLAN_PATH), merged.plan, { expected_hash: null, force: true });
   if (merged.done !== null) await fs.write(at(TEST_PLAN_DONE_PATH), merged.done, { expected_hash: null, force: true });

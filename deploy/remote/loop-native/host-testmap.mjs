@@ -5,7 +5,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { detectTestStructure, writeTestStructure, buildTestMap, writeTestMap, parseTestResults, ledgerDiff, readLedger, writeLedger } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
-import { writeTestPlan } from "./test-plan.ts";
+import { mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 
 const root = path.resolve(process.argv[2] || "");
 const op = process.argv[3];
@@ -30,7 +30,8 @@ if (op === "structure") {
 if (op === "map") {
   const map = await buildTestMap(api, "", structure, "system/loop/refactor/graph/graph-code.json", new Date(), scope);
   // Same as the desktop: the step plan first, so the map can list its todo files.
-  const w = await writeTestMap(api, "", map, await writeTestPlan(api, "", map, structure));
+  // Only the Test loop owns the plan file (argv[5] = "plan"); another loop's scoped map only lists candidates.
+  const w = await writeTestMap(api, "", map, process.argv[5] === "plan" ? await writeTestPlan(api, "", map, structure) : mergeTestPlan(null, map, structure).info);
   console.log(JSON.stringify({ op, entries: map.entries.length, untested: map.untestedFunctions, tested: map.testedFunctions, md: w.md, json: w.json }));
   process.exit(0);
 }

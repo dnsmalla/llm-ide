@@ -143,11 +143,12 @@ test("three blocked steps in a row stop the run and it does not pass", async () 
   assert.equal(nextTodo(TEST_RECIPE, st.plan).id, "T4");
 });
 
-test("a step still todo after its run stops the run", async () => {
-  const { deps, opts } = fake(T("T1") + T("T2"), { leave: ["T1"] });
+test("a step its run passed but did not mark is written off as skipped, and the run goes on", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"), { leave: ["T1"] });
   const out = await runTestSteps(cfg(), deps, opts);
-  assert.equal(out.passed, false);
-  assert.match(out.statusSummary, /T1 is still todo after its run; stopped/);
+  assert.equal(out.passed, true);
+  assert.equal(out.statusSummary, "1 step done (T2); T1 skipped");
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: skipped\)\n- Skipped: its run passed but did not mark the step/);
 });
 
 test("a loop with Test Write turned off runs as one plain loop", async () => {
@@ -168,4 +169,25 @@ test("a suite that was already red leaves the failing step todo and ends the run
   assert.match(out.statusSummary, /T1 rolled back and left todo/);
   assert.match(st.plan, /### T1 a\/T1\.py \(status: todo\)/, "the agent's done mark is undone");
   assert.equal(st.ran.filter((i) => i === "write").length, 1, "no further step is tried");
+});
+
+test("mid-run nothing moves to the finished file, so the step in flight stays in the live plan", () => {
+  const files = Array.from({ length: 70 }, (_, i) => entry(`a/f${String(i).padStart(3, "0")}.py`));
+  const first = mergeTestPlan(null, map(files), structure);
+  const id = heads(first.plan)[0].split(" ")[0];
+  const marked = first.plan.replace(new RegExp(`### ${id} (\\S+) \\(status: todo\\)`), `### ${id} $1 (status: done)`);
+  const during = mergeTestPlan(marked, map(files), structure, first.done, false);
+  assert.match(during.plan, new RegExp(`### ${id} \\S+ \\(status: done\\)`), "Test Map Check keeps the step where the driver reads it");
+  const planning = mergeTestPlan(marked, map(files), structure, first.done);
+  assert.ok(!planning.plan.includes(`### ${id} `) && planning.done.includes(`### ${id} `), "the next planning pass moves it out");
+});
+
+test("an area that was started keeps its place while its steps are finished", () => {
+  const files = [...["a1", "a2", "a3", "a4", "a5"].map((n) => entry(`src/a/${n}.py`)), ...["b1", "b2", "b3", "b4"].map((n) => entry(`src/b/${n}.py`))];
+  let plan = mergeTestPlan(null, map(files), structure).plan;
+  for (let i = 0; i < 3; i++) {
+    const [id, path] = heads(plan).find((h) => h.endsWith(" todo")).split(" ");
+    assert.match(path, /^src\/a\//, "area a is finished before area b starts");
+    plan = mergeTestPlan(plan.replace(`### ${id} ${path} (status: todo)`, `### ${id} ${path} (status: done)`), map(files), structure).plan;
+  }
 });

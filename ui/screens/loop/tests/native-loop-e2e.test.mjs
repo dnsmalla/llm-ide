@@ -330,8 +330,8 @@ test("two batches are both applied in one Refactoring run, each with its own bas
   const summary = outcome.stages.map((o) => `${o.ok ? "ok  " : "FAIL"} ${o.stage.name}`).join("\n");
   if (DISCOVER) console.log(`--- two batches: ${outcome.statusSummary}\n${summary}\n--- log ---\n${log.join("\n")}`);
   assert.equal(outcome.passed, true, `${outcome.statusSummary}\n${summary}\n--- log tail ---\n${log.slice(-25).join("\n")}`);
-  assert.match(outcome.statusSummary, /^2 batches applied \(R1, R2\)(; plan complete: no todo batches left)?( · |$)/);
-  assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/refactor-planner"], "the plan ran out, so the planner ran once more");
+  assert.match(outcome.statusSummary, /^2 batches applied \(R1, R2\)( · |$)/);
+  assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"]);
   const plan = fs.readFileSync(path.join(worktree, PLAN_REL), "utf8");
   assert.match(plan, /### R1 .*\(status: done\)/);
   assert.match(plan, /### R2 .*\(status: done\)/);

@@ -8,7 +8,7 @@ import type { CoreClient } from "../../shell/core";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
-import { TEST_PLAN_PATH, writeTestPlan } from "./test-plan.ts";
+import { TEST_PLAN_PATH, mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
 import { headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
@@ -211,6 +211,8 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
   parts.push(...runCommandLines(ctx.runCommand));
+  // The person's task is not the plan's next step: marking one would hide a file that was never tested.
+  if (ctx.runCommand && s.skillId === "skills/test-gap-writer") parts.push("For this run, take no step from the test plan and do not edit the plan.");
   const inputPath = target.inputPath ?? "";
   const scoped = inputPath !== "" && INPUT_PATH_SKILLS.has(s.skillId);
   let targetPath = scoped && s.skillId === "skills/refactor-planner" ? inputPath : s.targetPath;
@@ -373,8 +375,13 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
     }
   }
   const map = await buildTestMap(ctx.fs, prefix, structure, graphPath, new Date(), target.inputPath ?? "");
-  // The step plan is written by code right after the map (the Test Write stage works one plan step at a time).
-  const plan = await writeTestPlan(ctx.fs, prefix, map, structure);
+  // The Test loop's step plan is written by code right after the map (Test Write works one plan step at a time).
+  // Only the Test loop owns the file: Refactoring's map is scoped to its own Input, and merging that would drop the
+  // Test loop's other steps, so it only computes the candidate list. Mid-run (Test Map Check) nothing is moved to the
+  // finished file, or the step in flight would leave the plan the driver reads.
+  const plan = target.defaultKey === "test"
+    ? await writeTestPlan(ctx.fs, prefix, map, structure, s.defaultKey !== "test-map-check")
+    : mergeTestPlan(null, map, structure).info;
   const writes = await writeTestMap(ctx.fs, prefix, map, plan);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, ...map.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
