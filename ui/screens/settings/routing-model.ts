@@ -209,6 +209,8 @@ export interface RoutingState {
   notice: string | null;
   /** warning when the server dropped an entry or a role now runs the default. */
   noticeKind: "info" | "warning";
+  /** A Default/Standard choice not saved yet: it is a change even when the table itself is unchanged, so Save stays on. */
+  pendingDecision: boolean;
 }
 
 export function isDirty(loaded: RoutingTiers | null, draft: RoutingDraft | null): boolean {
@@ -247,7 +249,7 @@ export class RoutingModel extends Store<RoutingState> {
   #declined: Set<string>;
 
   constructor(client: CoreClient, storage: Storage | null = defaultStorage()) {
-    super({ phase: "idle", loaded: null, draft: null, saving: false, error: null, notice: null, noticeKind: "info" });
+    super({ phase: "idle", loaded: null, draft: null, saving: false, error: null, notice: null, noticeKind: "info", pendingDecision: false });
     this.#client = client;
     this.#storage = storage;
     this.#persisted = readDeclined(storage);
@@ -258,6 +260,10 @@ export class RoutingModel extends Store<RoutingState> {
     if (!PRESELECT_ROLES.includes(role)) return;
     if (declined) this.#declined.add(role);
     else this.#declined.delete(role);
+  }
+
+  #pending(): boolean {
+    return this.#declined.size !== this.#persisted.size || [...this.#declined].some((r) => !this.#persisted.has(r));
   }
 
   /** Called once a save succeeded: only then is a Default choice a decision worth remembering. */
@@ -286,7 +292,7 @@ export class RoutingModel extends Store<RoutingState> {
         this.set({ phase: "ready", loaded });
         return;
       }
-      this.set({ phase: "ready", loaded, draft: draftFromLoaded(loaded, this.#declined) });
+      this.set({ phase: "ready", loaded, draft: draftFromLoaded(loaded, this.#declined), pendingDecision: this.#pending() });
     } catch (e) {
       if (gen !== this.#generation) return;
       this.set({ phase: this.getState().loaded ? "ready" : "failed", error: describeError(e) });
@@ -312,14 +318,15 @@ export class RoutingModel extends Store<RoutingState> {
     else delete features[role];
     // An explicit Default must outlive Save and reload: without this mark the reload would preselect Standard again.
     this.#setDeclined(role, !tier);
-    this.set({ draft: { tiers: d.tiers, features }, notice: null });
+    this.set({ draft: { tiers: d.tiers, features }, notice: null, pendingDecision: this.#pending() });
   }
 
   /** Back to the saved table, with the same preselection a fresh load shows, so a later focus refresh sees no edits. */
   revert(): void {
     const l = this.getState().loaded;
     this.#declined = new Set(this.#persisted);
-    if (l) this.set({ draft: draftFromLoaded(l, this.#declined), error: null, notice: null });
+    if (l) this.set({ draft: draftFromLoaded(l, this.#declined), error: null, notice: null, pendingDecision: false });
+    else this.set({ pendingDecision: false });
   }
 
   async save(): Promise<RoutingSaveResult | null> {
@@ -343,7 +350,7 @@ export class RoutingModel extends Store<RoutingState> {
       const roleText = roles.map(([role, tier]) => `${roleLabel(role)} now uses the default because ${tierLabel(tier)} is not set.`);
       const notice = [head, ...roleText].join(" ");
       this.#commitDeclined();
-      this.set({ saving: false, notice, noticeKind: r.dropped.length > 0 ? "warning" : "info" });
+      this.set({ saving: false, notice, noticeKind: r.dropped.length > 0 ? "warning" : "info", pendingDecision: false });
       await this.load();
       return r;
     } catch (e) {

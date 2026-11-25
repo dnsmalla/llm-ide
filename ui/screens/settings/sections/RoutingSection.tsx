@@ -33,7 +33,7 @@ export default function RoutingSection() {
   }, [chosenProviders, modelLists]);
   const setProvider = (tier: string, current: TierChoice | undefined, provider: string) =>
     routing.setTier(tier, provider ? { provider, model: current && current.provider === provider ? current.model : "" } : null);
-  const dirty = isDirty(r.loaded, r.draft);
+  const dirty = isDirty(r.loaded, r.draft) || r.pendingDecision;
   const settings = p.catalog?.settings;
 
   return (

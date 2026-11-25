@@ -264,6 +264,28 @@ test("routing: Default then Revert preselects the role again and stores nothing;
   assert.deepEqual(JSON.parse(store.getItem("llmide.routing.declinedPreselect")!), ["autoTasks"]);
 });
 
+test("routing: Default for the last preselected role leaves the table unchanged, so the unsaved choice itself keeps Save on", async () => {
+  const store = memoryStorage();
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
+  const m = new RoutingModel(client, store);
+  await m.load();
+  assert.equal(m.getState().pendingDecision, false);
+  m.setRole("autoTasks", null);
+  const s = m.getState();
+  assert.equal(isDirty(s.loaded, s.draft), false, "the table equals what is saved");
+  assert.equal(s.pendingDecision, true, "the choice is not saved yet");
+  await m.save();
+  assert.equal(m.getState().pendingDecision, false);
+  assert.deepEqual(JSON.parse(store.getItem("llmide.routing.declinedPreselect")!), ["autoTasks"]);
+  const restarted = new RoutingModel(client, store);
+  await restarted.load();
+  assert.equal(restarted.getState().draft!.features.autoTasks, undefined, "still Default after a restart");
+  restarted.setRole("autoTasks", "standard");
+  assert.equal(restarted.getState().pendingDecision, true, "taking the Default back is an unsaved choice too");
+  restarted.revert();
+  assert.equal(restarted.getState().pendingDecision, false, "Revert drops it");
+});
+
 test("routing: removing a tier resets roles that used it; invalid drafts never reach the network", async () => {
   const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
   const m = new RoutingModel(client);
