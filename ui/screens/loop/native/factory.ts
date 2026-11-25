@@ -187,11 +187,13 @@ export const REFACTOR_MOVE_SKILLS: ReadonlySet<string> = new Set(["skills/refact
 export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[], created: readonly string[] = [], importOnly: readonly string[] = []): string[] {
   const skill = stage && stage.kind === "skill" ? stage.skillId : null;
   if (!isFactoryLoop(loop)) {
-    if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return [...paths];
+    // The Test loop's step plan is its own bookkeeping (never in a diff or a merge request), not a test: Test Write
+    // marks its step there, and a repair of that stage may correct the mark. llm-doc/loop/test/ is otherwise a
+    // protected "test" folder, and an edit there halted the run.
+    const planEdit = (p: string) => loop.defaultKey === "test" && (p === TEST_PLAN_PATH || p.endsWith(`/${TEST_PLAN_PATH}`));
+    if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return paths.filter((p) => !planEdit(p));
     // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
     const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
-    // The Test Write step marks its own step in the plan (llm-doc/loop/test/ is a protected "test" folder otherwise).
-    const planEdit = (p: string) => skill === "skills/test-gap-writer" && (p === TEST_PLAN_PATH || p.endsWith(`/${TEST_PLAN_PATH}`));
     return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p) && !planEdit(p));
   }
   if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {

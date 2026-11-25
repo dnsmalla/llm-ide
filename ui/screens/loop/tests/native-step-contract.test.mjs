@@ -198,3 +198,18 @@ test("plan Files keep extensionless files and parentheses inside a path", async 
   assert.deepEqual(planFiles("`Makefile`, `Dockerfile` (new), `app/(auth)/page.tsx`"), ["Makefile", "Dockerfile", "app/(auth)/page.tsx"]);
   assert.deepEqual(planFiles("`a.py` (moved from b.py)"), ["a.py"]);
 });
+
+test("test-gap-writer: the plan mode's Covered line names its step before the path", async () => {
+  const exists = async (p) => p === "src/a.py";
+  for (const reply of ["Covered: T3 src/a.py — totals", "Covered: T12 `src/a.py` — totals", "Covered: none — T3 every function is trivial", "Covered: src/a.py — totals"]) {
+    assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply, exists })), null, reply);
+  }
+  assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply: "Covered: T3 src/missing.py — x", exists })), "Covered names src/missing.py but that file does not exist");
+});
+
+test("test-gap-writer: a Covered line set in bold or code is still read", async () => {
+  const exists = async (p) => p === "src/a.py";
+  for (const reply of ["**Covered: T2 src/a.py — totals.**", "**Covered:** T2 src/a.py — totals", "`Covered: src/a.py` — totals", "__Covered:__ none — T2 trivial"]) {
+    assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply, exists })), null, reply);
+  }
+});

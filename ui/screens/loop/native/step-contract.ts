@@ -26,7 +26,9 @@ const APPLY = "skills/refactor-apply";
 const CONFORM = "skills/refactor-conform";
 
 const BATCH_HEADER = /^###\s+R(\d+)\b.*\(status:\s*(todo|done|skipped|blocked)\)\s*$/;
-const COVERED = /^\s*Covered:\s*(\S+)/;
+// The Test loop's plan mode names its step first: `Covered: T3 src/a.py — x`, `Covered: none — T3 trivial`.
+// Agents often set the whole line, or its label, in bold or code: `**Covered: T3 src/a.py — x**`.
+const COVERED = /^\s*[*_`]*Covered:[*_`]*\s*(?:T\d+\s+)?(\S+)/;
 const APPLIED = /Applied:\s*R(\d+)/;
 const CONFORMED = /Conformed:\s*R\d+/;
 

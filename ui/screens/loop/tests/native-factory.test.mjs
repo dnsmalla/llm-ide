@@ -476,3 +476,16 @@ test("a diff that contains a code fence cannot close the review's data block", a
   assert.equal(lines.slice(2, -1).join("\n"), diff);
   assert.equal(reviewDiffSection({ text: "+a", truncated: false }).split("\n")[1], "```diff", "a plain diff keeps the usual fence");
 });
+
+test("the Test loop's step plan is bookkeeping: a skill call or a repair may edit it, in no other loop", async () => {
+  const f = await import("../native/factory.ts");
+  const plan = "llm-doc/loop/test/TEST-PLAN.md";
+  const wt = `system/loop-worktrees/r1/${plan}`;
+  const testLoop = { defaultKey: "test", config: { stages: [] } };
+  const refactorLoop = { defaultKey: "refactor", config: { stages: [] } };
+  const writer = { kind: "skill", skillId: "skills/test-gap-writer" };
+  assert.deepEqual(f.guardedPaths(testLoop, null, [plan, wt, "tests/a.test.ts"]), ["tests/a.test.ts"], "a repair (no stage)");
+  assert.deepEqual(f.guardedPaths(testLoop, writer, [plan, "src/a.ts"]), ["src/a.ts"], "the Test Write call");
+  assert.deepEqual(f.guardedPaths(refactorLoop, null, [plan]), [plan], "another loop's repair may not");
+  assert.deepEqual(f.guardedPaths(testLoop, null, ["llm-doc/loop/test/TEST-MAP.md"]), ["llm-doc/loop/test/TEST-MAP.md"], "only the plan file");
+});

@@ -301,6 +301,9 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     const blockId = r.blockById ? todo.id : nextTodo(r, current)?.id;
     if (current !== null && blockId) await opts.writePlan(markBlocked(r, current, blockId, `${stageName} — ${reason}`, r.blockById));
     opts.log(`⊘ ${todo.id} rolled back to before the ${r.noun}: ${stageName} — ${reason}`);
+    // A halt (a policy violation the run could not undo) stays set for the rest of the run: every later step would
+    // end at once with the same reason and be blocked without having run. The run ends here.
+    if (sub.blocked) break;
     if (blockedStreak++ + 1 < r.blockedStreak) continue;
     if (r.blockedStreak > 0) note = `${r.blockedStreak} ${r.nouns} in a row were blocked; stopped`;
     break;
