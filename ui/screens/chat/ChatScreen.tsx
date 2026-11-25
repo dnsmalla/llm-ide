@@ -563,6 +563,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               onRefine={(title) => { controller.setView(activeId, { draft: refineSeed(title) }); setRefineNonce((n) => n + 1); }}
               onExecute={(turn) => {
                 if (sendBlock || readOnly) return; // the same reason the composer shows (no project, ended chat, no permission)
+                delete autoPicked.current[activeId]; // sent: the model that runs turn 1 is never swapped afterwards
                 setCurrent({ mode: "execute" });
                 setPlanRunChat(activeId);
                 void (busy ? Promise.resolve() : ensureBypass()).then(() => controller.send(activeId, turn.text, { ...turn.options, model: current.model, provider: current.provider, permissionMode: permission, effort: turnEffort(effortPick, effortLevels) }));
@@ -592,7 +593,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
                 {memoryOpen ? <Floating anchor={memoryChip.current} placement="above-start" onDismiss={() => setMemoryOpen(false)} role="dialog" aria-label="Session memory" className="chat-popover chat-memory-popover" onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setMemoryOpen(false); } }}>{state.memory && <p className="chat-muted">{state.memory.sessionFacts.toLocaleString()} session fact{state.memory.sessionFacts === 1 ? "" : "s"} from {state.memory.chars.toLocaleString()} characters (~{state.memory.approxTokens.toLocaleString()} tokens) are injected into this chat.</p>}<button type="button" className="chat-btn" onClick={() => void addMemoryToDraft()}>Add memory to prompt</button>
                   <button type="button" className="chat-btn" onClick={() => { setMemoryOpen(false); setProjectMemoryOpen(true); }}>Project memory</button></Floating> : null}
               </>}
-              onSend={(text, extra) => { if (!busy) setPlanRunChat(null); void (busy ? Promise.resolve() : ensureBypass()).then(() => controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) })); touchSession(activeId); }}
+              onSend={(text, extra) => { delete autoPicked.current[activeId]; /* sent: the model that runs turn 1 is never swapped afterwards */ if (!busy) setPlanRunChat(null); void (busy ? Promise.resolve() : ensureBypass()).then(() => controller.send(activeId, text, { mode: current.mode || AUTO_MODE, model: current.model, provider: current.provider, permissionMode: permission, skills: extra?.skills, attachments: extra?.attachments, effort: turnEffort(effortPick, effortLevels) })); touchSession(activeId); }}
               onStop={() => controller.abort(activeId)} onDropQueued={(i) => controller.dropQueued(activeId, i)} onAttach={host.attachFiles} disabledReason={sendBlock}
             />
           </>
