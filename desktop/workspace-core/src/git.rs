@@ -59,8 +59,10 @@ fn read_config(path: &Path) -> R<Option<Vec<u8>>> {
     Ok(Some(b))
 }
 
-/// Validates `<dir>/config` and `<dir>/config.worktree` (git reads the latter with
-/// `extensions.worktreeConfig`, which the allowlist forbids; it is scanned regardless).
+/// Validates `<dir>/config` and `<dir>/config.worktree`. Git reads the latter when `extensions.worktreeConfig`
+/// is on, which the allowlist accepts ONLY because this scan holds `config.worktree` to the same allowlist,
+/// unconditionally (also when the key is absent, the stricter choice). `check_repo_opts` calls this for the
+/// guarded git dir and for the common dir, so the main and the linked worktree's file are both covered.
 fn check_git_dir(dir: &Path, allow_worktree: bool, allow_lfs: bool) -> R<Option<String>> {
     let mut wt = None;
     for name in ["config", "config.worktree"] {
@@ -1155,7 +1157,6 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
             ("core.worktree", b"[core]\n\tworktree = /\n".to_vec()),
             ("submodule.recurse", b"[submodule]\n\trecurse = true\n".to_vec()),
             ("protocol.ext.allow", b"[protocol \"ext\"]\n\tallow = always\n".to_vec()),
-            ("extensions.worktreeconfig", b"[extensions]\n\tworktreeConfig = true\n".to_vec()),
             ("alias", format!("[alias]\n\tx = !touch {m}\n").into_bytes()),
             ("http", b"[http]\n\tproxy = http://evil\n".to_vec()),
             ("merge driver", format!("[merge \"x\"]\n\tdriver = touch {m}\n").into_bytes()),
@@ -1215,6 +1216,56 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         g(&root, &["init", "-q"]);
         fs::write(root.join(".git/config.worktree"), "[core]\n\tfsmonitor = touch x\n").unwrap();
         assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config");
+    }
+
+    fn worktree_config_repo(name: &str) -> RemoveOnDrop {
+        let root = scratch(name);
+        g(&root, &["init", "-q"]);
+        cfg_append(&root, b"[extensions]\n\tworktreeConfig = true\n");
+        root
+    }
+
+    #[test]
+    fn worktree_config_extension_is_accepted_with_a_clean_or_missing_config_worktree() {
+        if !have_git() {
+            return;
+        }
+        let root = worktree_config_repo("wtcfg-ok");
+        status(&root).unwrap();
+        fs::write(root.join(".git/config.worktree"), "[core]\n\tsparsecheckout = true\n").unwrap();
+        status(&root).unwrap();
+    }
+
+    #[test]
+    fn worktree_config_extension_still_refuses_a_bad_config_worktree() {
+        if !have_git() {
+            return;
+        }
+        for bad in ["[core]\n\tfsmonitor = touch x\n", "[core]\n\tsshcommand = x\n", "[filter \"x\"]\n\tclean = x\n", "[core]\n\tworktree = /\n"] {
+            let root = worktree_config_repo("wtcfg-bad");
+            fs::write(root.join(".git/config.worktree"), bad).unwrap();
+            assert_eq!(status(&root).unwrap_err().code, "untrusted_repo_config", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_linked_worktrees_config_worktree_is_scanned() {
+        if !have_git() {
+            return;
+        }
+        let main = worktree_config_repo("wtcfg-main");
+        fs::write(main.join("f"), "x").unwrap();
+        g(&main, &["add", "."]);
+        g(&main, &["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "i"]);
+        let wt = scratch("wtcfg-linked");
+        let _ = fs::remove_dir_all(&wt);
+        g(&main, &["worktree", "add", "-q", "-b", "w", crate::paths::plain_path(&wt).to_str().unwrap()]);
+        status(&wt).unwrap();
+        let gd = fs::read_dir(main.join(".git/worktrees")).unwrap().next().unwrap().unwrap().path();
+        fs::write(gd.join("config.worktree"), "[core]\n\thookspath = x\n\tfsmonitor = touch x\n").unwrap();
+        assert_eq!(status(&wt).unwrap_err().code, "untrusted_repo_config");
+        fs::write(gd.join("config.worktree"), "[core]\n\tsparsecheckout = true\n").unwrap();
+        status(&wt).unwrap();
     }
 
     #[test]

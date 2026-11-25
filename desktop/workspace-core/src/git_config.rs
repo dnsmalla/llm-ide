@@ -28,7 +28,10 @@ const ALLOWED: &[(&str, bool, &[&str])] = &[
             "hookspath",
         ],
     ),
-    ("extensions", false, &["objectformat"]),
+    // `worktreeconfig` makes git also read `config.worktree`. That is safe only because `git::check_git_dir` scans
+    // `config.worktree` through this same allowlist for every git dir it validates (the repo's own, the linked
+    // worktree's and the common one), whether or not the key is set. Do not add a path that skips that scan.
+    ("extensions", false, &["objectformat", "worktreeconfig"]),
     ("user", false, &["name", "email"]),
     ("remote", true, &["url", "pushurl", "fetch", "push", "tagopt", "prune", "prunetags"]),
     // `vscode-merge-base` is a branch name VS Code records; plain data.
@@ -266,6 +269,12 @@ mod tests {
     }
 
     #[test]
+    fn accepts_worktree_config_in_the_config_file() {
+        check_config(b"[extensions]\n\tworktreeConfig = true\n").unwrap();
+        check_config(b"[extensions]\n\tworktreeconfig = false\n").unwrap();
+    }
+
+    #[test]
     fn rejects_everything_unknown() {
         for bad in [
             "[core]\n\tfsmonitor = x\n",
@@ -288,7 +297,8 @@ mod tests {
             "[submodule]\n\trecurse = true\n",
             "[submodule \"s\"]\n\tupdate = !x\n",
             "[protocol \"ext\"]\n\tallow = always\n",
-            "[extensions]\n\tworktreeconfig = true\n",
+            "[extensions]\n\trelativeworktrees = true\n",
+            "[extensions]\n\tpreciousobjects = true\n",
             "[remote \"o\"]\n\tuploadpack = x\n",
             "[remote \"o\"]\n\tvcs = x\n",
             "[core \"sub\"]\n\tbare = false\n",

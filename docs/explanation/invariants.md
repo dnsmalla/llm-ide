@@ -543,6 +543,7 @@ not the repo-kb MOVE above and it never writes to the old folder. It runs only a
 - **Do NOT accept a command string from the webview** or expose `run_command_at`/`run_command_cancellable` as a Loop entry point. `run_command_cancellable` is Self-Heal's fixed-script helper only.
 - **Do NOT approve a command the host did not read and display**, and do not truncate the approved command set in the dialog. If it is too large to show, refuse rather than approve unseen commands.
 - **Do NOT blanket-approve every shell command in every project.** A grant is scoped to the shown hashes, loop/stage, canonical folder and expiry; a changed command or another loop/folder is refused.
+- **`extensions.worktreeConfig` is accepted only because every `config.worktree` is scanned.** `git::check_git_dir` runs `config` and `config.worktree` of each validated git dir (the guarded one and the common one, so the main and the linked worktree's file) through the same `git_config.rs` allowlist, whether or not the key is set. Do not accept the key on any path that skips that scan; a refused key inside a `config.worktree` is `untrusted_repo_config`. Pinned by `git::tests::worktree_config_*`, `a_linked_worktrees_config_worktree_is_scanned`.
 
 ## Loop self-improvement (`extension/kb/loop-improve.mjs`, `ui/screens/loop/native/improve/`)
 
