@@ -862,6 +862,8 @@ pub fn remove_in(info: &RunInfo) -> Result<(), String> {
         return Err("that is not this run's worktree folder".into());
     }
     let repo = PathBuf::from(&info.repo);
+    // Resolved before the folder goes: once it is gone the registered spelling can no longer be found.
+    let resolved = std::fs::canonicalize(&wt).ok();
     // The branch to delete is the one the worktree is really on (read before it goes), never a name guessed from the id:
     // a detached or foreign HEAD deletes no branch. With the folder already gone, only the run's own recorded branch.
     let on = if wt.exists() { git(&wt, &["symbolic-ref", "--quiet", "--short", "HEAD"]).map(text).ok() } else { Some(info.branch.clone()) };
@@ -878,6 +880,9 @@ pub fn remove_in(info: &RunInfo) -> Result<(), String> {
     unregister(&info.run_id);
     forget_project(&info.run_id);
     crate::loop_env_cache::forget_env_use(&wt);
+    if let Some(resolved) = resolved {
+        crate::loop_env_cache::forget_env_use(&resolved);
+    }
     Ok(())
 }
 

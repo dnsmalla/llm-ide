@@ -556,3 +556,36 @@ fn a_worktree_symlinked_parent_does_not_evict_the_cache_entry() {
     assert!(marker.exists(), "the good entry stays");
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[cfg(unix)]
+#[test]
+fn only_an_environment_this_host_prepared_goes_on_path_when_it_is_already_there() {
+    let project = project_with("mkdir -p .venv/bin && printf '#!/bin/sh\\necho prepared\\n' > .venv/bin/envtool && chmod +x .venv/bin/envtool");
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+
+    // A repository that committed its own `.venv/bin/envtool`: present, never approved, never on PATH.
+    let evil = worktree(&project, "evil", "x\n");
+    std::fs::create_dir_all(evil.join(".venv/bin")).unwrap();
+    std::fs::write(evil.join(".venv/bin/envtool"), "#!/bin/sh\necho committed-by-the-repo\n").unwrap();
+    std::fs::set_permissions(evil.join(".venv/bin/envtool"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    assert_eq!(prepare_gated(&project, &evil, "evil", "l1", Some(60), &store, None).unwrap().status, "present");
+    let out = crate::loop_runner::run_command_keyed(&evil, "envtool", Some(30), "k").unwrap();
+    assert_ne!(out.exit_code, Some(0), "an unapproved environment is not on PATH: {out:?}");
+
+    // One this host built: on PATH, and again after a restart (the registry is lost, the marker is not).
+    let a = worktree(&project, "a", "y\n");
+    assert_eq!(prepare_gated(&project, &a, "a", "l1", Some(60), &store, Some(&token)).unwrap().status, "built");
+    assert!(crate::loop_runner::run_command_keyed(&a, "envtool", Some(30), "k").unwrap().stdout.contains("prepared"));
+    forget_env_use(&a);
+    assert_ne!(crate::loop_runner::run_command_keyed(&a, "envtool", Some(30), "k").unwrap().exit_code, Some(0));
+    assert_eq!(prepare_gated(&project, &a, "a", "l1", Some(60), &store, None).unwrap().status, "present");
+    assert!(crate::loop_runner::run_command_keyed(&a, "envtool", Some(30), "k").unwrap().stdout.contains("prepared"), "a resumed run gets it back");
+
+    // The loop stops declaring an envCache: nothing stays registered.
+    write_loop_paths(&project, "true", &[".venv"]);
+    std::fs::write(project.join("system/loop.json"), r#"{"schemaVersion":2,"loops":[{"id":"l1","name":"Factory","config":{"stages":[]}}]}"#).unwrap();
+    assert_eq!(prepare_gated(&project, &a, "a", "l1", Some(60), &store, None).unwrap().status, "none");
+    assert_ne!(crate::loop_runner::run_command_keyed(&a, "envtool", Some(30), "k").unwrap().exit_code, Some(0), "a stale registration is dropped");
+    let _ = std::fs::remove_dir_all(project);
+}

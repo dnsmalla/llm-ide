@@ -666,12 +666,36 @@ pub(crate) fn apply_env(work: &Path, cmd: &mut std::process::Command) {
 /// is part of that approval); it is needed only on a miss, because only a miss runs a command.
 pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<EnvPrepare, String> {
     let prepared = prepare_inner(root, worktree, run_id, loop_id, timeout_secs, store, token)?;
-    if matches!(prepared.status, "present" | "restored" | "built") {
-        if let Some(spec) = read_spec(root, loop_id)? {
+    let spec = read_spec(root, loop_id)?;
+    match (prepared.status, spec) {
+        // Restored or built by this host just now: put it to use, and mark the worktree so a resumed run can again.
+        ("restored" | "built", Some(spec)) => {
+            write_prepared_marker(worktree);
             register_env_use(worktree, &spec);
         }
+        // Already there: only an environment this host prepared (the marker) goes on PATH. A `node_modules/.bin` the
+        // repository itself committed was never approved, so it must not shadow the tools an approved command runs.
+        ("present", Some(spec)) if has_prepared_marker(worktree) => register_env_use(worktree, &spec),
+        _ => forget_env_use(worktree),
     }
     Ok(prepared)
+}
+
+/// Written under `.factory/` (never tracked: the worktree refuses tracked `.factory` entries) when this host restored or
+/// built the environment in a worktree.
+const PREPARED_MARKER: &str = ".factory/env-prepared";
+
+fn write_prepared_marker(worktree: &Path) {
+    let dir = worktree.join(".factory");
+    if std::fs::symlink_metadata(&dir).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        return;
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(worktree.join(PREPARED_MARKER), b"prepared by LLM-IDE\n");
+}
+
+fn has_prepared_marker(worktree: &Path) -> bool {
+    std::fs::symlink_metadata(worktree.join(PREPARED_MARKER)).map(|m| m.is_file()).unwrap_or(false)
 }
 
 fn prepare_inner(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<EnvPrepare, String> {
