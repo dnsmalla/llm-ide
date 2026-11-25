@@ -54,8 +54,30 @@ function testFileFor(path: string, structure: TestStructure): string | null {
 }
 
 const vendored = (path: string) => path.split("/").some((seg) => SKIP.has(seg));
-// Two folder levels: most repositories keep everything under one `src/`, which as a single area would divide nothing.
-const areaOf = (path: string) => path.split("/").slice(0, -1).slice(0, 2).join("/") || "(root)";
+/** A folder with more source files than this is split into its sub-folders as areas of their own. */
+export const AREA_SPLIT = 40;
+
+/**
+ * The area of each path. Two folder levels to start with (most repositories keep everything under one `src/`, which as
+ * a single area would divide nothing), then one level deeper for as long as the folder holds more than AREA_SPLIT
+ * source files, so `ui/screens` with hundreds of files becomes `ui/screens/chat`, `ui/screens/loop`, … The count is
+ * of all source files in the map, tested or not, so finishing steps never changes which area a file is in.
+ */
+function areaIndex(paths: Iterable<string>): (path: string) => string {
+  const dirsOf = (path: string) => path.split("/").slice(0, -1);
+  const count = new Map<string, number>();
+  for (const p of paths) {
+    const dirs = dirsOf(p);
+    for (let d = 1; d <= dirs.length; d++) { const k = dirs.slice(0, d).join("/"); count.set(k, (count.get(k) ?? 0) + 1); }
+  }
+  return (path) => {
+    const dirs = dirsOf(path);
+    if (dirs.length === 0) return "(root)";
+    let d = Math.min(2, dirs.length);
+    while (d < dirs.length && (count.get(dirs.slice(0, d).join("/")) ?? 0) > AREA_SPLIT) d++;
+    return dirs.slice(0, d).join("/");
+  };
+}
 
 /** Merges the map into the previous plan (and finished-steps file); see the module header for the rules. */
 export function mergeTestPlan(previousText: string | null, map: TestMap, structure: TestStructure, doneText: string | null = null, moveFinished = true): TestPlanText {
@@ -73,6 +95,7 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
     else if (e.function !== "*" && !f.fns.includes(e.function)) f.fns.push(e.function);
     files.set(e.path, f);
   }
+  const areaOf = areaIndex(files.keys());
   const untested = (path: string) => { const f = files.get(path); return f !== undefined && !f.tested ? f : null; };
   const eligible = (path: string) => !isTestPath(path) && !isTestFileName(path) && !vendored(path);
 

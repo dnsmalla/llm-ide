@@ -222,3 +222,30 @@ test("the testFiles counter round-trips through the plan, also when the plan is 
   assert.equal(testSuiteExists(T("T1", "done")), true, "no counter: a done step means tests exist");
   assert.equal(testSuiteExists(T("T1")), false);
 });
+
+test("a halted step ends the run: later steps are not blocked without having run", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2") + T("T3"));
+  let halted = null;
+  const run = deps.runStage;
+  deps.runStage = async (s) => { const r = await run(s); if (s.id === "write") halted = "agent touched protected path(s)"; return r; };
+  deps.halt = () => halted;
+  opts.restore = async (t) => { st.restores.push(t); };
+  const out = await runTestSteps(cfg(), deps, opts);
+  assert.equal(out.passed, false);
+  assert.equal(st.ran.filter((i) => i === "write").length, 1);
+  assert.match(st.plan, /### T2 a\/T2\.py \(status: todo\)/, "T2 never ran, so it is still todo");
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)/);
+});
+
+test("a folder with many source files is split into its sub-folders as areas, and that does not change as steps finish", () => {
+  const big = [];
+  for (const sub of ["chat", "loop", "graph"]) for (let i = 0; i < 15; i++) big.push(entry(`ui/screens/${sub}/f${String(i).padStart(2, "0")}.ts`));
+  const small = [entry("web/src/a.ts"), entry("web/src/b.ts")];
+  let plan = mergeTestPlan(null, map([...big, ...small]), structure).plan;
+  const areas = () => [...new Set([...plan.matchAll(/^- Area: (.+)$/gm)].map((m) => m[1]))];
+  assert.deepEqual(areas().sort(), ["ui/screens/chat", "ui/screens/graph", "ui/screens/loop", "web/src"]);
+  // Tested files still count toward the folder's size, so the split holds while the work goes on.
+  const tested = big.map((e, i) => (i < 30 ? { ...e, testedBy: ["t"] } : e));
+  plan = mergeTestPlan(plan, map([...tested, ...small]), structure).plan;
+  assert.ok(areas().every((a) => a.startsWith("ui/screens/") || a === "web/src"), areas().join(", "));
+});
