@@ -265,3 +265,13 @@ test("a step skipped without a file change does not run the suite; one that wrot
   await runTestSteps(cfg({ maxPassesPerRun: 1 }), c.deps, c.opts);
   assert.deepEqual(c.st.ran, ["map", "test", "write", "test", "custom"], "a done step is always checked");
 });
+
+test("a failing new test is never repaired: the step is rolled back and blocked, and no repair agent runs", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
+  let repairs = 0;
+  deps.repair = async () => { repairs += 1; return { ok: true, output: "edited the source until it passed" }; };
+  const out = await runTestSteps(cfg({ maxRepairsPerStage: 3 }), deps, opts);
+  assert.equal(repairs, 0, "a repair could change source or build config to make the test pass");
+  assert.match(out.statusSummary, /1 step done \(T2\); T1 rolled back: /);
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
+});

@@ -34,6 +34,8 @@ export interface StepRecipe {
   baselineStageKey: string | null;
   /** Run the baseline after planning and only to learn whether the suite was already red (see runSteps). */
   baselineAfterPlanning?: boolean;
+  /** Run every step stage with repair off (see runSteps). */
+  noRepair?: boolean;
   /** Skip a step's checks (the stages after its apply skill) when the agent marked it skipped and changed no file. */
   skipChecksWhenSkipped?: boolean;
   /** With baselineAfterPlanning: whether the plan says tests already exist. A red suite that exists stops the run before any step. */
@@ -235,7 +237,10 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     const tree = await opts.checkpoint();
     pending = tree;
     // A later batch retakes the baseline from the tree the previous batch left, so its graph check judges only itself.
-    const stepStages = k === 1 ? batch : [...snapshot, ...batch];
+    // A recipe that only adds files never repairs a failed step: the generic repair agent may change source and build
+    // config until the suite is green, which is exactly what such a step must not do. The step fails, is rolled back
+    // and blocked with the failure as its reason.
+    const stepStages = (k === 1 ? batch : [...snapshot, ...batch]).map((s) => (r.noRepair ? { ...s, allowsRepair: false } : s));
     // A step the agent skipped without writing anything has nothing to check: its Test, map and prune stages (a full
     // suite run each time) are not run. The step's stages are split after the apply skill to find that out.
     const cut = r.skipChecksWhenSkipped ? stepStages.findIndex((s) => s.enabled && s.kind === "skill" && s.skillId === r.applySkill) : -1;
