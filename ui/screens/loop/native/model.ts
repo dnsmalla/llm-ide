@@ -93,6 +93,12 @@ export interface LoopEngineConfig {
   workMode?: "all" | "one";
   /** Most passes one "all" run makes. Absent = 3; read it through maxPassesOf. */
   maxPassesPerRun?: number;
+  /**
+   * An installed environment (a venv, node_modules) kept between Factory runs: built once by `setup`, keyed by the
+   * `keyFiles`, copied into each run's worktree. The host validates it (desktop/src-tauri/src/loop_env_cache.rs); this
+   * only carries it through load and save so a settings save does not drop it.
+   */
+  envCache?: { keyFiles: string[]; setup: string; paths: string[] };
 }
 
 /** Passes per "all" run: default 3, whole number, clamped to 1..10. */
@@ -226,6 +232,7 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     ...(typeof o.reviewEveryRuns === "number" && Number.isFinite(o.reviewEveryRuns) ? { reviewEveryRuns: o.reviewEveryRuns } : {}),
     ...(o.workMode === "one" ? { workMode: "one" as const } : {}),
     ...(typeof o.maxPassesPerRun === "number" && Number.isFinite(o.maxPassesPerRun) ? { maxPassesPerRun: o.maxPassesPerRun } : {}),
+    ...(isObj(o.envCache) ? { envCache: { keyFiles: strArray(o.envCache.keyFiles), setup: str(o.envCache.setup) ?? "", paths: strArray(o.envCache.paths) } } : {}),
   };
 }
 
@@ -327,5 +334,6 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     ...(typeof c.reviewEveryRuns === "number" ? { reviewEveryRuns: c.reviewEveryRuns } : {}),
     ...(c.workMode === "one" ? { workMode: "one" } : {}),
     ...(typeof c.maxPassesPerRun === "number" ? { maxPassesPerRun: c.maxPassesPerRun } : {}),
+    ...(c.envCache ? { envCache: c.envCache } : {}),
   };
 }

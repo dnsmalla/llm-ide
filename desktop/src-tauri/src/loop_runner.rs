@@ -203,7 +203,7 @@ pub(crate) struct FaultSpec {
     pub command: String,
 }
 
-fn read_loop_json(root: &Path) -> Result<serde_json::Value, String> {
+pub(crate) fn read_loop_json(root: &Path) -> Result<serde_json::Value, String> {
     let path = root.join("system").join("loop.json");
     let text = std::fs::read_to_string(&path).map_err(|e| format!("cannot read system/loop.json: {e}"))?;
     serde_json::from_str(&text).map_err(|e| format!("system/loop.json is not valid JSON: {e}"))
@@ -519,7 +519,7 @@ pub(crate) fn capped_sink(send: impl Fn(&str, bool) + Send + Sync + 'static) -> 
 }
 
 /// `run_command_at`, stopped only by a cancel for `key` (a run id, or `""` for the legacy run).
-fn run_command_keyed(work: &Path, command: &str, timeout_secs: Option<u64>, key: &str) -> Result<StageRun, String> {
+pub(crate) fn run_command_keyed(work: &Path, command: &str, timeout_secs: Option<u64>, key: &str) -> Result<StageRun, String> {
     let sink = OUTPUT_SINKS.lock().unwrap_or_else(|p| p.into_inner()).get(key).cloned();
     run_command_at_cancellable(work, command, timeout_secs, sink, &|| is_cancelled(key))
 }

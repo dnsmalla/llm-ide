@@ -20,6 +20,7 @@ const COMMANDS: &[&str] = &[
     "loop_approval_status",
     "loop_revoke_approvals",
     "loop_run_stage",
+    "loop_env_prepare",
     "loop_work_root",
     "loop_run_fault_verify",
     "loop_environment_check",

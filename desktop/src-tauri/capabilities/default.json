@@ -26,6 +26,7 @@
     "allow-loop-approval-status",
     "allow-loop-revoke-approvals",
     "allow-loop-run-stage",
+    "allow-loop-env-prepare",
     "allow-loop-work-root",
     "allow-loop-run-fault-verify",
     "allow-loop-environment-check",

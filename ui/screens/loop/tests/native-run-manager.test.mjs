@@ -29,6 +29,7 @@ function setup(over = {}) {
       world.hostCalls.push([command, args, world.active]);
       if (command === "loop_worktree_prepare") return { runId: args.runId, project: world.active, repo: world.active, worktree: `${world.active}/system/loop-worktrees/${args.runId}`, branch: `factory/${args.runId}`, baseCommit: "abc1234def" };
       if (command === "loop_work_root") return world.active;
+      if (command === "loop_env_prepare") return world.envAnswer ?? null;
       if (command === "loop_worktree_list") return world.list;
       if (command === "loop_worktree_diff") return { text: "", truncated: false, patchId: "c".repeat(64), files: ["src/a.ts"] };
       if (command === "loop_changed_paths") return [];
@@ -72,6 +73,37 @@ test("the run opens its MR right after its record is written, and never from a r
   await switchProject("/other");
   await finish(b);
   assert.equal(calls.length, 1, "a held record has no MR yet");
+});
+
+const ENV_LOOP = { ...FACTORY_LOOP, config: { ...structuredClone(FACTORY_TEMPLATE.config), envCache: { keyFiles: ["requirements.txt"], setup: "make env", paths: [".venv"] } } };
+
+test("a loop with an envCache prepares the environment in the worktree before its first step; one without never calls the host", async () => {
+  setup({ loadFactoryLoop: async () => ENV_LOOP });
+  world.envAnswer = { status: "restored", message: "Environment restored from the cache (abc).", key: "k", output: null };
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const calls = world.hostCalls.filter(([cmd]) => cmd === "loop_env_prepare");
+  assert.equal(calls.length, 1);
+  assert.deepEqual({ loopId: calls[0][1].loopId, runId: calls[0][1].runId, approvalToken: calls[0][1].approvalToken }, { loopId: "F", runId: a, approvalToken: "tok" });
+  assert.ok(rm.liveRuns()[0].log.some((l) => l.includes("Environment restored")));
+  const order = world.hostCalls.map(([cmd]) => cmd);
+  assert.ok(order.indexOf("loop_worktree_prepare") < order.indexOf("loop_env_prepare"), "the worktree exists first");
+  assert.equal(world.configs.length, 1, "the run went on to its steps");
+
+  setup();
+  rm.startRun("/p", item(2), "full");
+  await settle();
+  assert.equal(world.hostCalls.filter(([cmd]) => cmd === "loop_env_prepare").length, 0, "no envCache: the host is not asked");
+});
+
+test("a failed environment setup stops the run before any step and says why", async () => {
+  setup({ loadFactoryLoop: async () => ENV_LOOP });
+  world.envAnswer = { status: "failed", message: "The environment setup failed.", key: "k", output: "pip: no matching distribution" };
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.match(rm.takeRunNotice() ?? "", /The environment setup failed\. The run did not start\./);
+  assert.equal(world.configs.length, 0, "no step ran");
+  assert.deepEqual(rm.liveRuns(), [], "the run ended");
 });
 
 test("cap 2: third start is queued and starts when one finishes", async () => {

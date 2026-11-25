@@ -35,6 +35,7 @@ mod mermaid_runtime;
 mod menu;
 mod retired_leftovers;
 mod loop_approval;
+mod loop_env_cache;
 mod loop_runner;
 mod loop_worktree;
 mod notes_fs;
@@ -349,6 +350,7 @@ macro_rules! product_handlers {
                 loop_approval::loop_approval_status,
                 loop_approval::loop_revoke_approvals,
                 loop_runner::loop_run_stage,
+                loop_env_cache::loop_env_prepare,
                 loop_runner::loop_work_root,
                 loop_runner::loop_run_fault_verify,
                 loop_runner::loop_environment_check,

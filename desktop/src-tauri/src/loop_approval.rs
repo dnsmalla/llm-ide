@@ -221,7 +221,21 @@ fn data_for(project: PathBuf, work: PathBuf, stages: &[StageSpec], faults: &[Fau
 fn loop_request(root: &Path, loop_id: &str) -> Result<ApprovalRequest, String> {
     let (project, work) = canonical_roots(root)?;
     let loop_name = loop_name(root, loop_id)?;
-    let stages = loop_shell_stages(root, loop_id)?;
+    let mut stages = loop_shell_stages(root, loop_id)?;
+    // The environment setup command (`config.envCache.setup`) is approved with the loop's other commands, under a
+    // reserved stage id, so a cache miss never needs a second dialog in the middle of a run.
+    if let Some(spec) = crate::loop_env_cache::read_spec(root, loop_id)? {
+        if stages.iter().any(|s| s.stage_id == crate::loop_env_cache::ENV_CACHE_STAGE_ID) {
+            return Err("a stage uses the reserved id of the environment setup; rename it".into());
+        }
+        stages.push(StageSpec {
+            loop_id: loop_id.to_string(),
+            stage_id: crate::loop_env_cache::ENV_CACHE_STAGE_ID.to_string(),
+            name: crate::loop_env_cache::ENV_CACHE_STAGE_NAME.to_string(),
+            kind: "shellCommand".to_string(),
+            command: spec.setup,
+        });
+    }
     let faults = if loop_has_enabled_kind(root, loop_id, "regressionSweep")? { fault_commands(root)? } else { Vec::new() };
     let data = data_for(project, work, &stages, &faults);
     Ok(ApprovalRequest { data, loop_name, stages, faults })

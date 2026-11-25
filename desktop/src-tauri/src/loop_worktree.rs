@@ -25,6 +25,8 @@ const FACTORY_DIR: &str = ".factory";
 /// Added to `<project>/.git/info/exclude` when the project root is itself a git repo, so the worktrees folder never
 /// shows as untracked in the user's main tree. `.git/info/exclude` is untracked; `.gitignore` is never touched.
 const EXCLUDE_LINE: &str = "system/loop-worktrees/";
+/// The environment cache (`loop_env_cache.rs`) sits next to the worktrees and is never committed either.
+const ENV_CACHE_EXCLUDE_LINE: &str = "system/loop-env-cache/";
 const TASK_MAX: usize = 1024 * 1024;
 const DIFF_TEXT_MAX: usize = 2 * 1024 * 1024;
 const MAX_DIFF_FILES: usize = 1000;
@@ -261,14 +263,16 @@ fn exclude_worktrees(project: &Path) -> Result<(), String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => return Err(format!("cannot read .git/info/exclude: {e}")),
     };
-    if String::from_utf8_lossy(&current).lines().any(|l| l.trim() == EXCLUDE_LINE) {
+    let text = String::from_utf8_lossy(&current);
+    let missing: Vec<&str> = [EXCLUDE_LINE, ENV_CACHE_EXCLUDE_LINE].into_iter().filter(|want| !text.lines().any(|l| l.trim() == *want)).collect();
+    if missing.is_empty() {
         return Ok(());
     }
     std::fs::create_dir_all(&info_dir).map_err(|e| format!("cannot update .git/info/exclude: {e}"))?;
     let sep = if !current.is_empty() && !current.ends_with(b"\n") { "\n" } else { "" };
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(&path)
         .map_err(|e| format!("cannot update .git/info/exclude: {e}"))?;
-    f.write_all(format!("{sep}{EXCLUDE_LINE}\n").as_bytes()).map_err(|e| format!("cannot update .git/info/exclude: {e}"))
+    f.write_all(format!("{sep}{}\n", missing.join("\n")).as_bytes()).map_err(|e| format!("cannot update .git/info/exclude: {e}"))
 }
 
 /// Writes the work item into the fresh worktree without following a link the repo itself committed at `.factory`

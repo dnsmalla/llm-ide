@@ -520,6 +520,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
   run.logWriter = createRunLogWriter(fs, runLogPath(run.live.runId), run.live.log);
+  const envProblem = await prepareEnvironment(d, run.live.runId, loop, token, log);
+  if (envProblem) { fail(run, `${envProblem} The run did not start.`); return null; }
+  if (run.cancelled) { log("Run cancelled before it started."); return null; }
   // The project root often holds the clone under code/<name>, so detect the test command in the run worktree, not only at the project root.
   const runPrefix = repoPrefixFor(run.live.projectRoot, info.worktree);
   const detected = await detectTestCommand(fs, runPrefix).catch(() => null);
@@ -592,6 +595,29 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   // cancel, guard block, error and an intake decision keep their own states.
   const stopped = !outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && needsDecisionSummary(outcome) === null && run.live.mode !== "intakeOnly";
   return { loop, info, config, outcome: stopped ? { ...outcome, stoppedAtLimit: true } : outcome };
+}
+
+/** What the host's `loop_env_prepare` answers (loop_env_cache.rs). */
+interface EnvPrepare { status: "none" | "present" | "restored" | "built" | "failed"; message: string; key: string | null; output: string | null }
+
+/**
+ * Makes the loop's cached environment (`config.envCache`) ready in the run's worktree before its first step: copied from
+ * the cache, or built once by the approved setup command. Returns a reason to stop the run, else null. A loop with no
+ * envCache never reaches the host.
+ */
+async function prepareEnvironment(d: RunManagerDeps, runId: string, loop: { id: string; config: { envCache?: unknown } }, token: string, log: (line: string) => void): Promise<string | null> {
+  if (!loop.config.envCache) return null;
+  log("Preparing the environment (the first run for these requirements installs it; later runs reuse it)...");
+  let r: EnvPrepare | null;
+  try {
+    r = await d.host<EnvPrepare | null>("loop_env_prepare", { loopId: loop.id, runId, approvalToken: token, timeoutSecs: 1800 });
+  } catch (e) {
+    return `The environment could not be prepared: ${e instanceof Error ? e.message : String(e)}.`;
+  }
+  if (!r || r.status === "none") return null;
+  log(r.message);
+  if (r.output && r.status !== "restored") log(r.output);
+  return r.status === "failed" ? r.message : null;
 }
 
 /** Runs whose Approve is shipping right now. */
