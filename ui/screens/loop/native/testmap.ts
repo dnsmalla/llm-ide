@@ -99,7 +99,7 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
 export interface TestMapEntry { path: string; function: string; line: number; fanIn: number; loc: number; testedBy: string[] }
 /** What the plan tells the map: its todo files in step order (with their untested-function counts) and the files to refactor first. */
 export interface TestPlanInfo { todo: { path: string; functions: number }[]; refactorFirst: { path: string; loc: number }[] }
-export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number; notes: string[] }
+export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number; /** Test files found under the test roots (absent in an older map). */ testFiles?: number; notes: string[] }
 
 /** Files one walk collects before it stops; a bigger repo gets an incomplete map and says so. */
 export const WALK_LIMIT = 20_000;
@@ -211,7 +211,7 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   const files = new Set(entries.map((e) => e.path));
   const testedFiles = new Set(entries.filter((e) => e.testedBy.length > 0).map((e) => e.path));
   if (report.stopped) notes.push(WALK_STOP_NOTE);
-  return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length, notes };
+  return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length, testFiles: tests.length, notes };
 }
 
 function renderTestMap(m: TestMap, plan?: TestPlanInfo): string {

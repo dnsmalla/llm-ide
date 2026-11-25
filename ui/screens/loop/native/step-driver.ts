@@ -34,6 +34,8 @@ export interface StepRecipe {
   baselineStageKey: string | null;
   /** Run the baseline after planning and only to learn whether the suite was already red (see runSteps). */
   baselineAfterPlanning?: boolean;
+  /** With baselineAfterPlanning: whether the plan says tests already exist. A red suite that exists stops the run before any step. */
+  suiteExists?: (planText: string) => boolean;
   /** Steps per run asked of the config (null = the default 3). */
   limitOf(config: LoopEngineConfig): number | null;
   /** Log and summary words. */
@@ -174,6 +176,10 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     if (check.cancelled) return { ...check, stages, iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })), iterationsUsed, costUsd };
     redBefore = !check.passed;
     if (redBefore) opts.log(`${baseline.name} was already failing before any ${r.noun}.`);
+    const planNow = redBefore && r.suiteExists ? await opts.readPlan() : null;
+    if (planNow !== null && r.suiteExists!(planNow)) {
+      return { passed: false, iterationsUsed, stages, iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })), costUsd, failedStage: baseline, statusSummary: `the tests were already failing before any ${r.noun}, so none was run: ${baseline.name} failed — fix the failing tests first`, ...(check.errored ? { errored: true } : {}) };
+    }
   }
   let last: LoopRunOutcome = plan;
   const applied: string[] = [];

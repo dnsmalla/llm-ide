@@ -4,6 +4,7 @@
 import type { LoopEngineConfig } from "./model.ts";
 import { stepLimitOf } from "./model.ts";
 import type { LoopRunOutcome, RunnerDeps } from "./runner.ts";
+import { testSuiteExists } from "./test-plan.ts";
 import { runSteps, type StepDriverOpts, type StepRecipe } from "./step-driver.ts";
 
 export const TEST_RECIPE: StepRecipe = {
@@ -18,6 +19,8 @@ export const TEST_RECIPE: StepRecipe = {
   baselineKeys: ["test"],
   baselineStageKey: null,
   baselineAfterPlanning: true,
+  // A red suite with test files already in the repository stops the run; with none, the first step may be the one that fixes it.
+  suiteExists: testSuiteExists,
   // The Test loop's "Steps per run" is the existing per-run limit (maxPassesPerRun, default 3), which it no longer uses for passes.
   limitOf: (c) => stepLimitOf(c),
   noun: "step", nouns: "steps", doneWord: "done", blockById: true, blockedStreak: 3,

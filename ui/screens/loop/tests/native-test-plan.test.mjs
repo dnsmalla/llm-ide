@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mergeTestPlan, writeTestPlan } from "../native/test-plan.ts";
+import { mergeTestPlan, writeTestPlan, testSuiteExists } from "../native/test-plan.ts";
 import { runTestSteps, TEST_RECIPE } from "../native/test-steps.ts";
 import { nextTodo, splitPhases } from "../native/step-driver.ts";
 import { decodeConfig } from "../native/model.ts";
@@ -190,4 +190,35 @@ test("an area that was started keeps its place while its steps are finished", ()
     assert.match(path, /^src\/a\//, "area a is finished before area b starts");
     plan = mergeTestPlan(plan.replace(`### ${id} ${path} (status: todo)`, `### ${id} ${path} (status: done)`), map(files), structure).plan;
   }
+});
+
+const withFiles = (n) => `# Test plan\n\n| counter | value |\n|---|---|\n| testFiles | ${n} |\n\n${T("T1")}${T("T2")}`;
+const redBefore = (fx) => { const run = fx.deps.runStage; fx.deps.runStage = async (s) => (s.id === "test" && fx.st.current === null ? { ok: false, output: "red before" } : run(s)); };
+
+test("a red suite with test files already present stops before any step, with no agent call", async () => {
+  const fx = fake(withFiles(4)); redBefore(fx);
+  const out = await runTestSteps(cfg(), fx.deps, fx.opts);
+  assert.equal(out.passed, false);
+  assert.equal(out.failedStage.id, "test");
+  assert.equal(out.statusSummary, "the tests were already failing before any step, so none was run: test failed — fix the failing tests first");
+  assert.ok(!fx.st.ran.includes("write"));
+});
+
+test("a red suite with no test file yet still runs the first step, and the run goes on when it passes", async () => {
+  const fx = fake(withFiles(0)); redBefore(fx);
+  const out = await runTestSteps(cfg(), fx.deps, fx.opts);
+  assert.equal(out.passed, true);
+  assert.equal(fx.st.ran.filter((i) => i === "write").length, 2);
+  assert.match(out.statusSummary, /2 steps done/);
+});
+
+test("the testFiles counter round-trips through the plan, also when the plan is trimmed; an older map writes none", () => {
+  assert.match(mergeTestPlan(null, { ...map([entry("a/1.py")]), testFiles: 7 }, structure).plan, /\| testFiles \| 7 \|/);
+  const many = Array.from({ length: 70 }, (_, i) => entry(`a/f${String(i).padStart(3, "0")}.py`));
+  assert.match(mergeTestPlan(null, { ...map(many), testFiles: 3 }, structure).plan, /\| testFiles \| 3 \|/);
+  assert.doesNotMatch(mergeTestPlan(null, map([entry("a/1.py")]), structure).plan, /testFiles/);
+  assert.equal(testSuiteExists(withFiles(0)), false);
+  assert.equal(testSuiteExists(withFiles(2)), true);
+  assert.equal(testSuiteExists(T("T1", "done")), true, "no counter: a done step means tests exist");
+  assert.equal(testSuiteExists(T("T1")), false);
 });

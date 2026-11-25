@@ -119,7 +119,7 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
   const tail = refactorFirst.length ? ["## Refactor first", "", `Over ${BIG_FILE_LOC} lines: split before testing.`, ...refactorFirst.slice(0, 40).map((r) => `- ${r.path} (${r.loc} lines)`), ""] : [];
   const build = (listed: Step[], finishedHere: Step[]) => [
     "# Test plan", "", "| counter | value |", "|---|---|", `| todo | ${todoAll.length} |`, `| done | ${count("done")} |`, `| skipped | ${count("skipped")} |`,
-    `| blocked | ${count("blocked")} |`, `| areas | ${areas} |`, `| nextId | ${nextId} |`, "",
+    `| blocked | ${count("blocked")} |`, `| areas | ${areas} |`, ...(map.testFiles === undefined ? [] : [`| testFiles | ${map.testFiles} |`]), `| nextId | ${nextId} |`, "",
     "One step per untested source file, area by area. Take the first `(status: todo)` step; mark it `done` or `skipped` (with a `- Skipped: <reason>` line).",
     ...(listed.length < todoAll.length ? [`${todoAll.length - listed.length} more todo steps are not listed yet; they are added as these are finished.`] : []), "",
     ...[...listed, ...finishedHere].flatMap(render), ...tail,
@@ -140,6 +140,13 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
     done: done ? done.join("\n").replace(/\n+$/, "\n") : null,
     info: { todo: todoAll.map((s) => ({ path: s.path, functions: untested(s.path)?.fns.length ?? 0 })), refactorFirst },
   };
+}
+
+/** Whether the repository already has test files, from the plan's counters; no counter (older plan) = it has, once a step is done. */
+export function testSuiteExists(planText: string): boolean {
+  const n = /^\|\s*testFiles\s*\|\s*(\d+)\s*\|/m.exec(planText);
+  if (n) return Number(n[1]) > 0;
+  return /^\|\s*done\s*\|\s*[1-9]\d*\s*\|/m.test(planText) || /\(status:\s*done\)\s*$/m.test(planText);
 }
 
 async function readText(fs: TestMapFs, path: string): Promise<string | null> {
