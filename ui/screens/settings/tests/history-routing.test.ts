@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AgentHistoryModel, CLEAR_CONFIRM_WORD, clearConfirmed, compactSuccess, formatBytes, healthLines, scopeSentence, whenText } from "../agent-history-model.ts";
-import { RoutingModel, TIERS, dropReasonText, isDirty, tierStatusText, validateDraft } from "../routing-model.ts";
+import { RoutingModel, TIERS, draftFromLoaded, dropReasonText, isDirty, tierStatusText, validateDraft } from "../routing-model.ts";
 import { decodeCompactResult, decodeRoutingTiers, type RoutingTiers } from "../decoders.ts";
 import { deferred, fakeClient, fixture, reply } from "./helpers.ts";
 
@@ -149,6 +149,11 @@ test("history words: confirm word, byte format, scope sentence", () => {
 
 // ---- routing ----
 
+function memoryStorage(): Storage {
+  const data = new Map<string, string>();
+  return { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v), removeItem: (k: string) => void data.delete(k), clear: () => data.clear(), key: () => null, get length() { return data.size; } } as Storage;
+}
+
 const tiersBody = () => fixture("providers-usage/get-kb-routing-tiers-200.json").response;
 
 test("routing: draft starts from the loaded table; saving sends the WHOLE table and reports dropped entries", async () => {
@@ -200,15 +205,63 @@ test("routing: a focus refresh with only the Standard preselection (no real edit
   assert.deepEqual(m.getState().draft!.tiers.cheap, { provider: "deepseek", model: "deepseek-coder" }, "preselection alone must not freeze the draft against a focus refresh");
 });
 
-test("routing: after Revert, a focus refresh does not silently re-add the Standard preselection", async () => {
-  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }) });
-  const m = new RoutingModel(client);
+test("routing: after Revert, a focus refresh adopts a newer table and never re-adds a role the user set to Default", async () => {
+  let tiers = tiersBody();
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiers }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
+  const m = new RoutingModel(client, memoryStorage());
   await m.load();
   assert.equal(m.getState().draft!.features.autoTasks, "standard", "preselected on first load");
+  m.setRole("autoTasks", null);
+  await m.save();
+  m.setTier("cheap", { provider: "edited", model: "edited" });
   m.revert();
-  assert.equal(m.getState().draft!.features.autoTasks, undefined, "Revert clears the preselection");
+  assert.deepEqual(m.getState().draft, draftFromLoaded(m.getState().loaded!, new Set(["autoTasks"])), "Revert reads as no edits");
+  assert.equal(m.getState().draft!.features.autoTasks, undefined, "the saved Default stays");
+  // Another window saves a different Cheap provider; the focus refresh must pick it up instead of freezing the old draft.
+  const current = tiersBody() as RoutingTiers;
+  tiers = { ...current, tiers: { ...current.tiers, cheap: { provider: "deepseek", model: "deepseek-coder" } } };
   await m.load(true);
-  assert.equal(m.getState().draft!.features.autoTasks, undefined, "a focus refresh must not reintroduce it behind the user's back");
+  assert.deepEqual(m.getState().draft!.tiers.cheap, { provider: "deepseek", model: "deepseek-coder" });
+  assert.equal(m.getState().draft!.features.autoTasks, undefined, "never silently re-added");
+});
+
+test("routing: an explicit Default survives Save + reload, a later Save and a restart; untouched roles stay preselected", async () => {
+  const store = memoryStorage();
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
+  const m = new RoutingModel(client, store);
+  await m.load();
+  assert.equal(m.getState().draft!.features.internal, "standard");
+  m.setRole("autoTasks", null);
+  await m.save();
+  const posts = () => client.calls.filter((c) => c.method === "POST").map((c) => (c.body as { features: Record<string, string> }).features);
+  assert.equal("autoTasks" in posts()[0]!, false);
+  assert.equal(m.getState().draft!.features.autoTasks, undefined, "not preselected again after the reload");
+  assert.equal(m.getState().draft!.features.internal, "standard", "untouched roles are still preselected");
+  m.setTier("cheap", { provider: "deepseek", model: "deepseek-coder" });
+  await m.save();
+  assert.equal("autoTasks" in posts()[1]!, false, "a later unrelated Save does not write the role");
+  const restarted = new RoutingModel(client, store);
+  await restarted.load();
+  assert.equal(restarted.getState().draft!.features.autoTasks, undefined, "survives an app restart (same webview storage)");
+  restarted.setRole("autoTasks", "standard");
+  await restarted.save();
+  assert.equal(posts()[2]!.autoTasks, "standard", "choosing Standard again clears the mark");
+});
+
+test("routing: Default then Revert preselects the role again and stores nothing; Default then Save persists it", async () => {
+  const store = memoryStorage();
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
+  const m = new RoutingModel(client, store);
+  await m.load();
+  m.setRole("autoTasks", null);
+  m.revert();
+  assert.equal(m.getState().draft!.features.autoTasks, "standard", "Revert undoes the unsaved Default");
+  assert.equal(store.getItem("llmide.routing.declinedPreselect"), null, "nothing stored");
+  await m.load(true);
+  assert.equal(m.getState().draft!.features.autoTasks, "standard");
+  m.setRole("autoTasks", null);
+  await m.save();
+  assert.deepEqual(JSON.parse(store.getItem("llmide.routing.declinedPreselect")!), ["autoTasks"]);
 });
 
 test("routing: removing a tier resets roles that used it; invalid drafts never reach the network", async () => {
@@ -222,7 +275,7 @@ test("routing: removing a tier resets roles that used it; invalid drafts never r
   await m.save();
   assert.equal(client.calls.filter((c) => c.method === "POST").length, 0);
   m.revert();
-  assert.equal(isDirty(m.getState().loaded, m.getState().draft), false);
+  assert.deepEqual(m.getState().draft, draftFromLoaded(m.getState().loaded!));
   m.setRole("loop", "ghost");
   assert.match(validateDraft(m.getState().draft!)!, /which is not set/);
 });

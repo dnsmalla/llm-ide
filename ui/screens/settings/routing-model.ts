@@ -20,11 +20,37 @@ export function roleEmptyOptionLabel(role: string): string {
   return PRESELECT_ROLES.includes(role) ? "Default (built-in)" : "Default";
 }
 
-/** The saved routing as a draft; with Standard set, roles that have no saved tier start on Standard. */
-export function draftFromLoaded(l: { tiers: Record<string, TierChoice>; features: Record<string, string> }): RoutingDraft {
+/**
+ * The saved routing as a draft; with Standard set, roles that have no saved tier start on Standard, except roles in
+ * `declined`: the user chose "Default (built-in)" for them on purpose, and the server has no value that says so
+ * (features accept only a tier name), so the choice is remembered client-side (see RoutingModel).
+ */
+export function draftFromLoaded(
+  l: { tiers: Record<string, TierChoice>; features: Record<string, string> },
+  declined: ReadonlySet<string> = new Set(),
+): RoutingDraft {
   const features = { ...l.features };
-  if ("standard" in l.tiers) for (const role of PRESELECT_ROLES) if (!features[role]) features[role] = "standard";
+  if ("standard" in l.tiers) for (const role of PRESELECT_ROLES) if (!features[role] && !declined.has(role)) features[role] = "standard";
   return { tiers: { ...l.tiers }, features };
+}
+
+const DECLINED_KEY = "llmide.routing.declinedPreselect";
+
+function readDeclined(storage: Storage | null): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(storage?.getItem(DECLINED_KEY) ?? "[]");
+    return new Set(Array.isArray(parsed) ? parsed.filter((r): r is string => typeof r === "string" && PRESELECT_ROLES.includes(r)) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function defaultStorage(): Storage | null {
+  try {
+    return globalThis.localStorage ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Roles the draft put on Standard that are not saved that way yet. */
@@ -40,11 +66,11 @@ export const PRESELECT_HINT = "Roles without a saved tier are set to Standard; p
  * fresh preselection as dirty (so Save is offered and the hint shows), but a background refresh (`load(true)`) must
  * tell the two apart — preselection noise is not an edit worth protecting from a refresh, or a focus event would
  * freeze the draft and hide tiers changed elsewhere (another window, another device). A draft with no edits beyond
- * preselection, revert()'s bare copy of `loaded` included, reads as "no edits" here even where `isDirty` reads true.
+ * preselection (revert()'s result included) reads as "no edits" here even where `isDirty` reads true.
  */
-function hasExplicitEdits(loaded: RoutingTiers | null, draft: RoutingDraft | null): boolean {
+function hasExplicitEdits(loaded: RoutingTiers | null, draft: RoutingDraft | null, declined: ReadonlySet<string>): boolean {
   if (!loaded || !draft) return false;
-  const baseline = draftFromLoaded(loaded);
+  const baseline = draftFromLoaded(loaded, declined);
   return JSON.stringify(sortKeys({ t: baseline.tiers, f: baseline.features })) !== JSON.stringify(sortKeys({ t: draft.tiers, f: draft.features }));
 }
 
@@ -214,10 +240,34 @@ export function validateDraft(d: RoutingDraft): string | null {
 export class RoutingModel extends Store<RoutingState> {
   readonly #client: CoreClient;
   #generation = 0;
+  readonly #storage: Storage | null;
+  /** Preselect roles the user explicitly set to Default and saved; persisted in the webview's localStorage (best effort). */
+  #persisted: Set<string>;
+  /** `#persisted` plus unsaved Default/Standard picks; written to storage only after a successful save. */
+  #declined: Set<string>;
 
-  constructor(client: CoreClient) {
+  constructor(client: CoreClient, storage: Storage | null = defaultStorage()) {
     super({ phase: "idle", loaded: null, draft: null, saving: false, error: null, notice: null, noticeKind: "info" });
     this.#client = client;
+    this.#storage = storage;
+    this.#persisted = readDeclined(storage);
+    this.#declined = new Set(this.#persisted);
+  }
+
+  #setDeclined(role: string, declined: boolean): void {
+    if (!PRESELECT_ROLES.includes(role)) return;
+    if (declined) this.#declined.add(role);
+    else this.#declined.delete(role);
+  }
+
+  /** Called once a save succeeded: only then is a Default choice a decision worth remembering. */
+  #commitDeclined(): void {
+    this.#persisted = new Set(this.#declined);
+    try {
+      this.#storage?.setItem(DECLINED_KEY, JSON.stringify([...this.#persisted]));
+    } catch {
+      // NOTE: storage is optional; the in-memory set still holds for this session.
+    }
   }
 
   /**
@@ -226,16 +276,17 @@ export class RoutingModel extends Store<RoutingState> {
    */
   async load(keepEdits = false): Promise<void> {
     const gen = ++this.#generation;
+    if (!keepEdits) this.#declined = new Set(this.#persisted);
     this.set({ phase: this.getState().loaded ? "ready" : "loading", error: null });
     try {
       const loaded = decodeRoutingTiers(await call(this.#client, "GET", "/kb/routing-tiers"));
       if (gen !== this.#generation) return;
       const now = this.getState();
-      if (keepEdits && hasExplicitEdits(now.loaded, now.draft)) {
+      if (keepEdits && hasExplicitEdits(now.loaded, now.draft, this.#declined)) {
         this.set({ phase: "ready", loaded });
         return;
       }
-      this.set({ phase: "ready", loaded, draft: draftFromLoaded(loaded) });
+      this.set({ phase: "ready", loaded, draft: draftFromLoaded(loaded, this.#declined) });
     } catch (e) {
       if (gen !== this.#generation) return;
       this.set({ phase: this.getState().loaded ? "ready" : "failed", error: describeError(e) });
@@ -259,12 +310,16 @@ export class RoutingModel extends Store<RoutingState> {
     const features = { ...d.features };
     if (tier) features[role] = tier;
     else delete features[role];
+    // An explicit Default must outlive Save and reload: without this mark the reload would preselect Standard again.
+    this.#setDeclined(role, !tier);
     this.set({ draft: { tiers: d.tiers, features }, notice: null });
   }
 
+  /** Back to the saved table, with the same preselection a fresh load shows, so a later focus refresh sees no edits. */
   revert(): void {
     const l = this.getState().loaded;
-    if (l) this.set({ draft: { tiers: { ...l.tiers }, features: { ...l.features } }, error: null, notice: null });
+    this.#declined = new Set(this.#persisted);
+    if (l) this.set({ draft: draftFromLoaded(l, this.#declined), error: null, notice: null });
   }
 
   async save(): Promise<RoutingSaveResult | null> {
@@ -287,6 +342,7 @@ export class RoutingModel extends Store<RoutingState> {
       const roles = Object.entries(s.draft.features).filter(([, tier]) => droppedTiers.has(tier));
       const roleText = roles.map(([role, tier]) => `${roleLabel(role)} now uses the default because ${tierLabel(tier)} is not set.`);
       const notice = [head, ...roleText].join(" ");
+      this.#commitDeclined();
       this.set({ saving: false, notice, noticeKind: r.dropped.length > 0 ? "warning" : "info" });
       await this.load();
       return r;
