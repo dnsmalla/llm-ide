@@ -176,6 +176,9 @@ pub fn base_args() -> Vec<String> {
         "-c", "core.untrackedCache=false", "-c", "core.attributesFile=/dev/null", "-c", "submodule.recurse=false",
         "-c", "protocol.allow=never", "-c", "status.submoduleSummary=false", "-c", "maintenance.auto=false",
         "-c", "diff.ignoreSubmodules=dirty",
+        // A user's global `worktree.useRelativePaths=true` would make `git worktree add` write a relative gitdir and
+        // an `extensions.relativeWorktrees` key into the repository, and both are refused by the repository check.
+        "-c", "worktree.useRelativePaths=false",
     ]
     .iter()
     .map(|s| s.to_string())
