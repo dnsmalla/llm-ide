@@ -4,7 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import { clampIterations, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
-import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, headAndTail, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, baselineSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
+import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, headAndTail, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, unchangedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -63,8 +63,9 @@ export interface RunnerDeps {
    */
   holdWhilePaused?(timeoutSeconds: number): Promise<"ok" | "timedOut">;
   /**
-   * Whether the run has changed any file of the project (not its own bookkeeping folders). A failed Verify after a round
-   * that changed nothing is not the run's doing, so the run stops at once instead of looping back. Null = cannot tell.
+   * Whether the run has changed any file of the project (not its own bookkeeping folders). Asked right after a code step
+   * passes, BEFORE Verify runs, so files the checks leave behind never count. A failed Verify after a code step that
+   * changed nothing stops the run at once instead of looping back. Null = cannot tell.
    */
   codeChanged?(): Promise<boolean | null>;
   /** Typed run progress for the board; never parsed out of the log. */
@@ -178,6 +179,8 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
   const groupBaseline = new Map<string, StepSnapshot | null>();
   const groupAttempts = new Map<string, number>();
   const reviewDue = new Set<string>();
+  /** Per Verify closer: whether the code step before it changed the project, as of right after that step (before Verify). */
+  const groupCodeChanged = new Map<string, boolean | null>();
   const repairs = new Map<string, number>();
   let lastFailure = "";
   let nonImproving = 0;
@@ -344,6 +347,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       }
       if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
       if (result.ok && codeGroup && groupHead && deps.reviewStep && !reviews.closed.has(groupHead.id)) reviewDue.add(codeGroup.closerId);
+      if (result.ok && codeGroup && deps.codeChanged) groupCodeChanged.set(codeGroup.closerId, await Promise.resolve().then(() => deps.codeChanged?.() ?? null).catch(() => null));
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
         return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
       }
@@ -402,10 +406,10 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       if (deps.isCancelled?.()) return cancelledOutcome();
       const code = trigger.group.codeStages[0];
       const entry: FindingsEntry = { round: iteration, source: trigger.source, text: headAndTail(trigger.text, 12_000) };
-      if (trigger.source === "tests" && deps.codeChanged && (await deps.codeChanged()) === false) {
-        const summary = baselineSummary();
+      if (trigger.source === "tests" && groupCodeChanged.get(trigger.group.closerId) === false) {
+        const summary = unchangedSummary();
         deps.log(summary);
-        return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: "baseline", findings: findingsText(findings.concat(entry)), stopped: true } };
+        return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: "nochange", findings: findingsText(findings.concat(entry)), stopped: true } };
       }
       const signature = failureSignature(trigger.source, trigger.text);
       unchanged = signature === loopSignature ? unchanged + 1 : 1;

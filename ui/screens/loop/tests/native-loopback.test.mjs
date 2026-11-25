@@ -94,8 +94,11 @@ test("headAndTail keeps the end of long output, where a test run prints what fai
 test("changesCode: only the loop's own folders are not a change to the project", () => {
   assert.equal(lb.changesCode(null), null);
   assert.equal(lb.changesCode([]), false);
-  assert.equal(lb.changesCode([".factory/PLAN.md", "system/loop.json", "llm-doc/loop/x.md", "./.factory/RUN.json"]), false);
+  assert.equal(lb.changesCode([".factory/PLAN.md", "./.factory/RUN.json", "src/.Factory/x", "system/loop/a.json", "llm-doc/loop/test/t.md", "llm-doc/loop/runs/r.md"]), false);
+  assert.equal(lb.changesCode(["system/app.py"]), true, "a project's own system/ folder is code");
+  assert.equal(lb.changesCode(["llm-doc/loop/refactor/plan.md"]), true, "refactor notes are a real change, as in the host rule");
+  assert.equal(lb.changesCode(["system/loopback.py"]), true, "whole segments only");
   assert.equal(lb.changesCode([".factory/PLAN.md", "smart_input/tests/test_data_cleaning.py"]), true);
   assert.equal(lb.changesCode(["systematic.py"]), true, "a name that only starts like a bookkeeping folder is code");
-  assert.match(lb.baselineSummary(), /already fail/);
+  assert.match(lb.unchangedSummary(), /changed no code and the tests fail/);
 });

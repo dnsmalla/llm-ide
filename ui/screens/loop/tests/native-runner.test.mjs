@@ -587,35 +587,50 @@ test("loopback: never terminates - different failures each round stop at the rou
   assert.equal(runStatusCode(out), "stopped.limit");
 });
 
-test("loopback: a failed Verify after a round that changed no code stops at once as a red baseline, with no second round", async () => {
+test("loopback: a failed Verify after a code step that changed no code stops in that round as nochange", async () => {
   const counts = { impl: 0, v: 0, repair: 0 };
+  const asked = [];
   const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
-    async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: "Fatal Python error: Aborted" } : { ok: true, output: "" }; },
+    async runStage(s) { counts[s.id] += 1; asked.push(s.id); return s.id === "v" ? { ok: false, output: "Fatal Python error: Aborted" } : { ok: true, output: "" }; },
     repair: noRepair,
-    codeChanged: async () => false,
+    codeChanged: async () => { asked.push("codeChanged"); return false; },
   }));
   assert.deepEqual(counts, { impl: 1, v: 1, repair: 0 });
+  assert.deepEqual(asked, ["impl", "codeChanged", "v"], "the state is read before Verify, so files the checks leave behind never count");
   assert.equal(out.passed, false);
   assert.equal(out.stoppedAtLimit, true);
   assert.equal(out.iterationsUsed, 1);
-  assert.equal(out.loopback.reason, "baseline");
+  assert.equal(out.loopback.reason, "nochange");
   assert.equal(out.loopback.stopped, true);
   assert.match(out.loopback.findings, /Fatal Python error/);
-  assert.equal(out.statusSummary, "Stopped: the tests already fail before this run changed any code");
+  assert.equal(out.statusSummary, "Stopped: this run changed no code and the tests fail");
   assert.equal(runStatusCode(out), "stopped.limit");
 });
 
-test("loopback: code that did change, or an unknown change state, still loops back as before", async () => {
-  for (const state of [true, null]) {
+test("loopback: code that did change, an unknown state, or a throwing check still loops back as before", async () => {
+  const states = [async () => true, async () => null, async () => { throw new Error("git failed"); }, () => { throw new Error("sync"); }];
+  for (const codeChanged of states) {
     const counts = { impl: 0, v: 0 };
     const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
       async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: `fail ${"ABC"[counts.v - 1]}` } : { ok: true, output: "" }; },
       repair: noRepair,
-      codeChanged: async () => state,
+      codeChanged,
     }));
-    assert.deepEqual(counts, { impl: 3, v: 3 }, String(state));
+    assert.deepEqual(counts, { impl: 3, v: 3 });
     assert.equal(out.loopback.reason, "tests");
   }
+});
+
+test("loopback: a later round that leaves the code unchanged stops there", async () => {
+  const counts = { impl: 0, v: 0 };
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { counts[s.id] += 1; return s.id === "v" ? { ok: false, output: `fail ${"ABC"[counts.v - 1]}` } : { ok: true, output: "" }; },
+    repair: noRepair,
+    codeChanged: async () => counts.impl >= 2 ? false : true,
+  }));
+  assert.deepEqual(counts, { impl: 2, v: 2 });
+  assert.equal(out.loopback.reason, "nochange");
+  assert.equal(out.loopback.rounds, 2);
 });
 
 test("loopback: a limit of one round stops after one", async () => {

@@ -7,7 +7,7 @@ import { effectiveReviewAfter } from "./review.ts";
 /** Status code of a run that used up its rounds (or budget) without passing; a warning state, never shipped. */
 export const LOOPBACK_STOPPED_CODE = "stopped.limit";
 
-export type LoopbackReason = "tests" | "review" | "limit" | "baseline";
+export type LoopbackReason = "tests" | "review" | "limit" | "nochange";
 
 export interface LoopbackSummary { rounds: number; maxRounds: number; reason: LoopbackReason; findings: string; stopped: boolean }
 /** What a code stage is told when it is re-run after a failed round. */
@@ -81,8 +81,16 @@ export function findingsText(entries: readonly FindingsEntry[], maxChars = FINDI
   return "…" + text.slice(text.length - (maxChars - 1));
 }
 
-/** Folders a run writes for its own bookkeeping; a change there is not a change to the project's code. */
-const BOOKKEEPING_PREFIXES = ["llm-doc/loop/", "system/", ".factory/"];
+/**
+ * The loop's own files, by the same rule as the host's `is_excluded_rel` (loop_worktree.rs): any `.factory` segment in any
+ * case, and the root-anchored `system/loop`, `llm-doc/loop/test` and `llm-doc/loop/runs` folders. A project's own
+ * `system/` or `llm-doc/loop/refactor/` code is NOT bookkeeping.
+ */
+function isBookkeeping(path: string): boolean {
+  const rel = path.replace(/^\.\//, "");
+  if (rel.split("/").some((seg) => seg.toLowerCase() === ".factory")) return true;
+  return ["system/loop", "llm-doc/loop/test", "llm-doc/loop/runs"].some((dir) => rel === dir || rel.startsWith(`${dir}/`));
+}
 
 /**
  * Whether `paths` (what git reports as changed in the run's worktree) hold a change to the project itself: true, or false
@@ -90,12 +98,12 @@ const BOOKKEEPING_PREFIXES = ["llm-doc/loop/", "system/", ".factory/"];
  */
 export function changesCode(paths: readonly string[] | null): boolean | null {
   if (paths === null) return null;
-  return paths.some((p) => { const rel = p.replace(/^\.\//, ""); return !BOOKKEEPING_PREFIXES.some((b) => rel.startsWith(b)); });
+  return paths.some((p) => !isBookkeeping(p));
 }
 
-/** A failed Verify with no code changed in the run cannot be this run's doing: the tests were already failing. */
-export function baselineSummary(): string {
-  return "Stopped: the tests already fail before this run changed any code";
+/** A failed Verify after a code step that left the project's code as it was: another round could not fix anything. */
+export function unchangedSummary(): string {
+  return "Stopped: this run changed no code and the tests fail";
 }
 
 export function stoppedSummary(rounds: number, reason: "tests" | "review", unchanged = false): string {

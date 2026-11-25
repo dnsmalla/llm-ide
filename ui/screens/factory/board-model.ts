@@ -36,7 +36,7 @@ export interface CardView {
 export function loopbackTitle(l: LoopbackFacts): string {
   if (l.reason === "tests") return `Tests still failing after ${l.rounds} rounds`;
   if (l.reason === "review") return `Review still requests changes after ${l.rounds} rounds`;
-  if (l.reason === "baseline") return "The tests already fail before any change";
+  if (l.reason === "nochange") return "No code was changed and the tests fail";
   return `Stopped at its limit in round ${l.rounds} of ${l.maxRounds}`;
 }
 export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes", retryRecord: "Retry record" };

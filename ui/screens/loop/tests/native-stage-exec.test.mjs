@@ -1239,7 +1239,7 @@ test("setting an addendum leaves the built-in stage unedited, so it still follow
 });
 
 test("createStageDeps: a Factory run reports whether it changed project code; other loops leave the dep out", async () => {
-  const bookkeepingOnly = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "system/loop.json"] });
+  const bookkeepingOnly = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "system/loop/a.json"] });
   const factory = createStageDeps(ctxOf({ host: bookkeepingOnly.host }).ctx, loopOf([stage()]));
   assert.equal(await factory.codeChanged(), false, "only the loop's own files changed");
   const edited = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "app/main.py"] });

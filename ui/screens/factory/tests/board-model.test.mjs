@@ -6,6 +6,7 @@ import {
   shipRequestsFor, toWorkItem, foreignCommits, outputEditedSignals,
 } from "../board-model.ts";
 import { formatStepReviews } from "../../loop/native/issue-trail.ts";
+import { decodeRunRecordFacts } from "../columns.ts";
 import { NOTE } from "../columns.ts";
 import { budget } from "../../test-support/perf.ts";
 
@@ -391,7 +392,7 @@ test("a stopped loop card is an alert with the findings and a title", () => {
   assert.equal(card.loopback.findings, "boom");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "tests", findings: "" }), "Tests still failing after 3 rounds");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "review", findings: "" }), "Review still requests changes after 3 rounds");
-  assert.equal(loopbackTitle({ rounds: 1, maxRounds: 3, reason: "baseline", findings: "" }), "The tests already fail before any change");
+  assert.equal(loopbackTitle({ rounds: 1, maxRounds: 3, reason: "nochange", findings: "" }), "No code was changed and the tests fail");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "limit", findings: "" }), "Stopped at its limit in round 3 of 3");
 });
 
@@ -455,4 +456,10 @@ test("a run whose record stayed unwritten after the last try also offers Retry r
   assert.equal(card.note, "Record not written");
   assert.deepEqual(card.actions, ["retryRecord", "openDiff", "discard"]);
   assert.equal(ACTION_LABELS.retryRecord, "Retry record");
+});
+
+test("a record with a nochange loopback keeps it on the card; an unknown reason is dropped", () => {
+  const record = (reason) => ({ worktree: { runId: "20261125-095555-srghyh" }, loopback: { rounds: 1, maxRounds: 3, reason, findings: "Fatal Python error" } });
+  assert.deepEqual(decodeRunRecordFacts(record("nochange")).loopback, { rounds: 1, maxRounds: 3, reason: "nochange", findings: "Fatal Python error" });
+  assert.equal(decodeRunRecordFacts(record("something else")).loopback, null);
 });
