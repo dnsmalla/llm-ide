@@ -469,3 +469,37 @@ fn a_symlinked_parent_makes_restore_refuse_and_save_skip_without_touching_outsid
     assert!(!cache_root(&project).join(&other).exists());
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_prepared_path_that_is_a_link_out_of_the_worktree_is_never_put_on_path() {
+    let outside = temp("outside-env");
+    std::fs::create_dir_all(outside.join("bin")).unwrap();
+    std::fs::write(outside.join("bin/evil"), "#!/bin/sh\necho evil\n").unwrap();
+    std::fs::set_permissions(outside.join("bin/evil"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    let project = project_with("true");
+    let wt = worktree(&project, "a", "x\n");
+    std::os::unix::fs::symlink(&outside, wt.join(".venv")).unwrap();
+
+    register_env_use(&wt, &spec("true"));
+    let out = crate::loop_runner::run_command_keyed(&wt, "evil", Some(30), "k").unwrap();
+    assert_ne!(out.exit_code, Some(0), "the linked folder is not on PATH: {out:?}");
+    assert!(!out.stdout.contains("evil"), "{out:?}");
+    let _ = std::fs::remove_dir_all(project);
+    let _ = std::fs::remove_dir_all(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn forgetting_a_worktree_drops_its_path_entry() {
+    let project = project_with("true");
+    let wt = worktree(&project, "a", "x\n");
+    std::fs::create_dir_all(wt.join(".venv/bin")).unwrap();
+    std::fs::write(wt.join(".venv/bin/envtool"), "#!/bin/sh\necho here\n").unwrap();
+    std::fs::set_permissions(wt.join(".venv/bin/envtool"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    register_env_use(&wt, &spec("true"));
+    assert!(crate::loop_runner::run_command_keyed(&wt, "envtool", Some(30), "k").unwrap().stdout.contains("here"));
+    forget_env_use(&wt);
+    assert_ne!(crate::loop_runner::run_command_keyed(&wt, "envtool", Some(30), "k").unwrap().exit_code, Some(0));
+    let _ = std::fs::remove_dir_all(project);
+}

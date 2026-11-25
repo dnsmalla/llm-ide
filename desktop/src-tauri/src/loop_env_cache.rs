@@ -506,22 +506,34 @@ fn env_use() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf
     ENV_USE.lock().unwrap_or_else(|p| p.into_inner())
 }
 
-/// The `bin` folders of the declared paths that exist now, and the venv root when one of them is a Python venv.
+/// The `bin` folders of the declared paths that exist now, and the venv root when one of them is a Python venv. A folder
+/// that resolves outside the worktree (a `.venv` that is a link to somewhere else) is never put on `PATH`.
 fn env_use_of(worktree: &Path, spec: &EnvCacheSpec) -> EnvUse {
     let mut out = EnvUse::default();
+    let Ok(canon) = std::fs::canonicalize(worktree) else { return out };
+    let inside = |p: &Path| std::fs::canonicalize(p).ok().filter(|c| c.starts_with(&canon));
     for rel in &spec.paths {
         let root = worktree.join(rel);
+        let Some(root_real) = inside(&root) else { continue };
         for sub in ["bin", "Scripts", ".bin"] {
-            let dir = root.join(sub);
-            if dir.is_dir() {
+            if let Some(dir) = inside(&root.join(sub)).filter(|d| d.is_dir()) {
                 out.path_dirs.push(dir);
             }
         }
-        if out.virtual_env.is_none() && root.join("pyvenv.cfg").is_file() {
-            out.virtual_env = Some(root);
+        if out.virtual_env.is_none() && root_real.join("pyvenv.cfg").is_file() {
+            out.virtual_env = Some(root_real);
         }
     }
     out
+}
+
+/// Drops what `register_env_use` kept for a worktree that is gone, so the map never outlives the runs it describes.
+pub(crate) fn forget_env_use(worktree: &Path) {
+    let mut map = env_use();
+    map.remove(worktree);
+    if let Ok(canon) = std::fs::canonicalize(worktree) {
+        map.remove(&canon);
+    }
 }
 
 fn register_env_use(worktree: &Path, spec: &EnvCacheSpec) {

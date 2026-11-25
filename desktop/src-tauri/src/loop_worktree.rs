@@ -877,6 +877,7 @@ pub fn remove_in(info: &RunInfo) -> Result<(), String> {
     }
     unregister(&info.run_id);
     forget_project(&info.run_id);
+    crate::loop_env_cache::forget_env_use(&wt);
     Ok(())
 }
 
