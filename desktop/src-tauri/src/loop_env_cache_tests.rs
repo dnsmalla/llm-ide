@@ -264,3 +264,27 @@ fn the_loop_approval_lists_the_setup_command_with_the_others() {
     assert!(granted.stage_ids.contains(&ENV_CACHE_STAGE_ID.to_string()), "{granted:?}");
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_real_python_venv_still_runs_after_it_is_restored_into_another_worktree() {
+    let python = std::process::Command::new("python3").arg("--version").output();
+    if !python.map(|o| o.status.success()).unwrap_or(false) {
+        return;
+    }
+    let project = temp("venv");
+    let a = worktree(&project, "a", "x\n");
+    let s = spec("python3 -m venv .venv");
+    let built = std::process::Command::new("python3").args(["-m", "venv", ".venv"]).current_dir(&a).output().unwrap();
+    assert!(built.status.success(), "{}", String::from_utf8_lossy(&built.stderr));
+    let key = cache_key(&a, &s).unwrap();
+    save(&project, &a, &s, &key).unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+
+    let b = worktree(&project, "b", "x\n");
+    assert!(restore(&project, &b, &s, &key).unwrap());
+    let out = std::process::Command::new(b.join(".venv/bin/pip")).arg("--version").output().unwrap();
+    assert!(out.status.success(), "pip console script must run from the new worktree: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&b.display().to_string()), "pip runs from the new worktree's venv: {}", String::from_utf8_lossy(&out.stdout));
+    let _ = std::fs::remove_dir_all(project);
+}
