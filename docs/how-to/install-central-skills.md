@@ -56,7 +56,7 @@ After bumping the `.skills` pin (or editing agent-tools/globals in central):
 cd extension && npm run sync:skills
 ```
 
-Commit the mirrored `.md` files **and** `extension/.skills-lock`.
+Commit the mirrored `.md` files **and** `.skills-lock` (repo root; the sync script writes it).
 
 ## Bumping the kit
 
