@@ -117,6 +117,49 @@ fn check_key_line(section: &(String, bool), line: &str, allow_worktree: bool) ->
     Ok(None)
 }
 
+/// `bytes` without the settings a local Git LFS setup writes (`git lfs install --local`, a custom `lfs.url`), for a
+/// caller that works in LFS repositories. Only the exact standard commands are dropped: they run the user's own
+/// `git-lfs`, as a global install would. The `[filter "lfs"]` header becomes `[lfs]`, so any other line under it
+/// (a different program) is still judged, and refused, by `check_config_ex`.
+pub fn without_standard_lfs(bytes: &[u8]) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let mut out = String::with_capacity(text.len());
+    let mut section: Option<(String, Option<String>)> = None;
+    for raw in text.split('\n') {
+        let line = raw.trim_matches(|c: char| c == ' ' || c == '\t' || c == '\r');
+        if line.starts_with('[') {
+            section = None;
+            if let Ok((name, sub, rest)) = parse_header(line) {
+                let plain_filter_lfs = name == "filter" && sub.as_deref() == Some("lfs") && rest.trim().is_empty();
+                section = Some((name, sub));
+                if plain_filter_lfs {
+                    out.push_str("[lfs]\n");
+                    continue;
+                }
+            }
+        } else if let Some((name, sub)) = &section {
+            let (key, value) = line.split_once('=').map_or((String::new(), ""), |(k, v)| (k.trim().to_ascii_lowercase(), v.trim().trim_matches('"')));
+            let standard = match (name.as_str(), sub.as_deref()) {
+                ("filter", Some("lfs")) => matches!(
+                    (key.as_str(), value),
+                    ("clean", "git-lfs clean -- %f")
+                        | ("smudge", "git-lfs smudge -- %f" | "git-lfs smudge --skip -- %f")
+                        | ("process", "git-lfs filter-process" | "git-lfs filter-process --skip")
+                        | ("required", "true" | "false")
+                ),
+                ("lfs", None) => key == "url" && !value.is_empty() && !value.ends_with('\\'),
+                _ => false,
+            };
+            if standard {
+                continue;
+            }
+        }
+        out.push_str(raw);
+        out.push('\n');
+    }
+    out.into_bytes()
+}
+
 /// `Ok(())` only when `bytes` is a config made solely of allowed, plain-data settings.
 #[allow(dead_code)] // the unit tests and external callers use the strict form without a worktree allowance
 pub fn check_config(bytes: &[u8]) -> Result<(), String> {
@@ -273,4 +316,20 @@ mod tests {
         // ... but a header hidden after a quoted bracket is still parsed as one.
         assert!(check_config(b"[remote \"a]\"]\n[filter \"x\"]\n\tclean = x\n").is_err());
     }
+    #[test]
+    fn standard_lfs_settings_are_dropped_and_anything_else_under_them_is_still_refused() {
+        let local = "[core]\n\tbare = false\n[filter \"lfs\"]\n\tclean = git-lfs clean -- %f\n\tsmudge = git-lfs smudge -- %f\n\tprocess = git-lfs filter-process\n\trequired = true\n[lfs]\n\turl = http://127.0.0.1:9/\n\trepositoryformatversion = 0\n";
+        assert!(check_config(local.as_bytes()).is_err(), "the strict check still refuses it");
+        check_config(&without_standard_lfs(local.as_bytes())).unwrap();
+        for evil in [
+            "[filter \"lfs\"]\n\tclean = touch /tmp/x\n",
+            "[filter \"lfs\"]\n\tprocess = git-lfs filter-process; touch /tmp/x\n",
+            "[filter \"lfs\"]\n\tsmudge = git-lfs smudge -- %f\n\ttextconv = touch /tmp/x\n",
+            "[filter \"other\"]\n\tclean = git-lfs clean -- %f\n",
+            "[filter \"lfs\"] clean = touch /tmp/x\n",
+        ] {
+            assert!(check_config(&without_standard_lfs(evil.as_bytes())).is_err(), "{evil:?}");
+        }
+    }
+
 }

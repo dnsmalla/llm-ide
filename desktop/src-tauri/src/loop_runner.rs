@@ -593,7 +593,7 @@ const GIT_DEADLINE: Duration = Duration::from_secs(30 * 60);
 /// checked at the repository above it, which is the one git will use.
 pub(crate) fn guard_repo(dir: &Path) -> Result<(), String> {
     let repo = dir.ancestors().find(|p| p.join(".git").exists()).unwrap_or(dir);
-    crate::git::check_repo(repo).map_err(|e| {
+    crate::git::check_repo_opts(repo, true).map_err(|e| {
         if e.code == "untrusted_repo_config" {
             format!("This repository has git settings Loop does not allow, so Loop will not run git in it. ({})", e.message)
         } else {
@@ -1262,6 +1262,20 @@ mod tests {
         let mut cat = git_command();
         cat.args(["cat-file", "blob", id.trim()]);
         assert_eq!(run_git_guarded(&dir, cat).unwrap().stdout, b"caf\xe9\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A repository set up with `git lfs install --local` runs Loop git (the CI-only LFS worktree test needs git-lfs
+    /// installed, so this pins the guard itself); any other program under the same filter is still refused.
+    #[test]
+    fn the_guard_allows_a_local_lfs_setup_and_nothing_else_under_it() {
+        let dir = repo("lfsguard");
+        for (k, v) in [("filter.lfs.clean", "git-lfs clean -- %f"), ("filter.lfs.smudge", "git-lfs smudge -- %f"), ("filter.lfs.process", "git-lfs filter-process"), ("filter.lfs.required", "true"), ("lfs.url", "http://127.0.0.1:9/")] {
+            git(&dir, &["config", k, v]);
+        }
+        guard_repo(&dir).unwrap();
+        git(&dir, &["config", "filter.lfs.clean", "touch x"]);
+        assert!(guard_repo(&dir).unwrap_err().contains("Loop will not run git"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

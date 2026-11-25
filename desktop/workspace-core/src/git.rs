@@ -61,11 +61,12 @@ fn read_config(path: &Path) -> R<Option<Vec<u8>>> {
 
 /// Validates `<dir>/config` and `<dir>/config.worktree` (git reads the latter with
 /// `extensions.worktreeConfig`, which the allowlist forbids; it is scanned regardless).
-fn check_git_dir(dir: &Path, allow_worktree: bool) -> R<Option<String>> {
+fn check_git_dir(dir: &Path, allow_worktree: bool, allow_lfs: bool) -> R<Option<String>> {
     let mut wt = None;
     for name in ["config", "config.worktree"] {
         let f = dir.join(name);
         if let Some(bytes) = read_config(&f)? {
+            let bytes = if allow_lfs { crate::git_config::without_standard_lfs(&bytes) } else { bytes };
             match crate::git_config::check_config_ex(&bytes, allow_worktree && name == "config") {
                 Ok(w) => wt = wt.or(w),
                 Err(why) => {
@@ -93,6 +94,12 @@ fn read_small(path: &Path) -> Option<String> {
 
 /// Resolves and validates every git directory git would read for `root`.
 pub fn check_repo(root: &Path) -> R<()> {
+    check_repo_opts(root, false)
+}
+
+/// [`check_repo`]; with `allow_lfs` a local Git LFS setup in the config is tolerated (see `without_standard_lfs`).
+/// For a caller that works in LFS repositories with the pointer files, as the Loop's worktrees do.
+pub fn check_repo_opts(root: &Path, allow_lfs: bool) -> R<()> {
     let dotgit = root.join(".git");
     let meta = match std::fs::symlink_metadata(&dotgit) {
         Ok(m) => m,
@@ -102,7 +109,7 @@ pub fn check_repo(root: &Path) -> R<()> {
         return untrusted(".git is a symbolic link");
     }
     if meta.is_dir() {
-        check_git_dir(&dotgit, false)?;
+        check_git_dir(&dotgit, false, allow_lfs)?;
         return Ok(());
     }
     // `.git` FILE: `gitdir: <path>` (linked worktree, or a submodule checkout).
@@ -121,7 +128,7 @@ pub fn check_repo(root: &Path) -> R<()> {
     let back_ok = read_small(&gd.join("gitdir"))
         .and_then(|b| std::fs::canonicalize(Path::new(b.trim())).ok())
         .is_some_and(|p| p == croot.join(".git") || p == dotgit);
-    let wt = check_git_dir(&gd, !inside && !back_ok)?;
+    let wt = check_git_dir(&gd, !inside && !back_ok, allow_lfs)?;
     if !inside && !back_ok {
         let ok = wt.is_some_and(|w| std::fs::canonicalize(gd.join(w)).is_ok_and(|p| p == croot))
             && gd.components().any(|c| c.as_os_str() == "modules");
@@ -135,7 +142,7 @@ pub fn check_repo(root: &Path) -> R<()> {
             if !(inside && common.starts_with(&croot)) && !back_ok {
                 return untrusted("commondir points outside the project");
             }
-            check_git_dir(&common, false)?;
+            check_git_dir(&common, false, allow_lfs)?;
         }
     }
     Ok(())
