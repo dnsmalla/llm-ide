@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 158
+  x-api-version: 159
 servers:
   - url: "https://{host}"
     variables:
@@ -108,6 +108,9 @@ paths:
                 usdCapMonth:
                   type: "number"
                   description: "0-100000 (default 20)"
+                unlimited:
+                  type: "boolean"
+                  description: "Set true to confirm usdCapMonth 0 (= no cap). A 0 cap without unlimited: true answers 400 VALIDATION_FAILED (API 159)"
                 ttlHours:
                   type: "integer"
                   description: "1-168 (default 24)"
@@ -241,6 +244,9 @@ paths:
                 usdCapMonth:
                   type: "number"
                   description: "0-100000; 0 = no cap"
+                unlimited:
+                  type: "boolean"
+                  description: "Set true to confirm usdCapMonth 0 (= no cap). A 0 cap without unlimited: true answers 400 VALIDATION_FAILED (API 159)"
       responses:
         "200":
           description: "OK"

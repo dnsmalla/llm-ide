@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /admin/invites",
+  "status": 400,
+  "request": {
+    "body": {
+      "usdCapMonth": 0,
+      "unlimited": false
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "usdCapMonth 0 means unlimited; send unlimited: true to confirm"
+    }
+  }
+}

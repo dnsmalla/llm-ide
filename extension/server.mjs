@@ -517,7 +517,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          pushes a new fast-forward commit and updates the open draft MR (`reused: true`); a closed MR gets a new draft.
 //   v158 — POST /kb/self-heal/runs accepts `auto: true`, additive: the desktop's daily automatic run. Its triage passes
 //          over `uncaught` incidents (text that can come from outside the app) and leaves them new for a manual run.
-const SERVER_API_VERSION = 158;
+//   v159 — PATCH /admin/members/:userId and POST /admin/invites accept `unlimited: true`; a `usdCapMonth` of 0 (= no cap)
+//          without it answers 400 VALIDATION_FAILED, so an unlimited grant is always an explicit request.
+const SERVER_API_VERSION = 159;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

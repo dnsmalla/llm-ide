@@ -1,0 +1,19 @@
+{
+  "endpoint": "PATCH /admin/members/:userId",
+  "status": 400,
+  "request": {
+    "params": {
+      "userId": "12c2fcdf904d8d13"
+    },
+    "body": {
+      "usdCapMonth": 0,
+      "unlimited": false
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "usdCapMonth 0 means unlimited; send unlimited: true to confirm"
+    }
+  }
+}

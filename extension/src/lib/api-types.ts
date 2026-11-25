@@ -9038,6 +9038,8 @@ export type PatchAdminMembersUserIdRequest = {
     maxMode?: string;
     /** 0-100000; 0 = no cap */
     usdCapMonth?: number;
+    /** Set true to confirm usdCapMonth 0 (= no cap). A 0 cap without unlimited: true answers 400 VALIDATION_FAILED (API 159) */
+    unlimited?: boolean;
   };
 };
 
@@ -9066,6 +9068,8 @@ export type PostAdminInvitesRequest = {
     maxMode?: string;
     /** 0-100000 (default 20) */
     usdCapMonth?: number;
+    /** Set true to confirm usdCapMonth 0 (= no cap). A 0 cap without unlimited: true answers 400 VALIDATION_FAILED (API 159) */
+    unlimited?: boolean;
     /** 1-168 (default 24) */
     ttlHours?: number;
   };
