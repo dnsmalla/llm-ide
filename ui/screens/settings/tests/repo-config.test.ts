@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   ALL_REPO_OPS,
+  credentialHostOf,
+  gitCredentialStatus,
   addSavedRepo,
   decodeRepoConfig,
   defaultRepoConfig,
@@ -218,4 +220,35 @@ test("resolveCloneGrant: a non-gitlab.com base or a malformed one does not block
   );
   assert.equal(broken, null);
   assert.equal(asked, 0);
+});
+
+test("gitCredentialStatus words each save outcome", () => {
+  assert.equal(gitCredentialStatus(true, { stored: true }, "gitlab", "gitlab.com"), "Token saved. Git clone, pull and push will use it for gitlab.com.");
+  assert.match(gitCredentialStatus(true, { stored: false, reason: "not_stored" }, "gitlab", "gitlab.com"), /no working credential helper/);
+  assert.equal(gitCredentialStatus(true, new Error("boom"), "gitlab", "gitlab.com"), "Token saved for the GitLab API, but git could not store it: boom.");
+  assert.match(gitCredentialStatus(true, { stored: false, reason: "git_missing" }, "github", "github.com"), /Git was not found/);
+  assert.equal(gitCredentialStatus(true, null, "github", "github.com"), "Token saved.");
+});
+
+test("gitCredentialStatus words each clear outcome", () => {
+  assert.equal(gitCredentialStatus("cleared", { stored: true }, "gitlab", "gitlab.com"), "Token cleared from LLM-IDE and from git.");
+  assert.equal(gitCredentialStatus("cleared", null, "gitlab", "gitlab.com"), "Token cleared. Saved repositories kept.");
+  assert.match(gitCredentialStatus("cleared", new Error("x"), "gitlab", "gitlab.com"), /git could not remove it: x/);
+});
+
+test("gitCredentialStatus skips quietly in remote mode and trims a doubled period", () => {
+  assert.equal(gitCredentialStatus(true, { stored: false, reason: "remote" }, "gitlab", "gitlab.com"), "Token saved.");
+  assert.equal(gitCredentialStatus(true, { stored: false, reason: "ssh" }, "gitlab", "gitlab.com"), "Token saved.");
+  assert.equal(gitCredentialStatus("cleared", { stored: false, reason: "remote" }, "gitlab", "gitlab.com"), "Token cleared. Saved repositories kept.");
+  assert.equal(gitCredentialStatus(true, new Error("boom."), "gitlab", "gitlab.com"), "Token saved for the GitLab API, but git could not store it: boom.");
+  assert.match(gitCredentialStatus("cleared", { stored: false, reason: "not_removed" }, "gitlab", "git.example.com"), /still holds a login for git\.example\.com/);
+});
+
+test("credentialHostOf follows git's remote host rules", () => {
+  assert.equal(credentialHostOf("HTTPS://GitLab.Example.COM/g"), "gitlab.example.com");
+  assert.equal(credentialHostOf("https://gitlab.com:443"), "gitlab.com");
+  assert.equal(credentialHostOf("https://gitlab.com:8443/x"), "gitlab.com:8443");
+  for (const bad of ["http://gitlab.com", "https://gitlab.com.", "https://gitlab.com:0", "https://gitlab.com:70000", "https://u@gitlab.com", "https://gitlab.com:", "https://"]) {
+    assert.equal(credentialHostOf(bad), null, bad);
+  }
 });

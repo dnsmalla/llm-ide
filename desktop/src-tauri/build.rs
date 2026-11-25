@@ -38,6 +38,8 @@ const COMMANDS: &[&str] = &[
     "loop_repo_branch",
     "loop_clear_factory_output",
     "repo_clone",
+    "git_credential_save",
+    "git_credential_erase",
     "feature_rebuild",
     "core_log_read",
     "core_log_clear",

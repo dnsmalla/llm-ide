@@ -268,6 +268,12 @@ export interface SettingsHost {
    * SSH server's single-use clone grant; the server redeems it for the saved token, so the token never reaches here.
    */
   cloneRepository?(args: { provider: "github" | "gitlab"; url: string; token?: string; grant?: string }): Promise<{ path: string; name: string }>;
+  /**
+   * Local mode: stores / erases the provider token in the machine's git credential helper, so clone, pull and push
+   * work after a restart. `stored: false` carries a `reason` (`ssh`, `remote`, `not_stored`, `not_removed`, `git_missing`); a failure throws.
+   */
+  saveGitCredential?(args: { provider: "github" | "gitlab"; baseUrl?: string; token: string }): Promise<{ stored: boolean; reason?: string }>;
+  eraseGitCredential?(args: { provider: "github" | "gitlab"; baseUrl?: string }): Promise<{ stored: boolean; reason?: string }>;
   /** Active project folder, if the shell has one. */
   activeProjectPath?(): string | null;
   notesFolderPath?(): Promise<string | null>;

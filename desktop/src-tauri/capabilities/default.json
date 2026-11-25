@@ -44,6 +44,8 @@
     "allow-loop-repo-branch",
     "allow-loop-clear-factory-output",
     "allow-repo-clone",
+    "allow-git-credential-save",
+    "allow-git-credential-erase",
     "allow-feature-rebuild",
     "allow-core-log-read",
     "allow-core-log-clear",

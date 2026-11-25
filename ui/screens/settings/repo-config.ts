@@ -440,3 +440,49 @@ export function repoTitle(r: SavedRepo): string {
   const m = /^(?:https?:\/\/[^/]+\/)?([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i.exec(r.url.trim());
   return m?.[1] ?? "Untitled repository";
 }
+
+/**
+ * The host text git uses for a GitLab base URL, or null when the host would refuse it: case-insensitive https, lowercase
+ * host, no trailing dot, `:443` dropped, port 1-65535. Keep in step with `normalize_host` in git_credential.rs.
+ */
+export function credentialHostOf(base: string): string | null {
+  const m = /^https:\/\/([^/?#]*)/i.exec(base.trim());
+  if (!m) return null;
+  const [host, port, ...extra] = m[1].split(":");
+  if (extra.length > 0 || !/^[A-Za-z0-9][A-Za-z0-9.-]*$/.test(host) || host.endsWith(".")) return null;
+  const lower = host.toLowerCase();
+  if (port === undefined) return lower;
+  if (!/^[0-9]+$/.test(port)) return null;
+  const n = Number(port);
+  if (n < 1 || n > 65535) return null;
+  return n === 443 ? lower : `${lower}:${n}`;
+}
+
+/** What the host reported for the git credential step; `null` when the step did not run (remote mode, old host). */
+export type GitCredentialOutcome = { stored: boolean; reason?: string } | Error | null;
+
+const withoutTrailingStops = (text: string): string => text.replace(/[.\s]+$/, "");
+
+/**
+ * The status line after Save token (`saved: true`) or Clear token (`"cleared"`). The vault step already succeeded
+ * when this runs, so a git problem is worded as a warning, never as a failed save.
+ */
+export function gitCredentialStatus(saved: true | "cleared", outcome: GitCredentialOutcome, provider: RepoProvider, host: string): string {
+  const label = provider === "gitlab" ? "GitLab" : "GitHub";
+  const skipped = outcome === null || (!(outcome instanceof Error) && (outcome.reason === "ssh" || outcome.reason === "remote"));
+  if (saved === "cleared") {
+    if (outcome instanceof Error) return `Token cleared from LLM-IDE, but git could not remove it: ${withoutTrailingStops(outcome.message)}.`;
+    if (skipped) return "Token cleared. Saved repositories kept.";
+    if (outcome.stored) return "Token cleared from LLM-IDE and from git.";
+    if (outcome.reason === "not_removed") return `Token cleared from LLM-IDE, but git still holds a login for ${host}. Remove it in your keychain or credential helper.`;
+    return "Token cleared. Saved repositories kept.";
+  }
+  if (skipped) return "Token saved.";
+  if (outcome instanceof Error) return `Token saved for the ${label} API, but git could not store it: ${withoutTrailingStops(outcome.message)}.`;
+  if (outcome.stored) return `Token saved. Git clone, pull and push will use it for ${host}.`;
+  if (outcome.reason === "not_stored") {
+    return `Token saved for the ${label} API. Git has no working credential helper that kept it, so clone, pull and push need your own git login.`;
+  }
+  if (outcome.reason === "git_missing") return `Token saved for the ${label} API. Git was not found, so clone, pull and push are unavailable.`;
+  return "Token saved.";
+}

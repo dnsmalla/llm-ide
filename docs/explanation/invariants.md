@@ -480,6 +480,7 @@ not the repo-kb MOVE above and it never writes to the old folder. It runs only a
 ### ✅ MUST understand
 
 - **`git push` uses the user's ambient credentials.** The PR flow calls `git push -u origin <branch>` using whatever git config / credential helper the user has set up on their machine (SSH key, HTTPS keychain, etc.). No token is passed to the server; the server never stores one.
+- **Save token also writes the token to the OS git credential helper** for that host (Settings → Repositories, local mode only; `git_credential.rs`, verified by a `git credential fill` read-back). The webview chooses the host; accepted because the webview supplies the token itself.
 - **The working tree must be clean before `openPullRequest()`** — the function now checks `git status --porcelain` and throws if there are uncommitted changes outside `.llmide-auto/`. This prevents codegen-generated files from accidentally staging the user's WIP alongside the auto-generated artifacts.
 - **Branch names are prefixed `llmide/auto/<slug>`** — the slug is derived from `taskId` (lowercase alphanumeric + `-_`) so the branch name is deterministic and safe. A branch with the same name existing locally causes an explicit error; the user must delete or rename it before retrying.
 - **The function stages ONLY `.llmide-auto/<taskId>/`** — it never stages the rest of the repo.

@@ -187,6 +187,11 @@ export function inSshMode(): boolean {
   return sshModeProvider();
 }
 
+/** True in hub and ssh server mode: host commands that use this computer are refused (see `invokeHost`). */
+export function inRemoteMode(): boolean {
+  return remoteModeProvider();
+}
+
 function remoteSafe(command: string): boolean {
   return REMOTE_SAFE_COMMANDS.has(command) || REMOTE_SAFE_PREFIXES.some((p) => command.startsWith(p));
 }

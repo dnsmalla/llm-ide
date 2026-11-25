@@ -44,6 +44,7 @@ mod proc_tree;
 mod project;
 mod project_layout;
 mod project_scaffold;
+mod git_credential;
 mod repo_clone;
 mod backend_pick;
 mod graph_gen;
@@ -366,6 +367,8 @@ macro_rules! product_handlers {
                 loop_worktree::loop_repo_branch,
                 loop_worktree::loop_clear_factory_output,
                 repo_clone::repo_clone,
+                git_credential::git_credential_save,
+                git_credential::git_credential_erase,
                 feature_rebuild::feature_rebuild,
                 core_log::core_log_read,
                 core_log::core_log_clear,

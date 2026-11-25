@@ -36,7 +36,8 @@ pub(crate) fn cancel_for_exit() {
 }
 
 /// `grant` is the server's single-use clone grant. It is used only in SSH mode, where the helper redeems it for the
-/// saved token; local mode ignores it because the Mac's own git credentials are used there.
+/// saved token; local mode ignores it because the Mac's own git credentials are used there (Settings → Save token fills them via
+/// `git_credential_save`).
 #[tauri::command]
 pub async fn repo_clone(
     provider: String,
@@ -51,7 +52,8 @@ pub async fn repo_clone(
         })
         .await??);
     }
-    // Local mode never redeems a grant: the Mac's own git credentials are used, so `grant` stays unset here.
+    // Local mode never redeems a grant: it uses the Mac's git credentials, which Save token fills through
+    // `git_credential_save`, so `grant` stays unset here.
     let req = CloneRequest { provider, url, token: token.map(Token::from), folder, grant: None };
     let root = crate::project::active_root().ok_or_else(|| "open a project before cloning a repository".to_string())?;
     if crate::fs_ops::checked_root(&root).is_err() {

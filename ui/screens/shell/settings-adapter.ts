@@ -70,6 +70,13 @@ export function trustOf(status: CoreStatus | null): CoreTrust {
   return status?.trust === "spawned" ? "spawned" : "adopted-unverified";
 }
 
+/** The host's git credential answer; a malformed one throws so Save shows a warning instead of a false "stored". */
+function decodeGitCredential(raw: unknown): { stored: boolean; reason?: string } {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  if (!o || typeof o.stored !== "boolean") throw new Error("the host returned an unreadable git credential answer");
+  return typeof o.reason === "string" ? { stored: o.stored, reason: o.reason } : { stored: o.stored };
+}
+
 /** The host's answer for the saved local login: the email is shown, the password never comes back. */
 function decodeLocalLoginStatus(raw: unknown): { saved: boolean; email: string | null } {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -242,6 +249,12 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
           if (typeof o.path !== "string" || typeof o.name !== "string") throw new Error("the host returned no cloned path");
           return { path: o.path, name: o.name };
+        },
+        async saveGitCredential(args) {
+          return decodeGitCredential(await d.invoke<unknown>("git_credential_save", { provider: args.provider, baseUrl: args.baseUrl, token: args.token }));
+        },
+        async eraseGitCredential(args) {
+          return decodeGitCredential(await d.invoke<unknown>("git_credential_erase", { provider: args.provider, baseUrl: args.baseUrl }));
         },
         async rebuildFeatures(features) {
           const raw = await d.invoke<unknown>("feature_rebuild", { features });

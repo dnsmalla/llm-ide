@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { shellBus } from "../../shell/bus";
-import { inSshMode } from "../../shell/host.ts";
+import { inRemoteMode, inSshMode } from "../../shell/host.ts";
 import { call } from "../core-api.ts";
 import { decodeSecretNames } from "../decoders.ts";
 import { cloneError, codeDirOf } from "../project-model.ts";
@@ -11,6 +11,9 @@ import {
   addSavedRepo,
   applyCloneResult,
   cloneDestinationOf,
+  credentialHostOf,
+  gitCredentialStatus,
+  type GitCredentialOutcome,
   normalizeBase,
   readRepoConfig,
   removeSavedRepo,
@@ -37,7 +40,9 @@ import { PartialNote } from "./NoticeSections.tsx";
  * per-provider automation allow-list, and the saved repositories. Everything except the token is local app config
  * (the Mac uses AppConfig); tokens go to the core vault and are never rendered back, only their names.
  *
- * Tokens are stored write-only; Check token verifies the saved one through the core. Clone goes through the host.
+ * Tokens are stored write-only in the core vault; Check token verifies the saved one through the core. In local mode
+ * Save / Clear token also write / erase the machine's git credential (via the host), so git clone, pull and push work
+ * after a restart. Clone goes through the host.
  * The remaining gaps (pull/re-sync, the Mac's resolve step) are stated in the card.
  */
 export default function RepositoriesSection() {
@@ -51,7 +56,8 @@ export default function RepositoriesSection() {
   const [visible, setVisible] = useState(false);
   const [busy, setBusy] = useState(false);
   const [checking, setChecking] = useState(false);
-  // Tokens saved in this session live only in memory; the vault never returns them. They make Clone one click.
+  // Tokens saved in this session are also kept in memory because the vault never returns them; they make Clone one
+  // click even where git has no stored credential (SSH mode, no credential helper).
   const [memoryTokens, setMemoryTokens] = useState<Record<RepoProvider, string | null>>({ gitlab: null, github: null });
   const [cloneFor, setCloneFor] = useState<string | null>(null);
   const [cloneToken, setCloneToken] = useState("");
@@ -105,6 +111,27 @@ export default function RepositoriesSection() {
   const saved = cfg.saved[provider.id];
   const ops = cfg.operations[provider.id];
 
+  const tokenHost = provider.id === "gitlab" ? credentialHostOf(normalizeBase(cfg.gitlabBaseUrl)) ?? "your GitLab server" : "github.com";
+  const gitArgs = { provider: provider.id, ...(provider.id === "gitlab" ? { baseUrl: normalizeBase(cfg.gitlabBaseUrl) } : {}) };
+
+  // Best effort: the vault save already succeeded, so a git failure is reported as a warning, never thrown.
+  const storeGitCredential = async (token: string): Promise<GitCredentialOutcome> => {
+    if (!host.saveGitCredential || inRemoteMode()) return null;
+    try {
+      return await host.saveGitCredential({ ...gitArgs, token });
+    } catch (e) {
+      return new Error(sourcesError(e));
+    }
+  };
+  const eraseGitCredential = async (): Promise<GitCredentialOutcome> => {
+    if (!host.eraseGitCredential || inRemoteMode()) return null;
+    try {
+      return await host.eraseGitCredential(gitArgs);
+    } catch (e) {
+      return new Error(sourcesError(e));
+    }
+  };
+
   const saveToken = async () => {
     const value = draft.trim();
     if (!value) return;
@@ -113,12 +140,12 @@ export default function RepositoriesSection() {
     setStatus(null);
     try {
       await call(client, "POST", "/auth/me/secrets", { key: provider.tokenKey, value });
+      loadSecrets();
       edit((c) => ({ ...c, gitlabBaseUrl: normalizeBase(c.gitlabBaseUrl) }));
       setMemoryTokens((m) => ({ ...m, [provider.id]: value }));
       setDraft("");
       setVisible(false);
-      setStatus("Token saved.");
-      loadSecrets();
+      setStatus(gitCredentialStatus(true, await storeGitCredential(value), provider.id, tokenHost));
     } catch (e) {
       setError(sourcesError(e));
     } finally {
@@ -152,10 +179,10 @@ export default function RepositoriesSection() {
     setStatus(null);
     try {
       await call(client, "POST", "/auth/me/secrets", { key: provider.tokenKey, value: null });
+      loadSecrets();
       setMemoryTokens((m) => ({ ...m, [provider.id]: null }));
       setDraft("");
-      setStatus("Token cleared. Saved repositories kept.");
-      loadSecrets();
+      setStatus(gitCredentialStatus("cleared", await eraseGitCredential(), provider.id, tokenHost));
     } catch (e) {
       setError(sourcesError(e));
     } finally {
