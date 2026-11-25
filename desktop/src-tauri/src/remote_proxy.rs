@@ -136,11 +136,15 @@ static CONNS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::n
 struct ConnSlot;
 impl ConnSlot {
     fn take() -> Option<Self> {
-        if CONNS.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
-            CONNS.fetch_sub(1, Ordering::SeqCst);
-            return None;
+        Self::reserve(&CONNS).then_some(ConnSlot)
+    }
+    /// Counts one more connection on `counter`, or leaves it unchanged and returns false at the cap.
+    fn reserve(counter: &std::sync::atomic::AtomicUsize) -> bool {
+        if counter.fetch_add(1, Ordering::SeqCst) >= MAX_CONNS {
+            counter.fetch_sub(1, Ordering::SeqCst);
+            return false;
         }
-        Some(ConnSlot)
+        true
     }
 }
 impl Drop for ConnSlot {
@@ -274,11 +278,10 @@ mod tests {
 
     #[test]
     fn the_connection_cap_refuses_past_the_limit_and_frees_on_drop() {
-        // The counter is shared with the proxy tests running beside this one, so take until refused, not exactly MAX.
-        let held: Vec<_> = (0..=MAX_CONNS).map_while(|_| ConnSlot::take()).collect();
-        assert!(held.len() <= MAX_CONNS, "a slot past the cap was granted");
-        drop(held);
-        assert!(ConnSlot::take().is_some());
+        // A counter of its own: the shared one would refuse the connections of the proxy tests running beside this.
+        let n = std::sync::atomic::AtomicUsize::new(0);
+        assert!((0..MAX_CONNS).all(|_| ConnSlot::reserve(&n)));
+        assert!(!ConnSlot::reserve(&n) && n.load(Ordering::SeqCst) == MAX_CONNS);
     }
     use std::net::TcpListener as StdListener;
 
