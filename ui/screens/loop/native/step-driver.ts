@@ -34,6 +34,8 @@ export interface StepRecipe {
   baselineStageKey: string | null;
   /** Run the baseline after planning and only to learn whether the suite was already red (see runSteps). */
   baselineAfterPlanning?: boolean;
+  /** Skip a step's checks (the stages after its apply skill) when the agent marked it skipped and changed no file. */
+  skipChecksWhenSkipped?: boolean;
   /** With baselineAfterPlanning: whether the plan says tests already exist. A red suite that exists stops the run before any step. */
   suiteExists?: (planText: string) => boolean;
   /** Steps per run asked of the config (null = the default 3). */
@@ -233,7 +235,20 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     const tree = await opts.checkpoint();
     pending = tree;
     // A later batch retakes the baseline from the tree the previous batch left, so its graph check judges only itself.
-    const sub = await runNativeLoop({ ...config, ...left, stages: k === 1 ? batch : [...snapshot, ...batch] }, deps);
+    const stepStages = k === 1 ? batch : [...snapshot, ...batch];
+    // A step the agent skipped without writing anything has nothing to check: its Test, map and prune stages (a full
+    // suite run each time) are not run. The step's stages are split after the apply skill to find that out.
+    const cut = r.skipChecksWhenSkipped ? stepStages.findIndex((s) => s.enabled && s.kind === "skill" && s.skillId === r.applySkill) : -1;
+    let sub = await runNativeLoop({ ...config, ...left, stages: cut >= 0 ? stepStages.slice(0, cut + 1) : stepStages }, deps);
+    if (cut >= 0 && cut + 1 < stepStages.length && sub.passed && !sub.cancelled) {
+      const untouched = stepStatus(r, await opts.readPlan(), todo.id) === "skipped" && (await opts.checkpoint()) === tree;
+      if (untouched) opts.log(`${todo.id} was skipped and changed nothing: its checks are not run`);
+      else {
+        const rest = await runNativeLoop({ ...config, ...remaining(costUsd + (sub.costUsd ?? 0)), stages: stepStages.slice(cut + 1) }, deps);
+        const reviews = [...(sub.stepReviews ?? []), ...(rest.stepReviews ?? [])];
+        sub = { ...rest, stages: [...sub.stages, ...rest.stages], iterations: [...sub.iterations, ...rest.iterations], iterationsUsed: sub.iterationsUsed + rest.iterationsUsed, costUsd: (sub.costUsd ?? 0) + (rest.costUsd ?? 0), ...(reviews.length ? { stepReviews: reviews } : {}) };
+      }
+    }
     stages.push(...sub.stages);
     iterations.push(...sub.iterations);
     iterationsUsed += sub.iterationsUsed;

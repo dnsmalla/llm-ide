@@ -19,6 +19,7 @@ export const TEST_RECIPE: StepRecipe = {
   baselineKeys: ["test"],
   baselineStageKey: null,
   baselineAfterPlanning: true,
+  skipChecksWhenSkipped: true,
   // A red suite with test files already in the repository stops the run; with none, the first step may be the one that fixes it.
   suiteExists: testSuiteExists,
   // The Test loop's "Steps per run" is the existing per-run limit (maxPassesPerRun, default 3), which it no longer uses for passes.

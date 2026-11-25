@@ -249,3 +249,19 @@ test("a folder with many source files is split into its sub-folders as areas, an
   plan = mergeTestPlan(plan, map([...tested, ...small]), structure).plan;
   assert.ok(areas().every((a) => a.startsWith("ui/screens/") || a === "web/src"), areas().join(", "));
 });
+
+test("a step skipped without a file change does not run the suite; one that wrote a file does", async () => {
+  const a = fake(T("T1") + T("T2"), { skip: ["T1"] });
+  a.opts.checkpoint = async () => "same-tree"; // nothing outside the plan changed
+  const out = await runTestSteps(cfg({ maxPassesPerRun: 1 }), a.deps, a.opts);
+  assert.equal(out.statusSummary, "0 steps done; T1 skipped; step limit (1) reached");
+  // The suite ran once for the check after planning, and not again for the skipped step.
+  assert.deepEqual(a.st.ran, ["map", "test", "write"]);
+  const b = fake(T("T1") + T("T2"), { skip: ["T1"] }); // the default fake returns a new tree id each time: something changed
+  await runTestSteps(cfg({ maxPassesPerRun: 1 }), b.deps, b.opts);
+  assert.deepEqual(b.st.ran, ["map", "test", "write", "test", "custom"], "a skipped step that changed files is still checked");
+  const c = fake(T("T1"));
+  c.opts.checkpoint = async () => "same-tree";
+  await runTestSteps(cfg({ maxPassesPerRun: 1 }), c.deps, c.opts);
+  assert.deepEqual(c.st.ran, ["map", "test", "write", "test", "custom"], "a done step is always checked");
+});
