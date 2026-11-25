@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { setRunRecordShip } from "../loop/native/history.ts";
-import { LOOP_PAGE_NOTE, cancelRun, concurrency, dropHeldRecords, heldRunIds, retryHeldRecords, stuckRunIds, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { LOOP_PAGE_NOTE, cancelRun, concurrency, dropHeldRecords, heldAndStuckRunIds, retryHeldRecords, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
@@ -186,8 +186,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       setRecords(recs);
       setWorktrees(wts);
       setInterrupted(marks);
-      const held = heldRunIds(projectRoot);
-      const stuck = stuckRunIds(projectRoot);
+      const { held, stuck } = heldAndStuckRunIds(projectRoot);
       heldKey.current = `${[...held].sort().join(",")}|${[...stuck].sort().join(",")}`;
       setRecordStuck(stuck);
       setRecordPending(held);
@@ -246,7 +245,8 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     if (why) setNotice(why);
     const ids = now.map((r) => `${r.runId}:${r.state}`).join(",");
     // A held record is written (or fails) without a run changing state, so its set is compared too.
-    const held = projectRoot ? `${[...heldRunIds(projectRoot)].sort().join(",")}|${[...stuckRunIds(projectRoot)].sort().join(",")}` : "|";
+    const { held: heldNow, stuck: stuckNow } = projectRoot ? heldAndStuckRunIds(projectRoot) : { held: new Set<string>(), stuck: new Set<string>() };
+    const held = `${[...heldNow].sort().join(",")}|${[...stuckNow].sort().join(",")}`;
     if (ids !== liveIds.current || held !== heldKey.current) {
       liveIds.current = ids;
       void loadFacts();

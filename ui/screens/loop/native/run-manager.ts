@@ -715,12 +715,18 @@ function holdRecord(d: RunManagerDeps, fs: FsApi, held: PendingRecord, attempts:
   scheduleRetry(root);
 }
 
+/** One parse of the pending-records store, filtered to `projectRoot`: shared by heldRunIds/stuckRunIds/heldAndStuckRunIds
+ * so a caller needing more than one of them does not re-parse localStorage for each. */
+function pendingForProject(projectRoot: string): PendingRecord[] {
+  return readPending(storage()).filter((p) => p.projectRoot === projectRoot);
+}
+
 /** Run ids whose record (or marker clear) is waiting to be written in this project: the board shows them as "Record pending". */
 /** Held runs whose record failed every try: the board offers "Retry record" for them. */
 export function stuckRunIds(projectRoot: string): ReadonlySet<string> {
   const ids = new Set<string>();
-  for (const p of readPending(storage())) {
-    if (p.projectRoot !== projectRoot || (p.attempts ?? 0) < MAX_RECORD_ATTEMPTS) continue;
+  for (const p of pendingForProject(projectRoot)) {
+    if ((p.attempts ?? 0) < MAX_RECORD_ATTEMPTS) continue;
     const runId = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
     if (typeof runId === "string") ids.add(runId);
   }
@@ -753,13 +759,29 @@ export function dropHeldRecords(projectRoot: string, runIds: readonly string[]):
 export function heldRunIds(projectRoot: string): ReadonlySet<string> {
   const ids = new Set<string>();
   for (const m of pending.get(projectRoot) ?? []) if (m.runId) ids.add(m.runId);
-  for (const p of readPending(storage())) {
-    if (p.projectRoot !== projectRoot) continue;
+  for (const p of pendingForProject(projectRoot)) {
     const fromRecord = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
     if (typeof fromRecord === "string") ids.add(fromRecord);
     if (p.entry.id.startsWith("marker:")) ids.add(p.entry.id.slice("marker:".length));
   }
   return ids;
+}
+
+/** `heldRunIds` + `stuckRunIds` from one parse of localStorage: the board's run-log listener fires up to 20x/s while a
+ * run is live and needs both sets every time, so it calls this instead of the two functions above. */
+export function heldAndStuckRunIds(projectRoot: string): { held: ReadonlySet<string>; stuck: ReadonlySet<string> } {
+  const held = new Set<string>();
+  const stuck = new Set<string>();
+  for (const m of pending.get(projectRoot) ?? []) if (m.runId) held.add(m.runId);
+  for (const p of pendingForProject(projectRoot)) {
+    const fromRecord = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
+    if (typeof fromRecord === "string") {
+      held.add(fromRecord);
+      if ((p.attempts ?? 0) >= MAX_RECORD_ATTEMPTS) stuck.add(fromRecord);
+    }
+    if (p.entry.id.startsWith("marker:")) held.add(p.entry.id.slice("marker:".length));
+  }
+  return { held, stuck };
 }
 
 /** Retries a held record a few seconds later while its project stays open (a transient conflict usually clears). */
