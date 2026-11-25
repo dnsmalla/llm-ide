@@ -137,6 +137,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // The ids the user added ("Add model…"), kept per connection in this browser and joined onto the listed groups.
   const [userModels, setUserModels] = useState<UserModels>(loadUserModels);
   const [tierRouting, setTierRouting] = useState<TierRoutingStatus | null>(null);
+  // The Standard tier decides a new chat's model, so the default waits until the tier answer is in (or failed).
+  const [tierRoutingLoaded, setTierRoutingLoaded] = useState(false);
   // Tiers & Roles models come last and are de-duplicated against everything listed, the user's added ids included.
   const groups = useMemo(() => {
     const own = withUserModels(listedGroups, userModels);
@@ -225,7 +227,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     const ac = new AbortController();
     loadModelGroups(core, ac.signal).then((r) => { setListedGroups(r.groups); setToolsEnabled(r.toolsEnabled); setGroupsLoaded(true); }).catch(() => undefined);
     // Separately: the core may wait for a CLI health probe here, and the picker must not wait with it.
-    loadTierRouting(core, ac.signal).then(setTierRouting).catch(() => undefined);
+    loadTierRouting(core, ac.signal).then(setTierRouting).catch(() => undefined).finally(() => { if (!ac.signal.aborted) setTierRoutingLoaded(true); });
     return () => ac.abort();
   }, [core, coreRestarts]);
 
@@ -282,14 +284,14 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [state.messages, state.phase]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: readOnly ? "ask" : pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
-  // A chat with no explicit model starts on the mode's default: cheap for Ask/Document/Review, strong for
-  // Plan/Execute. A saved pick (or a pinned route) always wins.
+  // A chat with no explicit model starts on the Standard tier's model (else the mode's default). A saved pick (or a
+  // pinned route) always wins.
   useEffect(() => {
-    if (!activeId || !groupsLoaded || current.provider || current.model || route?.pinned) return;
-    const pick = defaultModelForMode(groups, current.mode);
+    if (!activeId || !groupsLoaded || !tierRoutingLoaded || current.provider || current.model || route?.pinned) return;
+    const pick = defaultModelForMode(groups, current.mode, tierRouting);
     if (pick) setCurrent({ provider: pick.provider, model: pick.model });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, groupsLoaded, groups, current.mode, current.provider, current.model, route?.pinned]);
+  }, [activeId, groupsLoaded, tierRoutingLoaded, tierRouting, groups, current.mode, current.provider, current.model, route?.pinned]);
 
   // A viewer has exactly one permitted mode (Ask): the picker never shows Auto and the chat runs as Ask.
   const modeOptions = useMemo(() => allowedModes(perms, MODES).filter((m) => !readOnly || READ_ONLY_MODES.has(m.id)), [perms, readOnly]);

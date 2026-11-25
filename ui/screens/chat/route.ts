@@ -409,14 +409,24 @@ const CHEAP_MODES: ReadonlySet<string> = new Set(["ask", "document", "review"]);
 const CHEAP = /(haiku|mini|flash|small|nano|lite|8b|7b)/i;
 const STRONG = /(opus|sonnet|pro|max|large|gpt-5|o3|o4|4\.1)/i;
 
+/** The Standard tier's model (Settings → Model routing) when it is set and the chat can run it, else null. Pure. */
+export function standardTierModel(cfg: TierRoutingStatus | null, groups: readonly ModelGroup[]): ModelChoice | null {
+  const t = cfg?.tiers?.standard;
+  if (!t || typeof t.provider !== "string" || typeof t.model !== "string" || !t.provider || !t.model) return null;
+  return groups.flatMap((g) => g.models).find((m) => m.provider === t.provider && m.model === t.model && !m.unavailable) ?? null;
+}
+
 /**
- * The model a chat starts on when the user has not picked one. Ask/Document/Review prefer a cheap model;
- * Plan/Execute/Auto prefer the strongest listed one (tools-capable when the mode needs tools). A user pick is
- * stored in the chat prefs and this helper is never consulted for it. Pure.
+ * The model a chat starts on when the user has not picked one: the Standard tier's model in every mode, as Settings
+ * promises ("Standard is the default for new chats"). Without a usable Standard tier: Ask/Document/Review prefer a
+ * cheap model; Plan/Execute/Auto prefer the strongest listed one. A user pick is stored in the chat prefs and this
+ * helper is never consulted for it. Pure.
  */
-export function defaultModelForMode(groups: readonly ModelGroup[], mode: string): ModelChoice | null {
+export function defaultModelForMode(groups: readonly ModelGroup[], mode: string, tiers: TierRoutingStatus | null = null): ModelChoice | null {
   const models = groups.flatMap((g) => g.models).filter((m) => !m.unavailable);
   if (models.length === 0) return null;
+  const standard = standardTierModel(tiers, groups);
+  if (standard) return standard;
   const cheap = CHEAP_MODES.has(mode);
   const match = models.find((m) => (cheap ? CHEAP : STRONG).test(`${m.model} ${m.label}`));
   if (match) return match;
