@@ -33,8 +33,11 @@ use crate::loop_runner::{
     resolve_stage, FaultSpec, StageSpec,
 };
 
-/// How long one approval lasts. It is released sooner by `loop_revoke_approvals` or by quitting the app.
-pub const GRANT_TTL_MS: u64 = 4 * 60 * 60 * 1000;
+/// How long one approval lasts. The store is in memory only, so in practice an approval lasts until the app quits
+/// (or `loop_revoke_approvals`); the one-year bound only keeps `now + TTL` finite. User decision 2026-11-25: the old
+/// 4 h re-prompt interrupted Factory runs for commands the user had already approved. A changed command still needs
+/// a new approval, because the grant is bound to the exact command hashes.
+pub const GRANT_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
 /// The one button that approves a Loop command set.
 pub const APPROVE_ACCEPT: &str = "Run these commands";
 /// A dialog longer than this is refused rather than silently truncating the commands the user is approving.
@@ -310,7 +313,7 @@ fn approval_text(req: &ApprovalRequest) -> Result<String, String> {
     }
     body.push_str(
         "Only these exact commands are approved. If a command changes, the approval no longer matches and nothing runs. \
-         The approval is for this loop, this folder and these command hashes only, and it expires in 4 hours.",
+         The approval is for this loop, this folder and these command hashes only, and it lasts until you quit LLM-IDE.",
     );
     if body.chars().count() > MAX_DIALOG_CHARS {
         return Err("there are too many commands to show in one approval dialog; split the loop or run the stages individually".into());
@@ -340,7 +343,7 @@ pub(crate) fn approve_loop_with(
     if !ask(dialog_title(&req), &text) {
         return Ok(None);
     }
-    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the 4 h.
+    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the TTL.
     let now = now.saturating_add(opened.elapsed().as_millis() as u64);
     let after = loop_request(root, loop_id)?;
     if after.data != req.data {
@@ -371,7 +374,7 @@ pub(crate) fn approve_stage_with(
     if !ask(dialog_title(&req), &text) {
         return Ok(None);
     }
-    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the 4 h.
+    // The grant starts when the dialog closes, not when it opened: time spent reading it must not eat into the TTL.
     let now = now.saturating_add(opened.elapsed().as_millis() as u64);
     let after = stage_request(root, stage_id, loop_id)?;
     if after.data != req.data {
@@ -556,7 +559,7 @@ mod tests {
         assert!(out.is_none(), "Cancel mints no token");
         assert!(shown.contains("printf approved"), "{shown}");
         assert!(shown.contains("exact commands"), "{shown}");
-        assert!(shown.contains("4 hours"), "{shown}");
+        assert!(shown.contains("until you quit"), "{shown}");
         assert_eq!(store.len(), 0, "a declined dialog stores nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
