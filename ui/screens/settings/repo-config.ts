@@ -474,11 +474,15 @@ export function gitCredentialStatus(saved: true | "cleared", outcome: GitCredent
     if (outcome instanceof Error) return `Token cleared from LLM-IDE, but git could not remove it: ${withoutTrailingStops(outcome.message)}.`;
     if (skipped) return "Token cleared. Saved repositories kept.";
     if (outcome.stored) return "Token cleared from LLM-IDE and from git.";
+    if (outcome.reason === "left_in_place") return `Token cleared from LLM-IDE. The git login for ${host} was not saved by LLM-IDE, so it was left in place.`;
     if (outcome.reason === "not_removed") return `Token cleared from LLM-IDE, but git still holds a login for ${host}. Remove it in your keychain or credential helper.`;
     return "Token cleared. Saved repositories kept.";
   }
   if (skipped) return "Token saved.";
   if (outcome instanceof Error) return `Token saved for the ${label} API, but git could not store it: ${withoutTrailingStops(outcome.message)}.`;
+  if (outcome.stored && outcome.reason === "replaced_existing") {
+    return `Token saved. An existing git login for ${host} was replaced; git clone, pull and push now use this token.`;
+  }
   if (outcome.stored) return `Token saved. Git clone, pull and push will use it for ${host}.`;
   if (outcome.reason === "not_stored") {
     return `Token saved for the ${label} API. Git has no working credential helper that kept it, so clone, pull and push need your own git login.`;

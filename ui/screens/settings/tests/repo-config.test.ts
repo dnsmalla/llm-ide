@@ -236,6 +236,11 @@ test("gitCredentialStatus words each clear outcome", () => {
   assert.match(gitCredentialStatus("cleared", new Error("x"), "gitlab", "gitlab.com"), /git could not remove it: x/);
 });
 
+test("gitCredentialStatus warns about a replaced or untouched git login", () => {
+  assert.match(gitCredentialStatus(true, { stored: true, reason: "replaced_existing" }, "gitlab", "gitlab.com"), /existing git login for gitlab\.com was replaced/);
+  assert.match(gitCredentialStatus("cleared", { stored: false, reason: "left_in_place" }, "gitlab", "gitlab.com"), /not saved by LLM-IDE, so it was left in place/);
+});
+
 test("gitCredentialStatus skips quietly in remote mode and trims a doubled period", () => {
   assert.equal(gitCredentialStatus(true, { stored: false, reason: "remote" }, "gitlab", "gitlab.com"), "Token saved.");
   assert.equal(gitCredentialStatus(true, { stored: false, reason: "ssh" }, "gitlab", "gitlab.com"), "Token saved.");

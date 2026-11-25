@@ -104,6 +104,9 @@ struct GitRun {
     /// Neutral directory: a repository's own `.git/config` must not decide which helper runs.
     cwd: PathBuf,
     cap: Duration,
+    /// Where LLM-IDE records a SHA-256 of each token it wrote to git (never the token), so Clear removes only
+    /// that entry and never a login the user stored themselves. `None`: nothing can be proven, so nothing is erased.
+    ledger: Option<PathBuf>,
 }
 
 struct GitOutput {
@@ -194,26 +197,95 @@ fn read_back(run: &GitRun, target: &Target) -> Result<Option<String>, String> {
     Ok(text.lines().find_map(|line| line.strip_prefix("password=")).map(str::to_string))
 }
 
-/// Core of the save command. `stored` is true only when a read-back returns exactly this token.
+fn digest(secret: &str) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(secret.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Constant-time over equal-length digests; the values compared are hex digests, never the secrets.
+fn same_digest(left: &str, right: &str) -> bool {
+    left.len() == right.len() && left.bytes().zip(right.bytes()).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
+
+fn ledger_key(target: &Target) -> String {
+    format!("{}\n{}", target.host, target.username)
+}
+
+fn ledger_read(run: &GitRun) -> serde_json::Map<String, serde_json::Value> {
+    let Some(path) = &run.ledger else { return Default::default() };
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(serde_json::Value::Object(map)) => map,
+        _ => Default::default(),
+    }
+}
+
+/// Whether LLM-IDE wrote exactly this password for the target.
+fn is_ours(run: &GitRun, target: &Target, password: &str) -> bool {
+    ledger_read(run).get(&ledger_key(target)).and_then(|v| v.as_str()).is_some_and(|d| same_digest(d, &digest(password)))
+}
+
+/// Records (`Some`) or forgets (`None`) the digest. Best effort: a failure only means Clear later leaves the entry.
+fn ledger_write(run: &GitRun, target: &Target, token: Option<&str>) {
+    let Some(path) = &run.ledger else { return };
+    let mut map = ledger_read(run);
+    match token {
+        Some(token) => map.insert(ledger_key(target), serde_json::Value::String(digest(token))),
+        None => map.remove(&ledger_key(target)),
+    };
+    let Some(dir) = path.parent() else { return };
+    if crate::fsutil::private_dir(dir).is_ok() {
+        let body = serde_json::Value::Object(map).to_string();
+        let _ = crate::fsutil::write_private_atomic(path, body.as_bytes(), 64 * 1024);
+    }
+}
+
+/// Core of the save command. `stored` is true only when a read-back returns exactly this token. A login the user
+/// held before (not written by LLM-IDE, different password) is still replaced, as asked, but reported.
 fn save_with(run: &GitRun, provider: &str, base_url: Option<&str>, token: Token) -> Result<GitCredentialResult, String> {
     let target = derive_target(provider, base_url)?;
     if !token.is_usable() {
         return Err("the token is empty, too long or contains control characters".into());
     }
+    // A failed pre-read only loses the warning; the save itself goes ahead.
+    let existing = read_back(run, &target).unwrap_or(None);
+    let was_ours = existing.as_deref().is_some_and(|found| is_ours(run, &target, found));
+    let replaced_foreign = existing.as_deref().is_some_and(|found| found != token.expose() && !was_ours);
+    let identical_foreign = existing.as_deref() == Some(token.expose()) && !was_ours;
     credential_step(run, "approve", &credential_input(&target, Some(token.expose())))?;
     match read_back(run, &target)? {
-        Some(found) if found == token.expose() => Ok(GitCredentialResult::done()),
+        Some(found) if found == token.expose() => {
+            // The same token already stored by the user is theirs: do not claim it, or Clear would remove it.
+            if !identical_foreign {
+                ledger_write(run, &target, Some(token.expose()));
+            }
+            if replaced_foreign {
+                return Ok(GitCredentialResult { stored: true, reason: Some("replaced_existing".into()) });
+            }
+            Ok(GitCredentialResult::done())
+        }
         _ => Ok(GitCredentialResult::skipped("not_stored")),
     }
 }
 
-/// `stored: true` means removed: no helper hands out a password for this host and username any more.
+/// `stored: true` means removed. Only the entry LLM-IDE wrote is rejected: when git holds another password for this
+/// host and username (the user's own login) it stays and the answer is `left_in_place`.
 fn erase_with(run: &GitRun, provider: &str, base_url: Option<&str>) -> Result<GitCredentialResult, String> {
     let target = derive_target(provider, base_url)?;
-    credential_step(run, "reject", &credential_input(&target, None))?;
-    match read_back(run, &target)? {
-        None => Ok(GitCredentialResult::done()),
-        Some(_) => Ok(GitCredentialResult::skipped("not_removed")),
+    let Some(current) = read_back(run, &target)? else {
+        ledger_write(run, &target, None);
+        return Ok(GitCredentialResult::skipped("not_present"));
+    };
+    if !is_ours(run, &target, &current) {
+        return Ok(GitCredentialResult::skipped("left_in_place"));
+    }
+    credential_step(run, "reject", &credential_input(&target, Some(&current)))?;
+    let removed = read_back(run, &target)?.is_none();
+    if removed {
+        ledger_write(run, &target, None);
+        Ok(GitCredentialResult::done())
+    } else {
+        Ok(GitCredentialResult::skipped("not_removed"))
     }
 }
 
@@ -228,7 +300,8 @@ fn inherited_env(parent: Vec<(OsString, OsString)>) -> Vec<(OsString, OsString)>
 
 fn production_run() -> Option<GitRun> {
     let git = llmide_workspace_core::git::git_binary()?;
-    Some(GitRun { git, env: inherited_env(std::env::vars_os().collect()), cwd: std::env::temp_dir(), cap: GIT_CAP })
+    let ledger = crate::fsutil::desktop_data_dir().ok().map(|dir| dir.join("git-credential-ledger.json"));
+    Some(GitRun { git, env: inherited_env(std::env::vars_os().collect()), cwd: std::env::temp_dir(), cap: GIT_CAP, ledger })
 }
 
 /// Outside local mode git runs elsewhere (SSH) or not at all (hub); report why instead of touching this machine.
@@ -340,7 +413,7 @@ mod tests {
                 ("GIT_CONFIG_NOSYSTEM".into(), "1".into()),
                 ("GIT_CONFIG_GLOBAL".into(), file.into()),
             ];
-            let run = GitRun { git, env, cwd: dir.clone(), cap: Duration::from_secs(20) };
+            let run = GitRun { git, env, cwd: dir.clone(), cap: Duration::from_secs(20), ledger: Some(dir.join("ledger.json")) };
             Self { dir, run }
         }
         fn with_store() -> Self {
@@ -397,6 +470,71 @@ mod tests {
         assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::done());
         let creds = sb.creds();
         assert!(creds.contains("https://alice:secret@gitlab.com") && !creds.contains("oauth2"), "creds: {creds}");
+    }
+
+    fn replaced() -> GitCredentialResult {
+        GitCredentialResult { stored: true, reason: Some("replaced_existing".into()) }
+    }
+
+    #[test]
+    fn erase_with_the_token_llmide_wrote_rejects_it() {
+        let sb = Sandbox::with_store();
+        save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::done());
+        assert!(!sb.creds().contains("oauth2"), "creds: {}", sb.creds());
+        assert!(!sb.run.ledger.as_ref().unwrap().exists() || !std::fs::read_to_string(sb.run.ledger.as_ref().unwrap()).unwrap().contains("gitlab.com"));
+    }
+
+    #[test]
+    fn erase_leaves_the_users_own_credential_in_place() {
+        let sb = Sandbox::with_store();
+        std::fs::write(sb.dir.join("creds"), "https://oauth2:users-own@gitlab.com\n").unwrap();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("left_in_place"));
+        assert!(sb.creds().contains("oauth2:users-own@gitlab.com"), "creds: {}", sb.creds());
+    }
+
+    #[test]
+    fn erase_leaves_a_credential_that_changed_after_llmide_wrote_it() {
+        let sb = Sandbox::with_store();
+        save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap();
+        std::fs::write(sb.dir.join("creds"), "https://oauth2:swapped@gitlab.com\n").unwrap();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("left_in_place"));
+        assert!(sb.creds().contains("swapped"));
+    }
+
+    #[test]
+    fn erase_without_a_ledger_cannot_prove_ownership() {
+        let mut sb = Sandbox::with_store();
+        save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap();
+        sb.run.ledger = None;
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("left_in_place"));
+        assert!(sb.creds().contains("glpat-abc"));
+    }
+
+    #[test]
+    fn erase_with_nothing_stored_touches_nothing() {
+        let sb = Sandbox::with_store();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("not_present"));
+    }
+
+    #[test]
+    fn save_over_a_different_existing_credential_reports_the_replacement() {
+        let sb = Sandbox::with_store();
+        std::fs::write(sb.dir.join("creds"), "https://oauth2:users-own@gitlab.com\n").unwrap();
+        assert_eq!(save_with(&sb.run, "gitlab", None, Token::from("glpat-new")).unwrap(), replaced());
+        assert!(sb.creds().contains("oauth2:glpat-new@gitlab.com") && !sb.creds().contains("users-own"), "creds: {}", sb.creds());
+        // Now LLM-IDE owns it: a later refresh is not a replacement of someone else's login.
+        assert_eq!(save_with(&sb.run, "gitlab", None, Token::from("glpat-newer")).unwrap(), GitCredentialResult::done());
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::done());
+    }
+
+    #[test]
+    fn saving_the_users_identical_token_does_not_claim_it() {
+        let sb = Sandbox::with_store();
+        std::fs::write(sb.dir.join("creds"), "https://oauth2:same@gitlab.com\n").unwrap();
+        assert_eq!(save_with(&sb.run, "gitlab", None, Token::from("same")).unwrap(), GitCredentialResult::done());
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("left_in_place"));
+        assert!(sb.creds().contains("same"));
     }
 
     #[test]
