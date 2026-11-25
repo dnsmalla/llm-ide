@@ -89,6 +89,17 @@ export interface LoopEngineConfig {
   reviewMode?: "auto" | "human";
   /** Suggest improvements after this many finished runs. Absent = 5; read it through reviewEveryRunsOf. */
   reviewEveryRuns?: number;
+  /** "all" (default) repeats the loop's steps as passes in one run; "one" does the single item the person names at ▶ Run. Absent = "all". */
+  workMode?: "all" | "one";
+  /** Most passes one "all" run makes. Absent = 3; read it through maxPassesOf. */
+  maxPassesPerRun?: number;
+}
+
+/** Passes per "all" run: default 3, whole number, clamped to 1..10. */
+export function maxPassesOf(config: Pick<LoopEngineConfig, "maxPassesPerRun">): number {
+  const n = config.maxPassesPerRun;
+  if (typeof n !== "number" || !Number.isFinite(n)) return 3;
+  return Math.min(10, Math.max(1, Math.floor(n)));
 }
 
 /** The improvement-review cadence in runs: default 5, whole number, clamped to 1..50. */
@@ -203,6 +214,8 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     maxCostUsd: num(o.maxCostUsd),
     ...(o.reviewMode === "human" ? { reviewMode: "human" as const } : {}),
     ...(typeof o.reviewEveryRuns === "number" && Number.isFinite(o.reviewEveryRuns) ? { reviewEveryRuns: o.reviewEveryRuns } : {}),
+    ...(o.workMode === "one" ? { workMode: "one" as const } : {}),
+    ...(typeof o.maxPassesPerRun === "number" && Number.isFinite(o.maxPassesPerRun) ? { maxPassesPerRun: o.maxPassesPerRun } : {}),
   };
 }
 
@@ -302,5 +315,7 @@ function encodeConfig(c: LoopEngineConfig): Record<string, unknown> {
     ...(c.maxCostUsd !== null ? { maxCostUsd: c.maxCostUsd } : {}),
     ...(c.reviewMode === "human" ? { reviewMode: "human" } : {}),
     ...(typeof c.reviewEveryRuns === "number" ? { reviewEveryRuns: c.reviewEveryRuns } : {}),
+    ...(c.workMode === "one" ? { workMode: "one" } : {}),
+    ...(typeof c.maxPassesPerRun === "number" ? { maxPassesPerRun: c.maxPassesPerRun } : {}),
   };
 }

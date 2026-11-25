@@ -72,6 +72,22 @@ export async function waitUnlessCancelled(ms: number, isCancelled?: () => boolea
 }
 
 /** The pause before the next stage or batch: none at 0, and none once the run is cancelled or halted. */
+/**
+ * The wall-clock budget and cost ceiling are per RUN: each sub-run gets only what is left of them.
+ * shortcut: paused time counts against the remaining wall clock here (the runner excludes it within one sub-run).
+ */
+export function runBudget(config: Pick<LoopEngineConfig, "wallClockBudgetSeconds" | "maxCostUsd">) {
+  const started = Date.now();
+  const remaining = (spent: number): { wallClockBudgetSeconds: number | null; maxCostUsd: number | null } => ({
+    wallClockBudgetSeconds: config.wallClockBudgetSeconds === null ? null : config.wallClockBudgetSeconds - (Date.now() - started) / 1000,
+    maxCostUsd: config.maxCostUsd === null ? null : config.maxCostUsd - spent,
+  });
+  const exhausted = (r: ReturnType<typeof remaining>): string | null =>
+    r.wallClockBudgetSeconds !== null && r.wallClockBudgetSeconds <= 0 ? "wall-clock budget reached"
+      : r.maxCostUsd !== null && r.maxCostUsd <= 0 ? "cost ceiling reached" : null;
+  return { remaining, exhausted };
+}
+
 export async function pauseBetween(deps: RunnerDeps, seconds: number): Promise<void> {
   if (seconds <= 0 || deps.isCancelled?.() || deps.halt?.()) return;
   await (deps.sleep ? deps.sleep(seconds * 1000) : waitUnlessCancelled(seconds * 1000, deps.isCancelled, deps.halt));

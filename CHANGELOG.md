@@ -5,6 +5,10 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Loop: Work and Approval switches
+
+- Every non-Factory loop has **Work** (`workMode`: everything it finds, repeated as passes up to `maxPassesPerRun`, or one item you name at ▶ Run) and **Approval** (`reviewMode`: AI, or hold the finished run for you) in its settings. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#work-and-approval-the-two-process-switches).
+
 ### API v150: Loop self-improvement
 
 - **A loop now learns from use** (`SERVER_API_VERSION` 149 → 150). The core records signals (run finished, loop edited,

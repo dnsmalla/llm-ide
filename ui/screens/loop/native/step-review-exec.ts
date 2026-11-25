@@ -2,6 +2,7 @@
 // before the step ran) and writes one verdict file under .factory/. Every failure here becomes a skipped review or a
 // skipped baseline, never a throw, so a review problem cannot take the run down. Only a write outside .factory/ halts
 // the run, as it does for any other agent stage.
+import { runCommandLines } from "./run-command.ts";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type GuardedCallOutcome } from "./agent-call.ts";
 import { agentRunBody, stepDiffSection } from "./factory.ts";
@@ -77,11 +78,12 @@ async function guardReviewWrites(ctx: StageExecContext, paths: readonly string[]
 }
 
 /** The review message: the step, the goal, where the verdict goes, and the step's diff as data. */
-function reviewMessage(loop: LoopDefinition, stage: LoopStage, outputPath: string, diff: { text: string; truncated: boolean }): string {
+function reviewMessage(loop: LoopDefinition, stage: LoopStage, outputPath: string, command: string | undefined, diff: { text: string; truncated: boolean }): string {
   const parts = [`Step: ${stage.name}`];
   // No accepted lessons here on purpose: a lesson guides doing the step, and must never steer the judge of that step.
   if (loop.goal) parts.push(`Loop goal: ${loop.goal}`);
   if (loop.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
+  parts.push(...runCommandLines(command));
   parts.push(`Output path: ${outputPath}`, stepDiffSection(diff));
   return parts.join("\n\n");
 }
@@ -108,7 +110,7 @@ export async function reviewStepOnce(ctx: StageExecContext, loop: LoopDefinition
   }
   // Without this the skill turns "no diff" into a [high] finding, which would pay for a review and then a repair loop over nothing.
   if (diff.changedFiles === 0 || diff.text.trim() === "") return skipped("the step changed no files");
-  const message = reviewMessage(loop, stage, outputPath, diff);
+  const message = reviewMessage(loop, stage, outputPath, ctx.runCommand, diff);
   const before = await dirtyBefore(ctx);
   const g: GuardedCallOutcome<AgentRunReply> = await guardedAgentCall<AgentRunReply>({
     before,

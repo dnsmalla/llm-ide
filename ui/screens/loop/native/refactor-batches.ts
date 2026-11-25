@@ -3,7 +3,7 @@
 // rolled back to that checkpoint and marked blocked in the plan; a batch that passed stays, even when a later one is
 // rolled back. A user Stop is not rolled back: the person is looking at the tree.
 import type { LoopEngineConfig, LoopStage } from "./model.ts";
-import { pauseBetween, runNativeLoop, stepReviewNote, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome, type StepReviewOutcome } from "./runner.ts";
+import { pauseBetween, runBudget, runNativeLoop, stepReviewNote, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome, type StepReviewOutcome } from "./runner.ts";
 
 export interface RefactorBatchOpts {
   maxBatches?: number;
@@ -80,16 +80,7 @@ export async function runRefactorBatches(config: LoopEngineConfig, deps: RunnerD
   const { planning, batch } = splitRefactorPhases(config.stages);
   const snapshot = planning.filter((s) => s.kind === "codeGraph" && s.graphOp === "snapshot");
 
-  // The wall-clock budget and the cost ceiling are per RUN: each sub-run gets only what is left of them.
-  // shortcut: paused time counts against the remaining wall clock here (the runner excludes it within one sub-run).
-  const started = Date.now();
-  const remaining = (spent: number): { wallClockBudgetSeconds: number | null; maxCostUsd: number | null } => ({
-    wallClockBudgetSeconds: config.wallClockBudgetSeconds === null ? null : config.wallClockBudgetSeconds - (Date.now() - started) / 1000,
-    maxCostUsd: config.maxCostUsd === null ? null : config.maxCostUsd - spent,
-  });
-  const exhausted = (r: ReturnType<typeof remaining>): string | null =>
-    r.wallClockBudgetSeconds !== null && r.wallClockBudgetSeconds <= 0 ? "wall-clock budget reached"
-      : r.maxCostUsd !== null && r.maxCostUsd <= 0 ? "cost ceiling reached" : null;
+  const { remaining, exhausted } = runBudget(config);
   const budgetStop = (summary: string) => /^(wall-clock budget reached|cost ceiling reached)/.test(summary);
 
   // Nothing is planned or changed until the tests can start and pass: a red baseline here means the test command or the tree.

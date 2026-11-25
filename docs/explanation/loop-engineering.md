@@ -262,6 +262,14 @@ The native Loop (desktop) moves one careful step at a time, and checks each step
 - **Time limit.** The request to the core for an agent step waits as long as the step's own limit (30 minutes by default) plus a minute, not the 30 seconds of an ordinary request.
 - **Graph generation is code, not a model.** The graph comes from the graph-kit scanner (`graph-kit/bin/graph-kit.js`, run by the host's `graph_generate`). The graph, test-map, ledger, prune, artifact and shell stages never call the model, and a test fails if one does. A graph is validated before it is used: a `schemaVersion`, unique node ids, and every edge pointing at an existing node. An invalid or empty graph fails the snapshot (it never becomes the baseline), and an invalid saved baseline fails the verify.
 
+### Work and Approval (the two process switches)
+
+Every loop except the Factory has two switches at the top of its settings; both work through the one run path.
+
+- **Work: Everything it finds** (default, `workMode` absent). One run repeats the loop's steps as passes, up to **Passes per run** (`maxPassesPerRun`, default 3, 1 to 10), and stops after the first pass that changes nothing real. A pass counts as progress when it changed a path outside the loop's own folders (`system/loop`, `system/loop-runs`, `system/loop-worktrees`, `llm-doc/loop/`, `.factory/`), so ledgers and maps do not keep it going. The time budget and cost ceiling are per run, and each pass gets only what is left. A pass that fails, is stopped, held or blocked ends the run; earlier passes stay in the record. A run without its own worktree is one pass, and the Refactoring loop keeps its own batches per run.
+- **Work: One item I name** (`workMode: "one"`). ▶ Run asks "What should this run do?" (one line, required, kept only in the screen, never in `loop.json`) and tells the agent on every prompt of the run: do only that item, then stop. A scheduled run has no task and is skipped with a notice. A queued run carries its task with it; one restored after a reload has lost it and is refused with a notice. The Refactoring loop applies one batch.
+- **Approval** (`reviewMode`): **AI** (default) opens the draft merge request after a passed run with changes; **Me** holds that run for your approval in the Ship panel and opens nothing by itself. The Factory sets this on its board ("Final review").
+
 ### Input path
 
 A loop that plans, applies or tests code (Refactoring, Test, or any loop with a Refactor Plan, Test Write, Refactor Apply or Refactor Conform stage) has an **Input path** in its Overview: the folder of the repository it works on. It is empty by default, which means the whole repository; enter a folder such as `src/billing` to limit the work to it. The path is relative to the repository root, and a path that is absolute, contains `..`, or points into `.git`, `.factory`, `node_modules`, `system/` or `llm-doc/loop/` is refused. A run does not start when the folder does not exist.

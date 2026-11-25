@@ -2,6 +2,7 @@
 // Loop screen and the factory run manager, so it closes over nothing: every host call, core call, file read and log
 // line goes through the StageExecContext. Host commands the host scopes by run carry the run id, so a run keeps
 // working in its own worktree after the user opens another project.
+import { runCommandLines } from "./run-command.ts";
 import type { FsApi } from "../../explorer/fs";
 import type { CoreClient } from "../../shell/core";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
@@ -54,6 +55,8 @@ export interface StageExecContext {
   isCancelled(): boolean;
   /** The host reported a shell stage as cancelled. */
   markCancelled(): void;
+  /** "One item I name": the user's task for this run, added to every agent prompt. */
+  runCommand?: string;
 }
 
 /** The halt one run raised. A reason ends the run; `isError` = a failed agent call with nothing out of scope. */
@@ -206,6 +209,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   if (lessons) parts.push(lessons);
   if (target.goal) parts.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) parts.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
+  parts.push(...runCommandLines(ctx.runCommand));
   const inputPath = target.inputPath ?? "";
   const scoped = inputPath !== "" && INPUT_PATH_SKILLS.has(s.skillId);
   const targetPath = scoped && s.skillId === "skills/refactor-planner" ? inputPath : s.targetPath;
@@ -462,6 +466,7 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
   if (lessons) message.push(lessons);
   if (target.goal) message.push(`Loop goal: ${target.goal}`);
   if (target.acceptanceCriteria) message.push(`Acceptance criteria: ${target.acceptanceCriteria}`);
+  message.push(...runCommandLines(ctx.runCommand));
   // NOTE: kept out of FACTORY_REPAIR_HINT, which a generated registry pins byte for byte.
   if (isFactoryLoop(target)) message.push(FACTORY_REPAIR_HINT, "If .factory/HUMAN-REVIEW.md exists, read it first.");
   const before = await dirtyBefore(ctx);

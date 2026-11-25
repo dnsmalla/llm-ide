@@ -14,9 +14,11 @@ import { core } from "../../shell/runtime";
 import { SkillIdField, decodeSkillChoices, type SkillChoice } from "./SkillIdField";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
-import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
+import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, maxPassesOf, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
-import { reviewSwitch, setReviewAfter } from "./review-ui.ts";
+import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
+import { hasRealProgress, runAllPasses } from "./all-passes.ts";
+import { RUN_COMMAND_MAX } from "./run-command.ts";
 import { reviewModeOf, stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
@@ -206,7 +208,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setLearnedWriteHook(() => core.request("/kb/agent/self-improvement/claim", { method: "POST", body: { workspaceRoot: projectRoot } }));
     return () => setLearnedWriteHook(null);
   }, [projectRoot]);
-  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean }>>([]);
+  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean; command?: string }>>([]);
+  // "One item I name": the task text per loop id. Component state only, never saved to loop.json.
+  const [runCommands, setRunCommands] = useState<Record<string, string>>({});
+  const runCommandsRef = useRef(runCommands);
+  runCommandsRef.current = runCommands;
   const queueRestored = useRef(false);
   const persistQueue = () => {
     if (!projectRoot) return;
@@ -533,13 +539,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const currentRunRoot = () => runRoot(projectRoot ?? "", activeRunRef.current, workRoot);
 
   /** The stage-execution context for one run (or one Run-stage click) in this screen. */
-  const stageContext = (runId: string | null, runRootPath: string, token: string | null): StageExecContext => ({
+  const stageContext = (runId: string | null, runRootPath: string, token: string | null, runCommand?: string): StageExecContext => ({
     projectRoot: projectRoot ?? "", runId, runRoot: runRootPath, fs, host: invokeHost, core,
     log: (line) => setRunLog((l) => [...l, line]),
     approvalToken: async () => token,
     signal: runAbortRef.current?.signal,
     isCancelled: () => cancelledRef.current,
     markCancelled: () => { cancelledRef.current = true; },
+    ...(runCommand ? { runCommand } : {}),
   });
 
   /** The Refactoring batch driver's rollback and plan access for one worktree run. */
@@ -562,6 +569,17 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       log: (line: string) => setRunLog((l) => [...l, line]),
     };
   };
+
+  /** The Everything mode's checkpoint and progress check for one worktree run: progress = a changed path outside the loop's own folders. */
+  const allPassesOpts = (run: RunInfo) => ({
+    checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
+    progressed: async (before: string) => {
+      const d = decodeWorktreeDiff(await invokeHost<unknown>("loop_worktree_diff", { runId: run.runId, since: before }));
+      if (!d) throw new Error("the worktree diff could not be read");
+      return hasRealProgress(d.files);
+    },
+    log: (line: string) => setRunLog((l) => [...l, line]),
+  });
 
   /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
   const cancelActiveRun = () => {
@@ -605,8 +623,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     return "ok";
   };
 
-  const executeLoopGated = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
+  const executeLoopGated = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null, command?: string) => {
     if (dirty) return;
+    const oneItem = !isFactoryLoop(target) && target.config.workMode === "one";
+    // A "one item I name" run is the person's task; the schedule never has one, and a queue entry restored after a reload lost it.
+    if (oneItem && !command?.trim()) { setNotice(scheduled ? `“${target.name}” is set to one item you name; the schedule skipped it.` : `“${target.name}” is set to one item you name: type the task and press ▶ Run.`); return; }
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
     // Every loop runs on its own branch unless it opted out or has a Regression stage (it works on the working tree).
@@ -760,12 +781,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunRecord(null);
     setShipRun(null);
     setRunningStage(true);
-    setRunLog((l) => [...l, `▶ ${target.name}`, ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`, ...(leftoverFiles === null ? ["The worktree's state could not be read; the end of this run waits for your review."] : leftoverFiles > 0 ? [`${leftoverFiles} uncommitted file(s) from an earlier run are in this worktree; the end of this run waits for your review.`] : [])] : []), ""]);
+    setRunLog((l) => [...l, `▶ ${target.name}`, ...(oneItem ? [`Task: ${command?.trim()}`] : []), ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`, ...(leftoverFiles === null ? ["The worktree's state could not be read; the end of this run waits for your review."] : leftoverFiles > 0 ? [`${leftoverFiles} uncommitted file(s) from an earlier run are in this worktree; the end of this run waits for your review.`] : [])] : []), ""]);
     const started = Date.now();
     let summaryPath: string | null = null;
     // Set once the Loop's saved state is back in the main tree; the finally block copies it back when the run threw first.
     let stateSavedBack = false;
-    const archiveLog: string[] = [];
+    const archiveLog: string[] = oneItem ? [`Task: ${command?.trim()}`] : [];
     // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
     let releaseBoardRun: (() => void) | null = null;
@@ -805,7 +826,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         if (stageId !== null) setSelectedStageId(stageId);
       };
       const runDeps: RunnerDeps = {
-        ...createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), log: followLog }, target),
+        ...createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken, oneItem ? command?.trim() : undefined), log: followLog }, target),
         isCancelled() { return cancelledRef.current; },
         log: followLog,
         holdWhilePaused,
@@ -817,8 +838,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         },
       };
       const outcome = target.defaultKey === "refactor" && activeRun
-        ? await runRefactorBatches(runConfig, runDeps, refactorBatchOpts(activeRun))
-        : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
+        ? await runRefactorBatches(runConfig, runDeps, { ...refactorBatchOpts(activeRun), ...(oneItem ? { maxBatches: 1 } : {}) })
+        : activeRun && !isFactoryLoop(target) && !oneItem && target.defaultKey !== "refactor" && maxPassesOf(runConfig) > 1
+          ? await runAllPasses(runConfig, runDeps, allPassesOpts(activeRun))
+          : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
       const setupStage = target.config.stages.find((st) => isSetupStage(st));
       if (activeRun && setupStage && outcome.stages.some((o) => isSetupStage(o.stage) && o.ok)) await markSetupDone(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setupStage.command ?? "");
       if (!outcome.passed && !outcome.cancelled && outcome.failedStage && isSetupStage(outcome.failedStage)) outcome.statusSummary = `Setting up the project's dependencies (${setupStage?.command ?? "install"}) failed, so the run stopped before its other steps.${activeRun ? ` Branch ${activeRun.branch} is kept.` : ""}`;
@@ -941,12 +964,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       // A run drains the whole queue. What is left now waits behind `next`: if `next` never becomes a run (no grant,
       // approval refused), the wrapper must still move on to these instead of leaving them for a manual Resume.
       waitingRef.current = new Set(next ? queueRef.current.map((x) => x.loop.id) : []);
-      if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled), 0);
+      if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled, null, next.command), 0);
     }
   };
 
-  const enqueueLoop = (target: LoopDefinition, scheduled: boolean) => {
-    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled });
+  const enqueueLoop = (target: LoopDefinition, scheduled: boolean, command?: string) => {
+    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled, ...(command ? { command } : {}) });
     setQueued(queueRef.current.length);
     persistQueue();
     setNotice(`Queued “${target.name}”.`);
@@ -954,17 +977,17 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
 
   // The only entry to a run. The gate is taken before the first await: `runningRef` is set only after the approval
   // dialog and worktree setup, so without it two starts in that window ran two loops in one working tree.
-  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null) => {
+  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null, command?: string) => {
     if (!startGateRef.current.tryAcquire()) {
       // A picked Factory item cannot wait in the queue (the queue holds loops, not work items).
       if (start) setNotice("Another run is starting; start this item again when it has begun.");
-      else { waitingRef.current.add(target.id); enqueueLoop(target, scheduled); }
+      else { waitingRef.current.add(target.id); enqueueLoop(target, scheduled, command); }
       return;
     }
     ranRef.current = false;
     setStarting(true);
     try {
-      await executeLoopGated(target, scheduled, start);
+      await executeLoopGated(target, scheduled, start, command);
     } finally {
       startGateRef.current.release();
       setStarting(false);
@@ -982,7 +1005,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           for (const x of queueRef.current) if (waiting.has(x.loop.id)) waitingRef.current.add(x.loop.id);
           setQueued(queueRef.current.length);
           persistQueue();
-          window.setTimeout(() => void executeLoop(next!.loop, next!.scheduled), 0);
+          window.setTimeout(() => void executeLoop(next!.loop, next!.scheduled, null, next!.command), 0);
         }
       }
     }
@@ -995,11 +1018,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       setPickerLoop(target);
       return;
     }
+    const command = !scheduled && !isFactoryLoop(target) && target.config.workMode === "one" ? runCommandsRef.current[target.id]?.trim() || undefined : undefined;
     if (runningRef.current || startGateRef.current.held) {
-      enqueueLoop(target, scheduled);
+      enqueueLoop(target, scheduled, command);
       return;
     }
-    void executeLoop(target, scheduled);
+    void executeLoop(target, scheduled, null, command);
   };
 
   runLoopRef.current = runLoop;
@@ -1069,7 +1093,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (!next) return;
     setQueued(queueRef.current.length);
     persistQueue();
-    void executeLoop(next.loop, next.scheduled);
+    void executeLoop(next.loop, next.scheduled, null, next.command);
   };
 
   const runSelectedStage = async () => {
@@ -1094,7 +1118,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunningStage(true);
     setRunLog((l) => [...l, `$ ${stage.name}`, ""]);
     try {
-      const r = await runOneStage(stageContext(null, workRoot ?? projectRoot ?? "", approvalToken), stage, loop, [], { reason: null, isError: false });
+      const r = await runOneStage(stageContext(null, workRoot ?? projectRoot ?? "", approvalToken, !isFactoryLoop(loop) && loop.config.workMode === "one" ? runCommands[loop.id]?.trim() || undefined : undefined), stage, loop, [], { reason: null, isError: false });
       setRunLog((l) => [...l, ...r.output.split("\n"), r.ok ? "Stage passed." : "Stage failed."]);
       setNotice(r.ok ? "The stage passed." : "The stage failed.");
     } catch (e) {
@@ -1155,6 +1179,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   if (!store || !loop) return <div className="loop-native-empty"><p>This project has no loops yet.</p></div>;
 
   const enabledGates = loop.config.stages.filter((s) => s.enabled && s.severity === "blocking");
+  const oneItemLoop = loop !== null && !isFactoryLoop(loop) && loop.config.workMode === "one";
+  const needsTask = oneItemLoop && !(runCommands[loop.id] ?? "").trim();
   const regressionOnTree = loop !== null && !isFactoryLoop(loop) && loop.config.alwaysUseWorktree && worktreeBlockedStage(loop.config.stages) !== null;
   const pastFactory = runRecord ? decodeFactoryFields(runRecord) : null;
   const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -1212,7 +1238,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}{dirty ? <button type="button" className="loop-btn loop-save-btn" data-dirty="true" disabled={saving} title="Save the Loop changes" onClick={() => void save()}>{saving ? "Saving…" : "● Save changes"}</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty} title={dirty ? "Save the Loop first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}{dirty ? <button type="button" className="loop-btn loop-save-btn" data-dirty="true" disabled={saving} title="Save the Loop changes" onClick={() => void save()}>{saving ? "Saving…" : "● Save changes"}</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty || needsTask} title={dirty ? "Save the Loop first" : needsTask ? "Type what this run should do first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        {oneItemLoop ? <div className="loop-run-command"><label className="loop-field"><span>What should this run do?</span><input value={runCommands[loop.id] ?? ""} maxLength={RUN_COMMAND_MAX} placeholder="One item, one line" onChange={(e) => { const v = e.target.value.replace(/\s+/g, " ").slice(0, RUN_COMMAND_MAX); setRunCommands((c) => ({ ...c, [loop.id]: v })); }} /></label>{needsTask ? <p className="loop-native-hint">Required: ▶ Run starts once you name the item.</p> : null}</div> : null}
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} branchDiscard={shipRun.branchDiscard} mergedMr={shipRun.mergedMr ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
         {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
@@ -1270,6 +1297,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <dt>Scheduled</dt><dd>{loop.runsOnSchedule ? "included in this page's cron schedule" : "no — run it from here"}</dd>
           </dl>
           <div className="loop-budgets">
+            {!isFactoryLoop(loop) ? <>
+              <label className="loop-field"><span>Work</span><select value={loop.config.workMode === "one" ? "one" : "all"} onChange={(e) => patchLoop((l) => { if (e.target.value === "one") l.config.workMode = "one"; else delete l.config.workMode; })}><option value="all">Everything it finds</option><option value="one">One item I name</option></select></label>
+              {loop.config.workMode !== "one" ? <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
+              <label className="loop-field"><span>Approval</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
+            </> : null}
             <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>
             <label className="loop-field"><span>Time budget (min)</span><input type="number" min={0} step={15} placeholder="none" title="Empty = no time limit" value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>
             <label className="loop-field"><span>Stop after non-improving</span><input type="number" min={1} max={10} value={loop.config.consecutiveFailureStop} onChange={(e) => patchLoop((l) => { l.config.consecutiveFailureStop = Math.max(1, Number(e.target.value) || 1); })} /></label>

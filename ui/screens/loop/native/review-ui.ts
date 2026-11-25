@@ -14,8 +14,8 @@ export function setReviewAfter(stage: LoopStage, on: boolean): void {
 }
 
 export const REVIEW_MODE_OPTIONS: readonly { value: "auto" | "human"; label: string }[] = [
-  { value: "auto", label: "Auto (AI reviews, then ships)" },
-  { value: "human", label: "Human (wait for my approval)" },
+  { value: "auto", label: "AI (reviews, then opens the draft MR)" },
+  { value: "human", label: "Me (hold the finished run for my approval)" },
 ];
 
 /** "auto" is the default and is stored as an absent key, matching how the engine and the template write it. */

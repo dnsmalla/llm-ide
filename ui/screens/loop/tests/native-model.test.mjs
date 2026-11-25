@@ -185,3 +185,22 @@ test("the round count is a whole number from 1 to 3 wherever it comes from", asy
   assert.equal(decodeConfig({ stages: [], maxIterations: 0 }).maxIterations, 1);
   assert.equal(decodeConfig({ stages: [] }).maxIterations, 3, "absent reads as the maximum");
 });
+
+test("workMode and maxPassesPerRun round-trip, are written only when set, and maxPassesOf defaults and clamps", () => {
+  const raw = { loops: [{ name: "A", config: { workMode: "one", maxPassesPerRun: 5, stages: [] } }] };
+  const loop = m.decodeProjectStore(raw).loops[0];
+  assert.equal(loop.config.workMode, "one");
+  assert.equal(loop.config.maxPassesPerRun, 5);
+  const again = JSON.parse(m.encodeProjectStore({ schemaVersion: 2, loops: [loop] })).loops[0].config;
+  assert.equal(again.workMode, "one");
+  assert.equal(again.maxPassesPerRun, 5);
+  const plain = m.decodeProjectStore({ loops: [{ name: "B", config: { workMode: "all", maxPassesPerRun: "x", stages: [] } }] }).loops[0];
+  assert.equal(plain.config.workMode, undefined);
+  assert.equal(plain.config.maxPassesPerRun, undefined);
+  const enc = JSON.parse(m.encodeProjectStore({ schemaVersion: 2, loops: [plain] })).loops[0].config;
+  assert.equal("workMode" in enc || "maxPassesPerRun" in enc, false);
+  assert.equal(m.maxPassesOf(plain.config), 3);
+  assert.equal(m.maxPassesOf({ maxPassesPerRun: 0 }), 1);
+  assert.equal(m.maxPassesOf({ maxPassesPerRun: 99 }), 10);
+  assert.equal(m.maxPassesOf({ maxPassesPerRun: 4.9 }), 4);
+});
