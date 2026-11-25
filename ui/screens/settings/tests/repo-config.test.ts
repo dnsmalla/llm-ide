@@ -238,7 +238,9 @@ test("gitCredentialStatus words each clear outcome", () => {
 
 test("gitCredentialStatus warns about a replaced or untouched git login", () => {
   assert.match(gitCredentialStatus(true, { stored: true, reason: "replaced_existing" }, "gitlab", "gitlab.com"), /existing git login for gitlab\.com was replaced/);
-  assert.match(gitCredentialStatus("cleared", { stored: false, reason: "left_in_place" }, "gitlab", "gitlab.com"), /not saved by LLM-IDE, so it was left in place/);
+  assert.match(gitCredentialStatus("cleared", { stored: false, reason: "left_in_place" }, "gitlab", "gitlab.com"), /no record of saving the git login for gitlab\.com .*left in place\. Remove it with your git credential helper/);
+  assert.match(gitCredentialStatus("cleared", { stored: false, reason: "read_failed" }, "gitlab", "gitlab.com"), /Could not read git's stored login for gitlab\.com; nothing was removed/);
+  assert.match(gitCredentialStatus(true, { stored: true, reason: "not_recorded" }, "gitlab", "gitlab.com"), /could not record it, so Clear token will leave it in git/);
 });
 
 test("gitCredentialStatus skips quietly in remote mode and trims a doubled period", () => {

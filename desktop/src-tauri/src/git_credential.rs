@@ -186,12 +186,20 @@ fn credential_step(run: &GitRun, verb: &str, input: &str) -> Result<(), String> 
     Err(format!("git credential {verb} failed: {first}"))
 }
 
-/// The password git's helpers would hand out for this target now, if any. The value is compared and dropped by the
-/// callers; it never reaches a log or an error.
+/// The password git's helpers would hand out for this target now. `Ok(None)` means git positively has no
+/// credential (it fell through to a prompt it may not show); `Err` means the answer is unknown (locked keychain,
+/// helper failure, timeout), which callers must never treat as "absent". The value never reaches a log or an error.
 fn read_back(run: &GitRun, target: &Target) -> Result<Option<String>, String> {
     let out = run_git(run, &["credential", "fill"], &credential_input(target, None))?;
     if !out.success {
-        return Ok(None);
+        // NOTE: with prompts disabled git's "nothing found" failure is a refused Username/Password prompt; any
+        // other failure text is a helper or keychain problem.
+        let lower = out.stderr.to_ascii_lowercase();
+        let no_credential = lower.contains("could not read username") || lower.contains("could not read password") || lower.contains("terminal prompts disabled");
+        if no_credential {
+            return Ok(None);
+        }
+        return Err("git could not read its stored login".into());
     }
     let text = String::from_utf8_lossy(&out.stdout);
     Ok(text.lines().find_map(|line| line.strip_prefix("password=")).map(str::to_string))
@@ -211,13 +219,26 @@ fn ledger_key(target: &Target) -> String {
     format!("{}\n{}", target.host, target.username)
 }
 
+/// Serializes the ledger's read-modify-write within the process; the file itself is replaced atomically.
+static LEDGER_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `Ok(None)`: the file exists but is not a JSON object. `Err`: it could not be read (permissions, I/O).
+fn ledger_load(path: &std::path::Path) -> Result<Option<serde_json::Map<String, serde_json::Value>>, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Some(Default::default())),
+        Err(e) => return Err(format!("cannot read the git credential ledger: {e}")),
+    };
+    Ok(match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(serde_json::Value::Object(map)) => Some(map),
+        _ => None,
+    })
+}
+
+/// Read-only view for ownership checks: anything unreadable or corrupt proves nothing, so nothing is owned.
 fn ledger_read(run: &GitRun) -> serde_json::Map<String, serde_json::Value> {
     let Some(path) = &run.ledger else { return Default::default() };
-    let text = std::fs::read_to_string(path).unwrap_or_default();
-    match serde_json::from_str::<serde_json::Value>(&text) {
-        Ok(serde_json::Value::Object(map)) => map,
-        _ => Default::default(),
-    }
+    ledger_load(path).ok().flatten().unwrap_or_default()
 }
 
 /// Whether LLM-IDE wrote exactly this password for the target.
@@ -225,19 +246,41 @@ fn is_ours(run: &GitRun, target: &Target, password: &str) -> bool {
     ledger_read(run).get(&ledger_key(target)).and_then(|v| v.as_str()).is_some_and(|d| same_digest(d, &digest(password)))
 }
 
-/// Records (`Some`) or forgets (`None`) the digest. Best effort: a failure only means Clear later leaves the entry.
-fn ledger_write(run: &GitRun, target: &Target, token: Option<&str>) {
-    let Some(path) = &run.ledger else { return };
-    let mut map = ledger_read(run);
+/// Keeps a corrupt ledger for inspection instead of silently overwriting it.
+fn move_ledger_aside(path: &std::path::Path) -> Result<(), String> {
+    let millis = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or_default();
+    let mut name = path.as_os_str().to_owned();
+    name.push(format!(".corrupt-{millis}"));
+    let aside = PathBuf::from(name);
+    std::fs::rename(path, &aside).map_err(|e| format!("cannot set the corrupt ledger aside: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&aside, std::fs::Permissions::from_mode(0o600));
+    }
+    Ok(())
+}
+
+/// Records (`Some`) or forgets (`None`) the digest. An unreadable ledger is never overwritten (the other hosts'
+/// entries would be lost); a corrupt one is moved aside first. `Err` only means Clear later leaves the entry.
+fn ledger_write(run: &GitRun, target: &Target, token: Option<&str>) -> Result<(), String> {
+    let Some(path) = &run.ledger else { return Err("no ledger location".into()) };
+    let _guard = LEDGER_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut map = match ledger_load(path)? {
+        Some(map) => map,
+        None => {
+            move_ledger_aside(path)?;
+            Default::default()
+        }
+    };
     match token {
         Some(token) => map.insert(ledger_key(target), serde_json::Value::String(digest(token))),
         None => map.remove(&ledger_key(target)),
     };
-    let Some(dir) = path.parent() else { return };
-    if crate::fsutil::private_dir(dir).is_ok() {
-        let body = serde_json::Value::Object(map).to_string();
-        let _ = crate::fsutil::write_private_atomic(path, body.as_bytes(), 64 * 1024);
-    }
+    let dir = path.parent().ok_or("no ledger directory")?;
+    crate::fsutil::private_dir(dir)?;
+    let body = serde_json::Value::Object(map).to_string();
+    crate::fsutil::write_private_atomic(path, body.as_bytes(), 64 * 1024)
 }
 
 /// Core of the save command. `stored` is true only when a read-back returns exactly this token. A login the user
@@ -256,8 +299,9 @@ fn save_with(run: &GitRun, provider: &str, base_url: Option<&str>, token: Token)
     match read_back(run, &target)? {
         Some(found) if found == token.expose() => {
             // The same token already stored by the user is theirs: do not claim it, or Clear would remove it.
-            if !identical_foreign {
-                ledger_write(run, &target, Some(token.expose()));
+            // The token is in git either way; only a failed record changes what the user is told.
+            if !identical_foreign && ledger_write(run, &target, Some(token.expose())).is_err() {
+                return Ok(GitCredentialResult { stored: true, reason: Some("not_recorded".into()) });
             }
             if replaced_foreign {
                 return Ok(GitCredentialResult { stored: true, reason: Some("replaced_existing".into()) });
@@ -272,20 +316,23 @@ fn save_with(run: &GitRun, provider: &str, base_url: Option<&str>, token: Token)
 /// host and username (the user's own login) it stays and the answer is `left_in_place`.
 fn erase_with(run: &GitRun, provider: &str, base_url: Option<&str>) -> Result<GitCredentialResult, String> {
     let target = derive_target(provider, base_url)?;
-    let Some(current) = read_back(run, &target)? else {
-        ledger_write(run, &target, None);
+    // Unknown is not absent: forgetting the entry now would leave git holding a token Clear can never remove.
+    let Ok(found) = read_back(run, &target) else { return Ok(GitCredentialResult::skipped("read_failed")) };
+    let Some(current) = found else {
+        let _ = ledger_write(run, &target, None);
         return Ok(GitCredentialResult::skipped("not_present"));
     };
     if !is_ours(run, &target, &current) {
         return Ok(GitCredentialResult::skipped("left_in_place"));
     }
     credential_step(run, "reject", &credential_input(&target, Some(&current)))?;
-    let removed = read_back(run, &target)?.is_none();
-    if removed {
-        ledger_write(run, &target, None);
-        Ok(GitCredentialResult::done())
-    } else {
-        Ok(GitCredentialResult::skipped("not_removed"))
+    match read_back(run, &target) {
+        Ok(None) => {
+            let _ = ledger_write(run, &target, None);
+            Ok(GitCredentialResult::done())
+        }
+        Ok(Some(_)) => Ok(GitCredentialResult::skipped("not_removed")),
+        Err(_) => Ok(GitCredentialResult::skipped("read_failed")),
     }
 }
 
@@ -591,6 +638,81 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(8), "took {:?}", started.elapsed());
         if let Err(message) = result {
             assert!(!message.contains("glpat"));
+        }
+    }
+
+    fn ledger_path(sb: &Sandbox) -> PathBuf {
+        sb.run.ledger.clone().unwrap()
+    }
+
+    #[test]
+    fn a_corrupt_ledger_is_moved_aside_and_the_new_entry_is_saved() {
+        let sb = Sandbox::with_store();
+        std::fs::write(ledger_path(&sb), "{not json").unwrap();
+        assert_eq!(save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap(), GitCredentialResult::done());
+        let kept: Vec<_> = std::fs::read_dir(&sb.dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("ledger.json.corrupt-"))
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(std::fs::read_to_string(kept[0].path()).unwrap(), "{not json");
+        assert!(std::fs::read_to_string(ledger_path(&sb)).unwrap().contains(&digest("glpat-abc")));
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::done());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_ledger_is_never_overwritten() {
+        use std::os::unix::fs::PermissionsExt;
+        let sb = Sandbox::with_store();
+        let path = ledger_path(&sb);
+        std::fs::write(&path, r#"{"other.example\noauth2":"abc"}"#).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+        if std::fs::read_to_string(&path).is_ok() {
+            return; // running as root: permissions do not apply
+        }
+        let result = save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(result, GitCredentialResult { stored: true, reason: Some("not_recorded".into()) });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), r#"{"other.example\noauth2":"abc"}"#);
+        assert!(sb.creds().contains("glpat-abc"));
+    }
+
+    #[test]
+    fn erase_keeps_the_ledger_entry_when_git_cannot_be_read() {
+        let sb = Sandbox::with_store();
+        save_with(&sb.run, "gitlab", None, Token::from("glpat-abc")).unwrap();
+        let config = sb.dir.join("gitconfig");
+        let good = std::fs::read_to_string(&config).unwrap();
+        std::fs::write(&config, "[credential\n").unwrap();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::skipped("read_failed"));
+        assert!(std::fs::read_to_string(ledger_path(&sb)).unwrap().contains(&digest("glpat-abc")));
+        assert!(sb.creds().contains("glpat-abc"));
+        // Once git is readable again, Clear still works.
+        std::fs::write(&config, good).unwrap();
+        assert_eq!(erase_with(&sb.run, "gitlab", None).unwrap(), GitCredentialResult::done());
+    }
+
+    #[test]
+    fn concurrent_ledger_writes_keep_every_host() {
+        let sb = Sandbox::with_store();
+        let handles: Vec<_> = (0..8)
+            .map(|n| {
+                let path = ledger_path(&sb);
+                std::thread::spawn(move || {
+                    let run = GitRun { git: PathBuf::new(), env: vec![], cwd: PathBuf::new(), cap: Duration::from_secs(1), ledger: Some(path) };
+                    let target = Target { host: format!("host{n}.example"), username: "oauth2" };
+                    ledger_write(&run, &target, Some(&format!("tok{n}"))).unwrap();
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        for n in 0..8 {
+            let target = Target { host: format!("host{n}.example"), username: "oauth2" };
+            assert!(is_ours(&sb.run, &target, &format!("tok{n}")), "host{n} lost");
         }
     }
 }
