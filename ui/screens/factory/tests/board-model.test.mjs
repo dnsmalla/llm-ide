@@ -391,6 +391,7 @@ test("a stopped loop card is an alert with the findings and a title", () => {
   assert.equal(card.loopback.findings, "boom");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "tests", findings: "" }), "Tests still failing after 3 rounds");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "review", findings: "" }), "Review still requests changes after 3 rounds");
+  assert.equal(loopbackTitle({ rounds: 1, maxRounds: 3, reason: "baseline", findings: "" }), "The tests already fail before any change");
   assert.equal(loopbackTitle({ rounds: 3, maxRounds: 3, reason: "limit", findings: "" }), "Stopped at its limit in round 3 of 3");
 });
 

@@ -12,7 +12,7 @@ import { ROADMAP_CONTRACT, checkRoadmap } from "./refactor-areas.ts";
 import { TEST_PLAN_PATH, mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
-import { headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
+import { changesCode, headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
@@ -556,7 +556,7 @@ async function recordRoundFindings(ctx: StageExecContext, loop: LoopDefinition, 
 }
 
 /** The runner deps that execute stages for one run. Each call has its own halt state. */
-export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
+export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview" | "codeChanged"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior, loopback) {
@@ -581,5 +581,7 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
     reviewStep: (s, snapshot) => reviewStepOnce(ctx, loop, s, snapshot, halt),
     noteUnresolvedReview: (s, findings) => noteUnresolvedStep(ctx, s, findings),
     recordFindings: (_stage, entry) => recordRoundFindings(ctx, loop, entry),
+    // Factory only: its work item may be no code task at all (closing issues), and a red baseline must not be repaired.
+    ...(isFactoryLoop(loop) ? { codeChanged: async () => changesCode(await changedPathsNow(ctx)) } : {}),
   };
 }

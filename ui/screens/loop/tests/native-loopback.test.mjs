@@ -90,3 +90,12 @@ test("headAndTail keeps the end of long output, where a test run prints what fai
   assert.match(cut, /… \[\d+ characters of output omitted here; the end of the output follows\] …/);
   assert.ok(cut.length < 12_200);
 });
+
+test("changesCode: only the loop's own folders are not a change to the project", () => {
+  assert.equal(lb.changesCode(null), null);
+  assert.equal(lb.changesCode([]), false);
+  assert.equal(lb.changesCode([".factory/PLAN.md", "system/loop.json", "llm-doc/loop/x.md", "./.factory/RUN.json"]), false);
+  assert.equal(lb.changesCode([".factory/PLAN.md", "smart_input/tests/test_data_cleaning.py"]), true);
+  assert.equal(lb.changesCode(["systematic.py"]), true, "a name that only starts like a bookkeeping folder is code");
+  assert.match(lb.baselineSummary(), /already fail/);
+});

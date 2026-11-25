@@ -1237,3 +1237,15 @@ test("setting an addendum leaves the built-in stage unedited, so it still follow
   assert.equal(followsRegistry({ ...base, promptAddendum: "Be brief." }), true);
   assert.equal({ ...base, promptAddendum: "Be brief." }.promptHash, base.promptHash);
 });
+
+test("createStageDeps: a Factory run reports whether it changed project code; other loops leave the dep out", async () => {
+  const bookkeepingOnly = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "system/loop.json"] });
+  const factory = createStageDeps(ctxOf({ host: bookkeepingOnly.host }).ctx, loopOf([stage()]));
+  assert.equal(await factory.codeChanged(), false, "only the loop's own files changed");
+  const edited = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "app/main.py"] });
+  assert.equal(await createStageDeps(ctxOf({ host: edited.host }).ctx, loopOf([stage()])).codeChanged(), true);
+  const broken = fakeHost({ loop_changed_paths: () => { throw new Error("git failed"); } });
+  assert.equal(await createStageDeps(ctxOf({ host: broken.host }).ctx, loopOf([stage()])).codeChanged(), null, "unknown is never a stop");
+  const other = { ...loopOf([stage()]), defaultKey: "refactoring", name: "Refactoring" };
+  assert.equal(createStageDeps(ctxOf().ctx, other).codeChanged, undefined);
+});

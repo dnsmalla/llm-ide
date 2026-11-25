@@ -7,7 +7,7 @@ import { effectiveReviewAfter } from "./review.ts";
 /** Status code of a run that used up its rounds (or budget) without passing; a warning state, never shipped. */
 export const LOOPBACK_STOPPED_CODE = "stopped.limit";
 
-export type LoopbackReason = "tests" | "review" | "limit";
+export type LoopbackReason = "tests" | "review" | "limit" | "baseline";
 
 export interface LoopbackSummary { rounds: number; maxRounds: number; reason: LoopbackReason; findings: string; stopped: boolean }
 /** What a code stage is told when it is re-run after a failed round. */
@@ -79,6 +79,23 @@ export function findingsText(entries: readonly FindingsEntry[], maxChars = FINDI
   const text = entries.map((entry) => `Round ${entry.round} (${entry.source})\n${entry.text}`).join("\n\n");
   if (text.length <= maxChars) return text;
   return "…" + text.slice(text.length - (maxChars - 1));
+}
+
+/** Folders a run writes for its own bookkeeping; a change there is not a change to the project's code. */
+const BOOKKEEPING_PREFIXES = ["llm-doc/loop/", "system/", ".factory/"];
+
+/**
+ * Whether `paths` (what git reports as changed in the run's worktree) hold a change to the project itself: true, or false
+ * when they hold only the loop's own files. Null when the paths are unknown, so a caller never stops a run on a guess.
+ */
+export function changesCode(paths: readonly string[] | null): boolean | null {
+  if (paths === null) return null;
+  return paths.some((p) => { const rel = p.replace(/^\.\//, ""); return !BOOKKEEPING_PREFIXES.some((b) => rel.startsWith(b)); });
+}
+
+/** A failed Verify with no code changed in the run cannot be this run's doing: the tests were already failing. */
+export function baselineSummary(): string {
+  return "Stopped: the tests already fail before this run changed any code";
 }
 
 export function stoppedSummary(rounds: number, reason: "tests" | "review", unchanged = false): string {
