@@ -1,8 +1,9 @@
 // The "Everything" work mode: one run repeats the loop's stages as passes until a pass changes nothing real. Each pass
 // is a plain runNativeLoop with only what is left of the run's wall-clock budget and cost ceiling. A pass that did not
 // pass, was stopped, held for review or blocked ends the run at once; earlier passes' stages stay in the record.
+import { isSetupStage } from "./loop-setup.ts";
 import { maxPassesOf, type LoopEngineConfig } from "./model.ts";
-import { pauseBetween, runBudget, runNativeLoop, type LoopRunOutcome, type RunnerDeps, type StepReviewOutcome } from "./runner.ts";
+import { pauseBetween, runBudget, runNativeLoop, stepReviewNote, type LoopRunOutcome, type RunnerDeps, type StepReviewOutcome } from "./runner.ts";
 
 export interface AllPassesOpts {
   /** A tree id of the worktree's current state (no commit). */
@@ -12,8 +13,10 @@ export interface AllPassesOpts {
   log(line: string): void;
 }
 
-// The loop's own bookkeeping: its ledgers and maps change on every pass and are not work.
-const BOOKKEEPING = ["system/loop", "system/loop-runs", "system/loop-worktrees", "llm-doc/loop/", ".factory/"];
+// The loop's own bookkeeping: its ledgers and run notes change on every pass and are not work. The same folders the
+// host leaves out of a run's diff (EXCLUDES in loop_worktree.rs); a loop's output under llm-doc/loop/docs or
+// llm-doc/loop/plan is work.
+const BOOKKEEPING = ["system/loop", "system/loop-runs", "system/loop-worktrees", "llm-doc/loop/test", "llm-doc/loop/runs", ".factory/"];
 
 /** True when at least one path lies outside the loop's bookkeeping folders. */
 export function hasRealProgress(paths: readonly string[]): boolean {
@@ -28,6 +31,8 @@ export async function runAllPasses(config: LoopEngineConfig, deps: RunnerDeps, o
   const { remaining, exhausted } = runBudget(config);
   let total: LoopRunOutcome | null = null;
   let passesRun = 0;
+  let setupDone = false;
+  let lastReviews: StepReviewOutcome[] = [];
   for (let pass = 1; pass <= max; pass++) {
     const left = remaining(total?.costUsd ?? 0);
     const out = exhausted(left);
@@ -35,9 +40,13 @@ export async function runAllPasses(config: LoopEngineConfig, deps: RunnerDeps, o
     if (pass > 1) { opts.log(`Pass ${pass} of up to ${max}`); await pauseBetween(deps, config.stageDelaySeconds); }
     let before: string | null = null;
     try { before = await opts.checkpoint(); } catch (e) { opts.log(`No more passes: ${e instanceof Error ? e.message : String(e)}`); if (total) return total; }
-    const r = await runNativeLoop({ ...config, ...left }, deps);
+    // The dependency install is once per run, not once per pass.
+    const stages = setupDone ? config.stages.map((s) => (isSetupStage(s) ? { ...s, enabled: false } : s)) : config.stages;
+    const r = await runNativeLoop({ ...config, ...left, stages }, deps);
+    if (r.stages.some((o) => isSetupStage(o.stage) && o.ok)) setupDone = true;
     passesRun = pass;
-    const stepReviews: StepReviewOutcome[] = [...(total?.stepReviews ?? []), ...(r.stepReviews ?? [])];
+    lastReviews = r.stepReviews ?? [];
+    const stepReviews: StepReviewOutcome[] = [...(total?.stepReviews ?? []), ...lastReviews];
     total = total === null ? r : {
       ...r,
       stages: [...total.stages, ...r.stages],
@@ -53,5 +62,9 @@ export async function runAllPasses(config: LoopEngineConfig, deps: RunnerDeps, o
   }
   const t = total!;
   const passes = passesRun;
-  return t.passed && passes > 1 ? { ...t, statusSummary: `${t.statusSummary} (${passes} passes)` } : t;
+  if (passes <= 1) return t;
+  // The last pass's summary names only its own step reviews: name every pass's.
+  const own = stepReviewNote(lastReviews);
+  const base = own && t.statusSummary.endsWith(own) ? t.statusSummary.slice(0, -own.length) : t.statusSummary;
+  return { ...t, statusSummary: `${base}${t.passed ? ` (${passes} passes)` : ""}${stepReviewNote(t.stepReviews ?? [])}` };
 }

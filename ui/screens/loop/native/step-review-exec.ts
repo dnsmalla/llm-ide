@@ -83,7 +83,8 @@ function reviewMessage(loop: LoopDefinition, stage: LoopStage, outputPath: strin
   // No accepted lessons here on purpose: a lesson guides doing the step, and must never steer the judge of that step.
   if (loop.goal) parts.push(`Loop goal: ${loop.goal}`);
   if (loop.acceptanceCriteria) parts.push(`Acceptance criteria: ${loop.acceptanceCriteria}`);
-  parts.push(...runCommandLines(command));
+  // Only the task itself: the "do only this" line is an order for the doer, not for the judge.
+  parts.push(...runCommandLines(command).slice(0, 1));
   parts.push(`Output path: ${outputPath}`, stepDiffSection(diff));
   return parts.join("\n\n");
 }

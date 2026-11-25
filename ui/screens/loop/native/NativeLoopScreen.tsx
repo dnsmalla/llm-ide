@@ -571,14 +571,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   };
 
   /** The Everything mode's checkpoint and progress check for one worktree run: progress = a changed path outside the loop's own folders. */
-  const allPassesOpts = (run: RunInfo) => ({
+  const allPassesOpts = (run: RunInfo, log: (line: string) => void) => ({
     checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
     progressed: async (before: string) => {
       const d = decodeWorktreeDiff(await invokeHost<unknown>("loop_worktree_diff", { runId: run.runId, since: before }));
       if (!d) throw new Error("the worktree diff could not be read");
       return hasRealProgress(d.files);
     },
-    log: (line: string) => setRunLog((l) => [...l, line]),
+    log,
   });
 
   /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
@@ -840,7 +840,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       const outcome = target.defaultKey === "refactor" && activeRun
         ? await runRefactorBatches(runConfig, runDeps, { ...refactorBatchOpts(activeRun), ...(oneItem ? { maxBatches: 1 } : {}) })
         : activeRun && !isFactoryLoop(target) && !oneItem && target.defaultKey !== "refactor" && maxPassesOf(runConfig) > 1
-          ? await runAllPasses(runConfig, runDeps, allPassesOpts(activeRun))
+          ? await runAllPasses(runConfig, runDeps, allPassesOpts(activeRun, followLog))
           : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
       const setupStage = target.config.stages.find((st) => isSetupStage(st));
       if (activeRun && setupStage && outcome.stages.some((o) => isSetupStage(o.stage) && o.ok)) await markSetupDone(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setupStage.command ?? "");
@@ -1299,7 +1299,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           <div className="loop-budgets">
             {!isFactoryLoop(loop) ? <>
               <label className="loop-field"><span>Work</span><select value={loop.config.workMode === "one" ? "one" : "all"} onChange={(e) => patchLoop((l) => { if (e.target.value === "one") l.config.workMode = "one"; else delete l.config.workMode; })}><option value="all">Everything it finds</option><option value="one">One item I name</option></select></label>
-              {loop.config.workMode !== "one" ? <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
+              {loop.config.workMode !== "one" && loop.defaultKey !== "refactor" && runsInWorktree(loop.config, false) ? <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
               <label className="loop-field"><span>Approval</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
             </> : null}
             <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>

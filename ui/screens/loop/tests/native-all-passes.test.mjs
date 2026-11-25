@@ -83,7 +83,9 @@ test("a held or cancelled pass is returned at once", async () => {
 
 test("only paths outside the loop's own folders count as progress", () => {
   assert.equal(hasRealProgress([]), false);
-  assert.equal(hasRealProgress(["system/loop/ledger.json", "system/loop-runs/a.md", "system/loop-worktrees/x/y", "llm-doc/loop/runs/r.md", ".factory/PLAN.md"]), false);
+  assert.equal(hasRealProgress(["system/loop/ledger.json", "system/loop-runs/a.md", "system/loop-worktrees/x/y", "llm-doc/loop/runs/r.md", "llm-doc/loop/test/TEST-MAP.md", ".factory/PLAN.md"]), false);
+  assert.equal(hasRealProgress(["llm-doc/loop/docs/a.md"]), true);
+  assert.equal(hasRealProgress(["llm-doc/loop/plan/PLAN.md"]), true);
   assert.equal(hasRealProgress(["system/loop/a", "src/a.ts"]), true);
   assert.equal(hasRealProgress(["system/loops.md"]), true);
   assert.equal(hasRealProgress(["llm-doc/loopy/a.md"]), true);
@@ -93,4 +95,13 @@ test("the run command wording is pinned and empty text adds nothing", () => {
   assert.deepEqual(runCommandLines("  fix the login bug "), ["This run's task, given by the user: fix the login bug", "Do only this one item and then stop. Do not pick any other item."]);
   assert.deepEqual(runCommandLines(undefined), []);
   assert.deepEqual(runCommandLines("   "), []);
+});
+
+test("the dependency install runs once per run, not once per pass", async () => {
+  const ran = [];
+  const deps = { async runStage(s) { ran.push(s.id); return { ok: true, output: "" }; }, async repair() { return { ok: false, output: "no" }; }, log() {}, isCancelled: () => false };
+  const opts = { async checkpoint() { return "t"; }, async progressed() { return true; }, log() {} };
+  const setup = "loop/setup-x";
+  await runAllPasses(config({ stages: [stage(setup), stage("s")], maxPassesPerRun: 3 }), deps, opts);
+  assert.deepEqual(ran, [setup, "s", "s", "s"]);
 });
