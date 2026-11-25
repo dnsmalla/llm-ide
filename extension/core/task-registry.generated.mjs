@@ -766,7 +766,7 @@ export const TASKS = Object.freeze([
     "id": "loop.test_gap_writer",
     "label": "Test gap writer",
     "group": "Maintenance",
-    "description": "Loop stage: add behaviour tests for one unit-test candidate from TEST-MAP.md, through public calls, never editing the source.",
+    "description": "Loop stage: add behaviour tests for the first todo step of TEST-PLAN.md (one source file), through public calls, never editing the source, then mark the step.",
     "aliases": [],
     "runner": {
       "kind": "agent",
@@ -796,9 +796,10 @@ export const TASKS = Object.freeze([
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
-      "455912ceb0fd79bb27c0d5f6f6beac90776a100bcdf4c47fb0b7c2170ea71d82"
+      "455912ceb0fd79bb27c0d5f6f6beac90776a100bcdf4c47fb0b7c2170ea71d82",
+      "ad95bf94233e5e9f76424fa4e6c97a610f07c128e0c90dec1da7b0d596bc615f"
     ]
   },
   {

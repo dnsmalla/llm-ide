@@ -5,6 +5,10 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Loop: Test step plan
+
+- A worktree run of the Test loop now divides the repository at plan time into one step per untested source file (`llm-doc/loop/test/TEST-PLAN.md`, `### T<n>` steps) and runs one step at a time through the shared step driver; "Passes per run" becomes "Steps per run" for it. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#the-test-step-plan).
+
 ### Loop: Work and Approval switches
 
 - Every non-Factory loop has **Work** (`workMode`: everything it finds, repeated as passes up to `maxPassesPerRun`, or one item you name at ▶ Run) and **Approval** (`reviewMode`: AI, or hold the finished run for you) in its settings. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#work-and-approval-the-two-process-switches).

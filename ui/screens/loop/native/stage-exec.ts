@@ -8,6 +8,7 @@ import type { CoreClient } from "../../shell/core";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
+import { TEST_PLAN_PATH, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
 import { headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
@@ -212,7 +213,9 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   parts.push(...runCommandLines(ctx.runCommand));
   const inputPath = target.inputPath ?? "";
   const scoped = inputPath !== "" && INPUT_PATH_SKILLS.has(s.skillId);
-  const targetPath = scoped && s.skillId === "skills/refactor-planner" ? inputPath : s.targetPath;
+  let targetPath = scoped && s.skillId === "skills/refactor-planner" ? inputPath : s.targetPath;
+  // A stored Test Write stage still names TEST-MAP.md; its unedited (registry) prompt now works the step plan instead.
+  if (s.skillId === "skills/test-gap-writer" && target.defaultKey === "test" && followsRegistry(s) && targetPath === "llm-doc/loop/test/TEST-MAP.md") targetPath = TEST_PLAN_PATH;
   if (targetPath) parts.push(`Target path: ${targetPath}`);
   const outputPath = scoped && REFACTOR_MOVE_SKILLS.has(s.skillId) ? inputPath : s.outputPath;
   if (outputPath) parts.push(`Output path: ${outputPath}`);
@@ -370,7 +373,9 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
     }
   }
   const map = await buildTestMap(ctx.fs, prefix, structure, graphPath, new Date(), target.inputPath ?? "");
-  const writes = await writeTestMap(ctx.fs, prefix, map);
+  // The step plan is written by code right after the map (the Test Write stage works one plan step at a time).
+  const plan = await writeTestPlan(ctx.fs, prefix, map, structure);
+  const writes = await writeTestMap(ctx.fs, prefix, map, plan);
   return { ok: true, output: [`${map.entries.length} function(s) · ${map.untestedFunctions} untested · ${map.testedFunctions} tested`, ...map.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
 }
 

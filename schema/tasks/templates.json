@@ -114,7 +114,7 @@
           },
           {
             "defaultKey": "test-write",
-            "defaultRevision": 2,
+            "defaultRevision": 3,
             "enabled": true,
             "id": "test/test-write",
             "isDefault": true,
@@ -125,7 +125,7 @@
             "promptTask": "loop.test_gap_writer",
             "severity": "blocking",
             "skillId": "skills/test-gap-writer",
-            "targetPath": "llm-doc/loop/test/TEST-MAP.md"
+            "targetPath": "llm-doc/loop/test/TEST-PLAN.md"
           },
           {
             "command": "<detected-test-command>",

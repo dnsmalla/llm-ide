@@ -14,6 +14,7 @@ import { core } from "../../shell/runtime";
 import { SkillIdField, decodeSkillChoices, type SkillChoice } from "./SkillIdField";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
+import { TEST_PLAN_PATH } from "./protected.ts";
 import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, maxPassesOf, reviewEveryRunsOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
@@ -26,6 +27,7 @@ import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, lo
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode, type RunnerDeps } from "./runner.ts";
 import { runRefactorBatches } from "./refactor-batches.ts";
+import { runTestSteps } from "./test-steps.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
@@ -549,10 +551,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     ...(runCommand ? { runCommand } : {}),
   });
 
-  /** The Refactoring batch driver's rollback and plan access for one worktree run. */
-  const refactorBatchOpts = (run: RunInfo) => {
+  /** The step driver's rollback and plan access for one worktree run (Refactoring: REFACTOR.md; the Test loop passes TEST_PLAN_PATH). */
+  const refactorBatchOpts = (run: RunInfo, planRel = "llm-doc/loop/refactor/REFACTOR.md") => {
     const prefix = repoPrefixFor(projectRoot ?? "", run.worktree);
-    const planPath = prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
+    const planPath = prefix ? `${prefix}/${planRel}` : planRel;
     return {
       checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
       restore: async (tree: string) => { await invokeHost("loop_worktree_restore", { runId: run.runId, tree }); },
@@ -839,6 +841,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       };
       const outcome = target.defaultKey === "refactor" && activeRun
         ? await runRefactorBatches(runConfig, runDeps, { ...refactorBatchOpts(activeRun), ...(oneItem ? { maxBatches: 1 } : {}) })
+        // "One item I name" is the person's own task, not the plan's next step: it runs as one plain pass.
+        : target.defaultKey === "test" && activeRun && !oneItem
+          ? await runTestSteps(runConfig, runDeps, refactorBatchOpts(activeRun, TEST_PLAN_PATH))
         : activeRun && !isFactoryLoop(target) && !oneItem && target.defaultKey !== "refactor" && maxPassesOf(runConfig) > 1
           ? await runAllPasses(runConfig, runDeps, allPassesOpts(activeRun, followLog))
           : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
@@ -1299,7 +1304,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           <div className="loop-budgets">
             {!isFactoryLoop(loop) ? <>
               <label className="loop-field"><span>Work</span><select value={loop.config.workMode === "one" ? "one" : "all"} onChange={(e) => patchLoop((l) => { if (e.target.value === "one") l.config.workMode = "one"; else delete l.config.workMode; })}><option value="all">Everything it finds</option><option value="one">One item I name</option></select></label>
-              {loop.config.workMode !== "one" && loop.defaultKey !== "refactor" && runsInWorktree(loop.config, false) ? <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
+              {loop.config.workMode !== "one" && loop.defaultKey !== "refactor" && runsInWorktree(loop.config, false) ? <label className="loop-field"><span>{loop.defaultKey === "test" ? "Steps per run" : "Passes per run"} (1–10)</span><input type="number" min={1} max={10} title={loop.defaultKey === "test" ? "The Test loop works the step plan one source file at a time, up to this many steps per run; the rest wait for the next run. Time budget and cost ceiling still apply." : "The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply."} value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
               <label className="loop-field"><span>Approval</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
             </> : null}
             <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>

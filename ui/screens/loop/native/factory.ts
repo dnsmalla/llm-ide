@@ -5,7 +5,7 @@ import type { FsApi } from "../../explorer/fs";
 import { repoKeyOf, type RepoConfig } from "../../settings/repo-config.ts";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
-import { isCiHookPath, isTestFileName } from "./protected.ts";
+import { TEST_PLAN_PATH, isCiHookPath, isTestFileName } from "./protected.ts";
 import { STEP_REVIEW_SKILL } from "./review.ts";
 import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
@@ -190,7 +190,9 @@ export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind"
     if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return [...paths];
     // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
     const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
-    return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p));
+    // The Test Write step marks its own step in the plan (llm-doc/loop/test/ is a protected "test" folder otherwise).
+    const planEdit = (p: string) => skill === "skills/test-gap-writer" && (p === TEST_PLAN_PATH || p.endsWith(`/${TEST_PLAN_PATH}`));
+    return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p) && !planEdit(p));
   }
   if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {
     return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));

@@ -1,0 +1,171 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mergeTestPlan, writeTestPlan } from "../native/test-plan.ts";
+import { runTestSteps, TEST_RECIPE } from "../native/test-steps.ts";
+import { nextTodo, splitPhases } from "../native/step-driver.ts";
+import { decodeConfig } from "../native/model.ts";
+
+const entry = (path, fn = "f", over = {}) => ({ path, function: fn, line: 1, fanIn: 0, loc: 10, testedBy: [], ...over });
+const map = (entries) => ({ generatedAt: "", source: "graph", entries, untestedFunctions: 0, testedFunctions: 0, untestedFiles: 0, notes: [] });
+const structure = { generatedAt: "", status: "ok", notes: [], roots: [{ packageDir: "svc", testDir: "svc/tests", runner: "pytest", command: "pytest", languages: ["py"] }] };
+const heads = (text) => [...text.matchAll(/^### (T\d+) (\S+) \(status: (\w+)\)$/gm)].map((m) => `${m[1]} ${m[2]} ${m[3]}`);
+
+test("one step per untested file, area by area, with functions and the test file", () => {
+  const m = map([
+    entry("svc/a.py", "one"), entry("svc/a.py", "two", { fanIn: 2 }), entry("web/x.ts", "x", { fanIn: 1 }), entry("web/y.ts", "y"), entry("web/z.ts", "z"),
+    entry("svc/done.py", "d", { testedBy: ["svc/tests/test_done.py"] }),
+    entry("svc/tests/test_a.py", "t"), entry("web/vendor/lib.ts", "v"), entry("web/node_modules/p/i.ts", "n"),
+  ]);
+  const { plan, info } = mergeTestPlan(null, m, structure);
+  // web has 3 untested files (weight 4), svc has 1 (weight 3): web first, fan-in then path inside it.
+  assert.deepEqual(heads(plan), ["T1 web/x.ts todo", "T2 web/y.ts todo", "T3 web/z.ts todo", "T4 svc/a.py todo"].filter((l) => !l.includes("vendor")));
+  assert.match(plan, /### T4 svc\/a\.py \(status: todo\)\n- Area: svc\n- Functions: one, two\n- Test file: svc\/tests\/test_a\.py\n/);
+  assert.doesNotMatch(plan, /### T1 web\/x\.ts[^#]*Test file/, "no test root owns web/");
+  assert.equal(info.todo.length, 4);
+  assert.match(plan, /\| todo \| 4 \|/);
+  assert.match(plan, /\| areas \| 2 \|/);
+});
+
+test("statuses, ids and reason lines survive; a tested todo becomes done; a gone todo is dropped; new files append", () => {
+  const first = mergeTestPlan(null, map([entry("a/1.py"), entry("a/2.py"), entry("a/3.py"), entry("a/4.py")]), structure).plan;
+  const edited = first
+    .replace("### T1 a/1.py (status: todo)", "### T1 a/1.py (status: skipped)\n- Skipped: trivial")
+    .replace("### T2 a/2.py (status: todo)", "### T2 a/2.py (status: blocked)\n- Blocked: Test — failed");
+  const m2 = map([entry("a/1.py"), entry("a/2.py"), entry("a/3.py", "f", { testedBy: ["a/tests/x.py"] }), entry("b/new.py")]); // a/4.py is gone
+  const { plan } = mergeTestPlan(edited, m2, structure);
+  assert.deepEqual(heads(plan), ["T5 b/new.py todo", "T1 a/1.py skipped", "T2 a/2.py blocked", "T3 a/3.py done"]);
+  assert.match(plan, /\(status: skipped\)\n- Skipped: trivial\n- Area: a\n/);
+  assert.match(plan, /\(status: blocked\)\n- Blocked: Test — failed\n/);
+  const again = mergeTestPlan(plan, m2, structure).plan;
+  assert.equal(again, plan, "a second merge changes nothing");
+  // T4 was dropped, so its number is never reused: the next new file is T6.
+  assert.match(mergeTestPlan(plan, map([...m2.entries, entry("c/n.py")]), structure).plan, /### T6 c\/n\.py \(status: todo\)/);
+});
+
+test("a file over 500 lines goes to Refactor first and is not a step", () => {
+  const { plan, info } = mergeTestPlan(null, map([entry("a/big.py", "f", { loc: 900 }), entry("a/ok.py")]), structure);
+  assert.deepEqual(heads(plan), ["T1 a/ok.py todo"]);
+  assert.match(plan, /## Refactor first\n[\s\S]*- a\/big\.py \(900 lines\)/);
+  assert.deepEqual(info.refactorFirst, [{ path: "a/big.py", loc: 900 }]);
+});
+
+test("a file-walk entry (function *) has no Functions line", () => {
+  assert.doesNotMatch(mergeTestPlan(null, map([entry("a/x.py", "*")]), structure).plan, /Functions/);
+});
+
+test("a plan over ~250 lines keeps the next 40 todo steps and moves finished ones to the done file", () => {
+  const files = Array.from({ length: 100 }, (_, i) => entry(`a/f${String(i).padStart(3, "0")}.py`));
+  const first = mergeTestPlan(null, map(files), structure);
+  assert.equal(heads(first.plan).length, 40);
+  assert.match(first.plan, /\| todo \| 100 \|/);
+  assert.match(first.plan, /60 more todo steps are not listed yet/);
+  const marked = first.plan.replace("### T1 a/f000.py (status: todo)", "### T1 a/f000.py (status: done)");
+  const next = mergeTestPlan(marked, map(files.slice(1)), structure, first.done);
+  assert.match(next.done, /### T1 a\/f000\.py \(status: done\)/);
+  assert.ok(!next.plan.includes("T1 a/f000.py"));
+  assert.equal(heads(next.plan).length, 40);
+  assert.match(next.plan, /\| done \| 1 \|/);
+  assert.match(next.plan, /\| nextId \| 42 \|/);
+  const ids = new Set([...heads(next.plan), ...heads(next.done)].map((h) => h.split(" ")[0]));
+  assert.equal(ids.size, 41, "ids are unique across both files");
+});
+
+test("writeTestPlan reads the previous plan and writes both files", async () => {
+  const files = {};
+  const fs = { async read(p) { if (!(p in files)) throw new Error("missing"); return { status: "ok", text: files[p] }; }, async write(p, t) { files[p] = t; }, async create() {} };
+  await writeTestPlan(fs, "repo", map([entry("a/x.py")]), structure);
+  assert.match(files["repo/llm-doc/loop/test/TEST-PLAN.md"], /### T1 a\/x\.py \(status: todo\)/);
+});
+
+// ---- the Test recipe of the shared step driver
+const stage = (id, over = {}) => ({ id, name: id, kind: "shellCommand", order: 0, enabled: true, severity: "blocking", allowsRepair: true, ...over });
+const S = [
+  stage("map", { kind: "testMap", testOp: "map", defaultKey: "test-map" }),
+  stage("write", { kind: "skill", skillId: "skills/test-gap-writer", defaultKey: "test-write" }),
+  stage("test", { defaultKey: "test" }),
+  stage("custom"),
+];
+const cfg = (over = {}) => decodeConfig({ stages: S, maxIterations: 1, maxRepairsPerStage: 1, consecutiveFailureStop: 3, stageDelaySeconds: 0, ...over });
+const T = (id, status = "todo") => `### ${id} a/${id}.py (status: ${status})\n- Area: a\n`;
+
+function fake(plan, { fail = [], skip = [], leave = [] } = {}) {
+  const st = { plan, ran: [], restores: [], current: null, snaps: {}, n: 0 };
+  const deps = {
+    async runStage(s) {
+      st.ran.push(s.id);
+      if (s.id === "write") {
+        st.current = nextTodo(TEST_RECIPE, st.plan).id;
+        if (!leave.includes(st.current)) st.plan = st.plan.replace(`### ${st.current} a/${st.current}.py (status: todo)`, `### ${st.current} a/${st.current}.py (status: ${skip.includes(st.current) ? "skipped" : "done"})`);
+      }
+      if (s.id === "test" && fail.includes(st.current)) return { ok: false, output: "red" };
+      return { ok: true, output: "" };
+    },
+    async repair() { return { ok: false, output: "no" }; }, log() {}, isCancelled() { return false; },
+  };
+  const opts = {
+    async checkpoint() { const t = `t${++st.n}`; st.snaps[t] = st.plan; return t; },
+    async restore(t) { st.restores.push(t); st.plan = st.snaps[t]; },
+    async readPlan() { return st.plan; }, async writePlan(t) { st.plan = t; }, log() {},
+  };
+  return { st, deps, opts };
+}
+
+test("the Test recipe splits map-and-before from write-and-after; an unknown stage keeps its position", () => {
+  const { planning, batch } = splitPhases(TEST_RECIPE, S);
+  assert.deepEqual(planning.map((s) => s.id), ["map"]);
+  assert.deepEqual(batch.map((s) => s.id), ["write", "test", "custom"]);
+});
+
+test("steps run one at a time up to the limit, each marked by the agent", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2") + T("T3") + T("T4"), { skip: ["T2"] });
+  const out = await runTestSteps(cfg(), deps, opts); // default limit 3
+  assert.equal(out.passed, true);
+  assert.equal(out.statusSummary, "2 steps done (T1, T3); T2 skipped; step limit (3) reached");
+  assert.equal(st.ran.filter((i) => i === "map").length, 1, "planning runs once");
+  assert.equal(nextTodo(TEST_RECIPE, st.plan).id, "T4");
+});
+
+test("a failed step is rolled back and blocked, and the run goes on with the next step", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
+  const out = await runTestSteps(cfg(), deps, opts);
+  assert.equal(out.passed, true);
+  assert.deepEqual(st.restores, ["t1"]);
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
+  assert.match(st.plan, /### T2 a\/T2\.py \(status: done\)/);
+  assert.match(out.statusSummary, /^1 step done \(T2\); T1 rolled back: /);
+});
+
+test("three blocked steps in a row stop the run and it does not pass", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2") + T("T3") + T("T4"), { fail: ["T1", "T2", "T3", "T4"] });
+  const out = await runTestSteps(cfg({ maxPassesPerRun: 10 }), deps, opts);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /3 steps in a row were blocked; stopped/);
+  assert.equal(nextTodo(TEST_RECIPE, st.plan).id, "T4");
+});
+
+test("a step still todo after its run stops the run", async () => {
+  const { deps, opts } = fake(T("T1") + T("T2"), { leave: ["T1"] });
+  const out = await runTestSteps(cfg(), deps, opts);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /T1 is still todo after its run; stopped/);
+});
+
+test("a loop with Test Write turned off runs as one plain loop", async () => {
+  const { st, deps, opts } = fake(T("T1"));
+  const off = S.map((s) => (s.id === "write" ? { ...s, enabled: false } : s));
+  await runTestSteps(cfg({ stages: off }), deps, opts);
+  assert.equal(st.n, 0, "no checkpoint was taken");
+});
+
+test("a suite that was already red leaves the failing step todo and ends the run, instead of blocking it", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
+  const run = deps.runStage;
+  // The check after planning runs Test before any step: red here means the suite, not the new test.
+  deps.runStage = async (s) => (s.id === "test" && st.current === null ? { ok: false, output: "red before" } : run(s));
+  opts.restore = async (t) => { st.restores.push(t); }; // like the real state folder: the plan is not reverted
+  const out = await runTestSteps(cfg(), deps, opts);
+  assert.equal(out.passed, false);
+  assert.match(out.statusSummary, /T1 rolled back and left todo/);
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: todo\)/, "the agent's done mark is undone");
+  assert.equal(st.ran.filter((i) => i === "write").length, 1, "no further step is tried");
+});

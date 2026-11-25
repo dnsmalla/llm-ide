@@ -660,6 +660,24 @@ and the counter change (`graphDelta`). The run summary prints `**Batch:** R<n>`
 and a `| Counter | Δ |` table, or `**Graph:** not verified (no code graph in this build)`
 when the build has no rescanner.
 
+## The test step plan
+
+A Test loop run in its own worktree does not hand the agent the whole repository. The Test Map stage (`testOp: "map"`, in the Refactoring loop too) writes `llm-doc/loop/test/TEST-PLAN.md` by code, one step per untested source file:
+
+```text
+### T3 svc/billing/invoice.py (status: todo)
+- Area: svc/billing
+- Functions: total, tax, +2 more
+- Test file: svc/tests/test_invoice.py
+```
+
+- **Statuses.** `todo`, `done`, `skipped` (with a `- Skipped: <reason>` line) and `blocked` (with a `- Blocked: <reason>` line). A regeneration keeps every ID and status, turns a todo step whose file is now tested into `done`, drops a todo step whose file is gone, and appends new untested files. A number is never reused.
+- **Order.** Area by area (an area is the first two folder levels; areas with the most untested files, weighted by fan-in, come first), so one area is finished before the next starts. A file over 500 lines is listed under `## Refactor first` instead of becoming a step; test files and vendored folders are never steps.
+- **Size.** Past about 250 lines the plan lists only the next 40 todo steps plus counts, and finished steps move to `TEST-PLAN-DONE.md`.
+- **One step at a time.** The planning stages (structure, setup, structure check, map) run once. Then each todo step runs Test Write, Test, Test Ledger, Test Map Check and Test Prune as its own run, with a checkpoint of the worktree first. Test Write marks its own step `done` or `skipped`. A failed step is rolled back and marked `blocked`, and, unlike a refactor batch, the run goes on with the next step (three blocked in a row stop it). A step still `todo` after a passed run stops the run.
+- **Continues next run.** At most "Steps per run" steps run (`maxPassesPerRun`, default 3), also bounded by the time budget and cost ceiling. The plan lives in the worktree's state folder, so the next run continues where this one stopped. The plan files never reach the merge request. A "One item I name" run does not use the plan: it is one plain pass on the task you typed.
+- **A suite that was already failing.** The suite runs once after planning. If it was already red, a step that then fails at Test is rolled back, left `todo`, and ends the run with that reason, instead of being blocked.
+
 ## Four budgets
 
 | Budget | Field | Terminal status |

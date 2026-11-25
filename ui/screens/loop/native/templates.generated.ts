@@ -1305,7 +1305,7 @@ export const BUILT_IN_TEMPLATES = [
         },
         {
           "defaultKey": "test-write",
-          "defaultRevision": 2,
+          "defaultRevision": 3,
           "enabled": true,
           "id": "test/test-write",
           "isDefault": true,
@@ -1315,10 +1315,10 @@ export const BUILT_IN_TEMPLATES = [
           "outputPath": ".",
           "severity": "blocking",
           "skillId": "skills/test-gap-writer",
-          "targetPath": "llm-doc/loop/test/TEST-MAP.md",
-          "prompt": "Read the test map at the Input and the test-structure report next to it. Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its public interface offers — not one test per function; skip it if every function is trivial. Create ONE new test file at the path the structure report gives. Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or `Covered: none — <reason>`.",
+          "targetPath": "llm-doc/loop/test/TEST-PLAN.md",
+          "prompt": "Read the test plan at the Input and the test-structure report next to it. Take the FIRST `(status: todo)` step in the plan and read the source file it names (`### T<n> <path>`); choose the business behaviours its public interface offers — not one test per function; the step's `- Functions:` line lists what is untested. Create ONE new test file at the step's `- Test file:` path (or the path the structure report gives). Assert observable outputs through public calls only: never call private or underscore members, never check internal state, variable names or call order. Build inputs in memory inside the test (no reading input files); mock only external boundaries such as a solver, network or clock, never the unit itself. Create files only under the test root; never edit the source, existing tests or build config. Then mark that step in the plan `done`, or `skipped` with a `- Skipped: <reason>` line when every function is trivial; touch no other step and no other line of the plan. Where this message differs from the skill's own text about which file to take, this message wins. End with `Covered: T<n> <path> — <behaviours>` or `Covered: none — T<n> <reason>`.",
           "promptRef": "loop.test_gap_writer",
-          "promptHash": "455912ceb0fd79bb27c0d5f6f6beac90776a100bcdf4c47fb0b7c2170ea71d82"
+          "promptHash": "ad95bf94233e5e9f76424fa4e6c97a610f07c128e0c90dec1da7b0d596bc615f"
         },
         {
           "command": "<detected-test-command>",

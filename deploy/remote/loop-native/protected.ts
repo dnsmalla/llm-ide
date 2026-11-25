@@ -25,6 +25,9 @@ export const TEST_FILE_GLOBS = [
   ...TEST_NAME_GLOBS,
 ];
 
+/** The Test loop's step plan: the one file under the protected llm-doc/loop/test/ folder that the Test Write agent edits (marks its step). */
+export const TEST_PLAN_PATH = "llm-doc/loop/test/TEST-PLAN.md";
+
 export const DEFAULT_PROTECTED_GLOBS = [
   ...TEST_FILE_GLOBS,
   "Makefile", "**/Makefile", "**/Package.swift", "**/package.json", "pytest.ini", "**/pytest.ini",

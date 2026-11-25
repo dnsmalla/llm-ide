@@ -408,7 +408,10 @@ test("F4: a worktree run's test map reads its own graph snapshot, not the projec
   const s = stage({ id: "t1", name: "Test map", kind: "testMap", command: null, testOp: "map" });
   const r = await createStageDeps(ctx, loopOf([s])).runStage(s, []);
   assert.match(r.output, /^1 function\(s\)/, "the run's own graph supplies the function");
-  assert.deepEqual(writes.map(([p]) => p), ["system/loop-worktrees/r1/llm-doc/loop/test/TEST-MAP.md", "system/loop-worktrees/r1/system/loop/test/TEST-MAP.json"]);
+  assert.deepEqual(writes.map(([p]) => p), ["system/loop-worktrees/r1/llm-doc/loop/test/TEST-PLAN.md", "system/loop-worktrees/r1/llm-doc/loop/test/TEST-MAP.md", "system/loop-worktrees/r1/system/loop/test/TEST-MAP.json"]);
+  const md = writes.find(([p]) => p.endsWith("TEST-MAP.md"))[1];
+  assert.match(md, /## Unit-test candidates\n\n- src\/a\.ts \(1 untested function\)/);
+  assert.match(md, /## Refactor first/);
 });
 
 test("F5: a worktree run's artifact check does not accept a file that only exists in the main tree", async () => {

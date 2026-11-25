@@ -11,7 +11,7 @@ export interface TestRoot { packageDir: string; testDir: string; runner: string;
 export interface TestStructure { generatedAt: string; roots: TestRoot[]; status: "ok" | "missing"; notes: string[] }
 export type TestMapFs = Pick<FsApi, "read" | "list" | "create" | "write">;
 
-const SKIP = new Set([".git", "node_modules", ".build", ".swiftpm", "DerivedData", "dist", "build", "vendor"]);
+export const SKIP = new Set([".git", "node_modules", ".build", ".swiftpm", "DerivedData", "dist", "build", "vendor"]);
 
 async function isDir(fs: TestMapFs, path: string): Promise<boolean> {
   try { return (await fs.list(path)).entries.length >= 0; } catch { return false; }
@@ -80,7 +80,7 @@ function renderMarkdown(s: TestStructure): string {
   return lines.join("\n") + "\n";
 }
 
-async function ensureDir(fs: TestMapFs, dir: string): Promise<void> {
+export async function ensureDir(fs: TestMapFs, dir: string): Promise<void> {
   let at = "";
   for (const seg of dir.split("/")) { at = at ? `${at}/${seg}` : seg; try { await fs.create(at, "dir"); } catch (e) { if (typeof e === "object" && e !== null && (e as { code?: unknown }).code !== "exists") throw e; } }
 }
@@ -97,6 +97,8 @@ export async function writeTestStructure(fs: TestMapFs, repoPrefix: string, s: T
 }
 
 export interface TestMapEntry { path: string; function: string; line: number; fanIn: number; loc: number; testedBy: string[] }
+/** What the plan tells the map: its todo files in step order (with their untested-function counts) and the files to refactor first. */
+export interface TestPlanInfo { todo: { path: string; functions: number }[]; refactorFirst: { path: string; loc: number }[] }
 export interface TestMap { generatedAt: string; source: "graph" | "files"; entries: TestMapEntry[]; untestedFunctions: number; testedFunctions: number; untestedFiles: number; notes: string[] }
 
 /** Files one walk collects before it stops; a bigger repo gets an incomplete map and says so. */
@@ -212,21 +214,27 @@ export async function buildTestMap(fs: TestMapFs, repoPrefix: string, structure:
   return { generatedAt: now.toISOString(), source, entries, untestedFunctions: entries.length - tested, testedFunctions: tested, untestedFiles: [...files].filter((f) => !testedFiles.has(f)).length, notes };
 }
 
-function renderTestMap(m: TestMap): string {
+function renderTestMap(m: TestMap, plan?: TestPlanInfo): string {
   const lines = [`# Test map (${m.source}, ${m.generatedAt})`, "", "| counter | value |", "|---|---|", `| untestedFunctions | ${m.untestedFunctions} |`, `| testedFunctions | ${m.testedFunctions} |`, `| untestedFiles | ${m.untestedFiles} |`, "", "## Untested functions", ""];
   for (const e of m.entries.filter((x) => x.testedBy.length === 0).slice(0, 80)) lines.push(`- ${e.path}:${e.line} ${e.function}`);
+  // The sections the Test Write and Refactor Planner prompts read: the step plan's todo files, in its order.
+  lines.push("", "## Unit-test candidates", "");
+  for (const t of (plan?.todo ?? []).slice(0, 80)) lines.push(`- ${t.path}${t.functions ? ` (${t.functions} untested function${t.functions === 1 ? "" : "s"})` : ""}`);
+  if ((plan?.todo.length ?? 0) > 80) lines.push(`- +${plan!.todo.length - 80} more in TEST-PLAN.md`);
+  lines.push("", "## Refactor first", "");
+  for (const r of plan?.refactorFirst ?? []) lines.push(`- ${r.path} (${r.loc} lines)`);
   lines.push("", "## Tested functions", "");
   for (const e of m.entries.filter((x) => x.testedBy.length > 0).slice(0, 80)) lines.push(`- ${e.path}:${e.line} ${e.function} — ${e.testedBy.join(", ")}`);
   return lines.join("\n") + "\n";
 }
 
-export async function writeTestMap(fs: TestMapFs, repoPrefix: string, m: TestMap): Promise<{ md: string; json: string }> {
+export async function writeTestMap(fs: TestMapFs, repoPrefix: string, m: TestMap, plan?: TestPlanInfo): Promise<{ md: string; json: string }> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const md = `${prefix}llm-doc/loop/test/TEST-MAP.md`;
   const json = `${prefix}system/loop/test/TEST-MAP.json`;
   await ensureDir(fs, md.split("/").slice(0, -1).join("/"));
   await ensureDir(fs, json.split("/").slice(0, -1).join("/"));
-  await fs.write(md, renderTestMap(m), { expected_hash: null, force: true });
+  await fs.write(md, renderTestMap(m, plan), { expected_hash: null, force: true });
   await fs.write(json, JSON.stringify(m, null, 2) + "\n", { expected_hash: null, force: true });
   return { md, json };
 }

@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { detectTestStructure, writeTestStructure, buildTestMap, writeTestMap, parseTestResults, ledgerDiff, readLedger, writeLedger } from "./testmap.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
+import { writeTestPlan } from "./test-plan.ts";
 
 const root = path.resolve(process.argv[2] || "");
 const op = process.argv[3];
@@ -16,7 +17,7 @@ const abs = (p) => {
 };
 const api = {
   async read(p) { try { const text = fs.readFileSync(abs(p), "utf8"); return { status: "ok", text, truncated: false, size: Buffer.byteLength(text) }; } catch { return { status: "missing", text: null, truncated: false, size: 0 }; } },
-  async list(p) { const rows = fs.readdirSync(abs(p), { withFileTypes: true }); return { entries: rows.map((e) => ({ name: e.name, kind: e.isDirectory() ? "dir" : "file" })) }; },
+  async list(p) { const rows = fs.readdirSync(abs(p), { withFileTypes: true }); return { entries: rows.map((e) => ({ name: e.name, path: p === "." || p === "" ? e.name : `${p}/${e.name}`, kind: e.isDirectory() ? "dir" : "file" })) }; },
   async create(p, kind) { const full = abs(p); if (kind === "dir") fs.mkdirSync(full, { recursive: true }); else { fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, ""); } return p; },
   async write(p, text) { const full = abs(p); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, text); return { ok: true }; },
 };
@@ -28,7 +29,8 @@ if (op === "structure") {
 }
 if (op === "map") {
   const map = await buildTestMap(api, "", structure, "system/loop/refactor/graph/graph-code.json", new Date(), scope);
-  const w = await writeTestMap(api, "", map);
+  // Same as the desktop: the step plan first, so the map can list its todo files.
+  const w = await writeTestMap(api, "", map, await writeTestPlan(api, "", map, structure));
   console.log(JSON.stringify({ op, entries: map.entries.length, untested: map.untestedFunctions, tested: map.testedFunctions, md: w.md, json: w.json }));
   process.exit(0);
 }
