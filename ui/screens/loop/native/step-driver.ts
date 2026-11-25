@@ -178,7 +178,7 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     if (redBefore) opts.log(`${baseline.name} was already failing before any ${r.noun}.`);
     const planNow = redBefore && r.suiteExists ? await opts.readPlan() : null;
     if (planNow !== null && r.suiteExists!(planNow)) {
-      return { passed: false, iterationsUsed, stages, iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })), costUsd, failedStage: baseline, statusSummary: `the tests were already failing before any ${r.noun}, so none was run: ${baseline.name} failed — fix the failing tests first`, ...(check.errored ? { errored: true } : {}) };
+      return { passed: false, iterationsUsed, stages, iterations: iterations.map((it, i) => ({ ...it, index: i + 1 })), costUsd, failedStage: baseline, statusSummary: `the tests were already failing before any ${r.noun}, so none was run: ${baseline.name} failed — fix the failing tests first`, ...(check.errored ? { errored: true } : {}), ...(plan.stepReviews?.length ? { stepReviews: plan.stepReviews } : {}) };
     }
   }
   let last: LoopRunOutcome = plan;
@@ -205,7 +205,7 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     let todo = nextTodo(r, planText);
     // Only a plan divided into areas has a next area to open, and at most MAX_REPLANS times a run: a planner that
     // keeps finding one more batch must not re-plan (graph, test map, planner) until the step limit.
-    if (!todo && r.replanWhenDone && !replanned && replans < MAX_REPLANS && /^- Area:/m.test(planText) && applied.length + skipped.length > 0 && k <= max && !exhausted(remaining(costUsd)) && !ALL_DONE.test(planText.split("\n").slice(0, 6).join("\n"))) {
+    if (!todo && r.replanWhenDone && !replanned && replans < MAX_REPLANS && /^- Area:/m.test(planText) && applied.length + skipped.length > 0 && k <= max && !exhausted(remaining(costUsd)) && !ALL_DONE.test(planText.split("\n").slice(0, 15).join("\n"))) {
       replanned = true;
       replans += 1;
       opts.log(`— re-planning: the plan has no todo ${r.nouns} left —`);

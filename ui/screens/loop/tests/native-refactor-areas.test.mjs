@@ -66,3 +66,25 @@ test("the Plan Check stage fails with the roadmap message when the roadmap is br
   assert.equal((await planCheck({ [`${dir}/REFACTOR.md`]: R("R1", "src/b"), [`${dir}/REFACTOR-AREAS.md`]: ok })).ok, true);
   assert.equal((await planCheck({ [`${dir}/REFACTOR.md`]: R("R1", null) })).ok, true);
 });
+
+test("a plan not divided into areas is never checked, even with an old roadmap on disk or a narrowed Input", () => {
+  assert.deepEqual(checkRoadmap(R("R9", null), ok), [], "a single-file plan after a whole-repository one");
+  assert.deepEqual(checkRoadmap(`${R("R1", "src/a")}${R("R2", "src/b")}`, null, false), [], "an older multi-area plan, re-run on one folder");
+  assert.equal(checkRoadmap(`${R("R1", "src/a")}${R("R2", "src/b")}`, null, true).length, 1, "the whole repository still needs the roadmap");
+});
+
+test("an area may be named by ID, with ./, or carry a note after a dash in its heading", () => {
+  const noted = roadmap(A("A1", "src/b — billing core", "active"));
+  for (const area of ["A1", "A1 src/b", "./src/b", "src/b/inner"]) assert.deepEqual(checkRoadmap(R("R1", area), noted), [], area);
+});
+
+test("a batch that names the active area but has all its files elsewhere is a problem; tests and config beside one file inside are fine", () => {
+  const batch = (files) => `### R1 T (status: todo)\n- Area: src/b\n- Files: ${files}\n\n`;
+  assert.match(checkRoadmap(batch("`src/c/x.py`, `src/c/y.py`"), ok).join("\n"), /R1 names the active area but none of its files is under src\/b/);
+  assert.deepEqual(checkRoadmap(batch("`src/b/x.py`, `tests/test_x.py`, `Makefile`"), ok), []);
+});
+
+test("the all-done marker is found after the plan's frontmatter", () => {
+  const plan = `---\nupdated: 2026-11-25\ncommit: abc1234\ngraph: present\n---\n\nAll areas are done.\n\n${R("R1", "src/b")}`;
+  assert.match(checkRoadmap(plan, ok).join("\n"), /All areas are done.” but still has todo batch R1/);
+});
