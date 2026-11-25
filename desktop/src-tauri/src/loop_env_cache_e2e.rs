@@ -56,6 +56,15 @@ fn env_cache_e2e_on_a_real_project() {
         let which = crate::loop_runner::run_command_keyed(wt, "command -v pytest python3; echo VIRTUAL_ENV=$VIRTUAL_ENV", Some(30), run_id).unwrap();
         println!("[{run_id}] a stage command resolves: {}", which.stdout.trim().replace('\n', " | "));
     }
+    // A resumed run after an app restart: the in-memory registry is lost, the worktree and its marker are not.
+    let run_id = "e2e-a";
+    let wt_path = project.join("system").join("loop-worktrees").join(run_id);
+    forget_env_use(&wt_path);
+    let before = crate::loop_runner::run_command_keyed(&wt_path, "command -v pytest", Some(30), run_id).unwrap();
+    let t = Instant::now();
+    let again = prepare_gated(&project, &wt_path, run_id, &loop_id, Some(1800), &store, None).unwrap();
+    let after = crate::loop_runner::run_command_keyed(&wt_path, "command -v pytest", Some(30), run_id).unwrap();
+    println!("[resume] before: {} | prepare: {} in {:?} | after: {}", before.stdout.trim(), again.status, t.elapsed(), after.stdout.trim());
     let cache = cache_root(&project);
     for e in std::fs::read_dir(&cache).unwrap().flatten() {
         println!("cache entry: {}", e.file_name().to_string_lossy());
