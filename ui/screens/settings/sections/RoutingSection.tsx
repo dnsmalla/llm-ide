@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
-import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, tierStatusText } from "../routing-model.ts";
+import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, roleFallbackWarning, roleStatusText, tierStatusText } from "../routing-model.ts";
+import { ModelListsModel, OTHER_MODEL, pickerView, type ModelListEntry } from "../routing-models.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
-import type { CatalogMigration, ProviderSettings } from "../decoders.ts";
+import type { CatalogMigration, ProviderSettings, TierChoice } from "../decoders.ts";
 import type { SettingsHost } from "../host.ts";
 import { Button, ErrorText, NeedsHost, Switch } from "../ui.tsx";
 import { StatusBanner } from "@llmide/ui-kit";
@@ -20,6 +21,18 @@ export default function RoutingSection() {
 
   const rows = useMemo(() => (p.catalog ? rowsFromCatalog(p.catalog) : []), [p.catalog]);
   const options = useMemo(() => [{ id: ANTHROPIC, name: "Anthropic (Claude)" }, ...rows.map((x) => ({ id: x.provider, name: x.name }))], [rows]);
+  // The routing provider id of a catalog connection (`custom:cat-groq`) back to its connection id (`cat-groq`).
+  const connectionIds = useRef(new Map<string, string>());
+  connectionIds.current = new Map(rows.map((x) => [x.provider, x.id]));
+  const modelLists = useModel(() => new ModelListsModel(client, (provider) => connectionIds.current.get(provider) ?? null));
+  const lists = useStore(modelLists).lists;
+  useEffect(() => () => modelLists.dispose(), [modelLists]);
+  const chosenProviders = Object.values(r.draft?.tiers ?? {}).map((c) => c.provider).filter(Boolean).sort().join("|");
+  useEffect(() => {
+    for (const provider of chosenProviders.split("|")) if (provider) void modelLists.ensure(provider);
+  }, [chosenProviders, modelLists]);
+  const setProvider = (tier: string, current: TierChoice | undefined, provider: string) =>
+    routing.setTier(tier, provider ? { provider, model: current && current.provider === provider ? current.model : "" } : null);
   const dirty = isDirty(r.loaded, r.draft);
   const settings = p.catalog?.settings;
 
@@ -27,7 +40,7 @@ export default function RoutingSection() {
     <div className="st-stack">
       <p className="st-hint">Which model each job uses. Standard is the default for new chats and every role left on it. A tier that cannot be used is skipped, and its row says what runs instead.</p>
       <ErrorText text={r.error} />
-      {r.notice ? <StatusBanner severity="info" message={r.notice} /> : null}
+      {r.notice ? <StatusBanner severity={r.noticeKind} message={r.notice} /> : null}
       {r.phase === "loading" ? <p className="st-hint" role="status">Loading routing...</p> : null}
       {r.draft ? (
         <>
@@ -40,15 +53,13 @@ export default function RoutingSection() {
                   <tr key={t.id}>
                     <th scope="row">{t.label}<div className="st-hint">{t.hint}</div></th>
                     <td>
-                      <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => routing.setTier(t.id, e.target.value ? { provider: e.target.value, model: c?.model ?? "" } : null)}>
+                      <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => setProvider(t.id, c, e.target.value)}>
                         <option value="">None</option>
                         {c && !options.some((o) => o.id === c.provider) ? <option value={c.provider}>{c.provider}</option> : null}
                         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                       </select>
                     </td>
-                    <td>
-                      <input className="st-input" aria-label={`${t.label} model`} value={c?.model ?? ""} disabled={!c} autoComplete="off" spellCheck={false} onChange={(e) => c && routing.setTier(t.id, { provider: c.provider, model: e.target.value })} />
-                    </td>
+                    <td><ModelCell label={`${t.label} model`} tier={t.id} choice={c} entry={c ? lists[c.provider] : undefined} onChange={(choice) => routing.setTier(t.id, choice)} onRetry={() => c && void modelLists.ensure(c.provider)} /></td>
                     <td className="st-hint">{tierStatusText(r.loaded?.status[t.id])}</td>
                   </tr>
                 );
@@ -65,21 +76,20 @@ export default function RoutingSection() {
                   <tr key={t.id}>
                     <th scope="row">{t.label}<div className="st-hint">{t.hint}</div></th>
                     <td>
-                      <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => routing.setTier(t.id, e.target.value ? { provider: e.target.value, model: c?.model ?? "" } : null)}>
+                      <select className="st-select" aria-label={`${t.label} provider`} value={c?.provider ?? ""} onChange={(e) => setProvider(t.id, c, e.target.value)}>
                         <option value="">None</option>
                         {c && !options.some((o) => o.id === c.provider) ? <option value={c.provider}>{c.provider}</option> : null}
                         {options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                       </select>
                     </td>
-                    <td>
-                      <input className="st-input" aria-label={`${t.label} model id`} value={c?.model ?? ""} disabled={!c} placeholder="Model id" autoComplete="off" spellCheck={false} onChange={(e) => c && routing.setTier(t.id, { provider: c.provider, model: e.target.value })} />
-                    </td>
+                    <td><ModelCell label={`${t.label} model id`} tier={t.id} choice={c} entry={c ? lists[c.provider] : undefined} onChange={(choice) => routing.setTier(t.id, choice)} onRetry={() => c && void modelLists.ensure(c.provider)} /></td>
                     <td className="st-hint">{c ? tierStatusText(r.loaded?.status[t.id]) : "None"}</td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          {roleFallbackWarning(r.draft) ? <StatusBanner severity="warning" message={roleFallbackWarning(r.draft)!} /> : null}
           <table className="st-table" aria-label="Roles">
             <thead><tr><th scope="col">Role</th><th scope="col">Tier</th><th scope="col">Status</th></tr></thead>
             <tbody>
@@ -89,10 +99,11 @@ export default function RoutingSection() {
                   <td>
                     <select className="st-select" aria-label={`${role.label} tier`} value={r.draft!.features[role.id] ?? ""} onChange={(e) => routing.setRole(role.id, e.target.value || null)}>
                       <option value="">Default</option>
+                      {r.draft!.features[role.id] && !(r.draft!.features[role.id]! in r.draft!.tiers) ? <option value={r.draft!.features[role.id]}>{`${[...TIERS, ...EXTRA_TIERS].find((t) => t.id === r.draft!.features[role.id])?.label ?? r.draft!.features[role.id]} (not set)`}</option> : null}
                       {(role.id === "decisions" ? EXTRA_TIERS.filter((t) => t.id === "decision") : TIERS).filter((t) => t.id in r.draft!.tiers).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                     </select>
                   </td>
-                  <td className="st-hint">{tierStatusText(r.loaded?.featureStatus[role.id])}</td>
+                  <td className="st-hint">{roleStatusText(role.id, r.draft!) ?? tierStatusText(r.loaded?.featureStatus[role.id])}</td>
                 </tr>
               ))}
             </tbody>
@@ -125,6 +136,69 @@ export default function RoutingSection() {
       )}
       <RoutePrefs getPrefs={host.getRoutePrefs?.bind(host)} setPrefs={host.setRoutePrefs?.bind(host)} migration={p.catalog?.migration} toolsOn={settings?.toolsEnabled} />
       <ExtraPrefs host={host} />
+    </div>
+  );
+}
+
+/** A tier's Model cell: a select of the provider's models, plus a text box for "Other" or when the list cannot load. */
+function ModelCell({ label, tier, choice, entry, onChange, onRetry }: { label: string; tier: string; choice: TierChoice | undefined; entry: ModelListEntry | undefined; onChange: (c: TierChoice) => void; onRetry: () => void }) {
+  // "Other (type an id)" and typing in the box are remembered per tier and provider, so a typed id that equals a
+  // listed one does not close the box mid-typing; changing the provider closes it again.
+  const [other, setOther] = useState<string | null>(null);
+  if (!choice) return <input className="st-input" aria-label={label} value="" disabled readOnly />;
+  const pin = `${tier}|${choice.provider}`;
+  const view = pickerView(entry, choice.model, other === pin);
+  const text = (
+    <input
+      className="st-input"
+      aria-label={view.kind === "select" ? `${label} (typed id)` : label}
+      value={choice.model}
+      placeholder="Model id"
+      autoComplete="off"
+      spellCheck={false}
+      onChange={(e) => {
+        setOther(pin);
+        onChange({ provider: choice.provider, model: e.target.value });
+      }}
+    />
+  );
+  if (view.kind === "loading") {
+    return (
+      <div className="st-stack">
+        {text}
+        <span className="st-hint" role="status">Loading models...</span>
+      </div>
+    );
+  }
+  if (view.kind === "text") {
+    return (
+      <div className="st-stack">
+        {text}
+        <span className="st-hint">{view.retry ? `Could not list models${view.note ? `: ${view.note}` : ""}. Type a model id.` : `${view.note} Type a model id.`}</span>
+        {view.retry ? <Button label={`Try again to list ${label}`} onClick={onRetry}>Try again</Button> : null}
+      </div>
+    );
+  }
+  return (
+    <div className="st-stack">
+      <select
+        className="st-select"
+        aria-label={label}
+        value={view.value}
+        onChange={(e) => {
+          if (e.target.value === OTHER_MODEL) {
+            setOther(pin);
+            return;
+          }
+          setOther(null);
+          onChange({ provider: choice.provider, model: e.target.value });
+        }}
+      >
+        <option value="">Choose a model</option>
+        {view.options.map((o) => <option key={o.id} value={o.id}>{o.name === o.id ? o.id : `${o.name} (${o.id})`}</option>)}
+        <option value={OTHER_MODEL}>Other (type an id)...</option>
+      </select>
+      {view.showText ? text : null}
     </div>
   );
 }

@@ -198,7 +198,7 @@ test("routing: removing a tier resets roles that used it; invalid drafts never r
   m.revert();
   assert.equal(isDirty(m.getState().loaded, m.getState().draft), false);
   m.setRole("loop", "ghost");
-  assert.match(validateDraft(m.getState().draft!)!, /tier, which is not set/);
+  assert.match(validateDraft(m.getState().draft!)!, /which is not set/);
 });
 
 test("routing: status sentences explain skipped and non-agent tiers", () => {

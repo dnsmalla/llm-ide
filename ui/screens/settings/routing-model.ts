@@ -83,7 +83,50 @@ export function tierStatusText(s: TierStatus | undefined): string {
 export function dropReasonText(reason: string): string {
   if (reason === "unknown_tier") return "that tier is not used by the server";
   if (reason === "unknown_feature") return "that role is not used by the server";
+  if (reason === "invalid_provider") return "that provider id is not supported";
+  if (reason === "invalid_model") return "that model id is not valid";
+  if (reason === "invalid_shape") return "the entry was not complete";
   return "the server did not accept it";
+}
+
+// Same pattern as MODEL_RE in extension/server/tier-routing.mjs: the server drops any other id.
+const MODEL_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\[1m\])?$/;
+export const MODEL_ID_HELP = "Model id can only contain letters, digits, . _ : / - (no spaces), start with a letter or digit, and be at most 128 characters; [1m] is allowed at the end.";
+
+/** null when the id is one the server accepts, else the plain reason. The server trims first, so does this. */
+export function modelIdProblem(model: string): string | null {
+  return MODEL_ID_RE.test(model.trim()) ? null : MODEL_ID_HELP;
+}
+
+const tierLabel = (id: string): string => [...TIERS, ...EXTRA_TIERS].find((t) => t.id === id)?.label ?? id;
+const roleLabel = (id: string): string => ROLES.find((r) => r.id === id)?.label ?? id;
+
+export interface RoleFallback {
+  role: string;
+  label: string;
+  tier: string;
+  tierLabel: string;
+}
+
+/** Roles whose tier is not set in the draft: the server keeps the role, but the default runs. */
+export function roleFallbacks(d: RoutingDraft): RoleFallback[] {
+  return Object.entries(d.features)
+    .filter(([, tier]) => !(tier in d.tiers))
+    .map(([role, tier]) => ({ role, label: roleLabel(role), tier, tierLabel: tierLabel(tier) }));
+}
+
+/** A warning above the Roles table, or null when every role's tier is set. */
+export function roleFallbackWarning(d: RoutingDraft): string | null {
+  const f = roleFallbacks(d);
+  if (f.length === 0) return null;
+  return `These roles run the default because their tier is not set: ${f.map((x) => `${x.label} (${x.tierLabel})`).join(", ")}.`;
+}
+
+/** One sentence for a role row when its tier is not set, else null. */
+export function roleStatusText(role: string, d: RoutingDraft): string | null {
+  const tier = d.features[role];
+  if (!tier || tier in d.tiers) return null;
+  return `Uses ${tierLabel(tier)}, which is not set; the default runs.`;
 }
 
 export interface RoutingDraft {
@@ -98,6 +141,8 @@ export interface RoutingState {
   saving: boolean;
   error: string | null;
   notice: string | null;
+  /** warning when the server dropped an entry or a role now runs the default. */
+  noticeKind: "info" | "warning";
 }
 
 export function isDirty(loaded: RoutingTiers | null, draft: RoutingDraft | null): boolean {
@@ -117,9 +162,11 @@ function sortKeys(v: unknown): unknown {
 export function validateDraft(d: RoutingDraft): string | null {
   for (const [id, t] of Object.entries(d.tiers)) {
     if (!t.provider.trim() || !t.model.trim()) return `Pick a provider and a model for ${id}, or remove the tier.`;
+    const bad = modelIdProblem(t.model);
+    if (bad) return `${tierLabel(id)}: ${bad}`;
   }
   for (const [role, tier] of Object.entries(d.features)) {
-    if (!(tier in d.tiers)) return `The ${role} role uses the ${tier} tier, which is not set.`;
+    if (!(tier in d.tiers)) return `${roleLabel(role)} uses ${tierLabel(tier)}, which is not set. Set ${tierLabel(tier)}, or change ${roleLabel(role)} to Default.`;
   }
   return null;
 }
@@ -129,7 +176,7 @@ export class RoutingModel extends Store<RoutingState> {
   #generation = 0;
 
   constructor(client: CoreClient) {
-    super({ phase: "idle", loaded: null, draft: null, saving: false, error: null, notice: null });
+    super({ phase: "idle", loaded: null, draft: null, saving: false, error: null, notice: null, noticeKind: "info" });
     this.#client = client;
   }
 
@@ -192,11 +239,15 @@ export class RoutingModel extends Store<RoutingState> {
     this.#generation++;
     try {
       const r = decodeRoutingSave(await call(this.#client, "POST", "/kb/routing-tiers", { tiers: s.draft.tiers, features: s.draft.features }));
-      const notice =
+      const head =
         r.dropped.length > 0
           ? `Saved. The server ignored ${r.dropped.length} entr${r.dropped.length === 1 ? "y" : "ies"}: ${r.dropped.map((d) => `${d.entry} (${dropReasonText(d.reason)})`).join("; ")}.`
           : "Saved.";
-      this.set({ saving: false, notice });
+      const droppedTiers = new Set(r.dropped.filter((d) => d.entry.startsWith("tiers.")).map((d) => d.entry.slice("tiers.".length)));
+      const roles = Object.entries(s.draft.features).filter(([, tier]) => droppedTiers.has(tier));
+      const roleText = roles.map(([role, tier]) => `${roleLabel(role)} now uses the default because ${tierLabel(tier)} is not set.`);
+      const notice = [head, ...roleText].join(" ");
+      this.set({ saving: false, notice, noticeKind: r.dropped.length > 0 ? "warning" : "info" });
       await this.load();
       return r;
     } catch (e) {
