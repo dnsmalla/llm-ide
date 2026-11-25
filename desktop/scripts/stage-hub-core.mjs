@@ -128,11 +128,15 @@ export function ensureHelperToolchain(probe = defaultToolchainProbe) {
 export function buildWorkspaceHelper(run = execFileSync) {
   // NOTE: cargo reads .cargo/config.toml from the working directory upwards, not from --manifest-path, so the
   // crate's own config (rust-lld, static CRT) only applies when the build runs inside the crate folder.
+  // NOTE: desktop/.cargo/config.toml shares one target dir across the desktop crates; pin it here so the
+  // output path below cannot drift from where cargo writes.
+  const targetDir = process.env.CARGO_TARGET_DIR || join(DESKTOP, 'src-tauri', 'target');
   run('cargo', ['build', '--release', '--target', HELPER_TARGET, '--manifest-path', join(HELPER_CRATE, 'Cargo.toml')], {
     cwd: HELPER_CRATE,
     stdio: 'inherit',
+    env: { ...process.env, CARGO_TARGET_DIR: targetDir },
   });
-  const built = join(HELPER_CRATE, 'target', HELPER_TARGET, 'release', HELPER_BINARY);
+  const built = join(targetDir, HELPER_TARGET, 'release', HELPER_BINARY);
   if (!existsSync(built)) throw new Error(`cargo did not produce ${built}`);
   return built;
 }
