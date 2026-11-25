@@ -21,9 +21,18 @@ use crate::workspace_backend::{self, Connector, Remote};
 /// the app. The SSH helper has its own cancel.
 static LOCAL_CANCEL: AtomicBool = AtomicBool::new(false);
 
-/// Stops a running local clone (git is killed and the partial folder removed by the core). Called on app exit.
+/// Local clones in flight, so `cancel_for_exit` knows whether there is one to wait for.
+static LOCAL_RUNNING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Stops a running local clone on app exit and waits up to 2 s for it to end: the clone polls the flag every
+/// 100 ms, then kills git and removes the partial folder, and the process must not exit before that.
 pub(crate) fn cancel_for_exit() {
-    LOCAL_CANCEL.store(true, std::sync::atomic::Ordering::SeqCst);
+    use std::sync::atomic::Ordering::SeqCst;
+    LOCAL_CANCEL.store(true, SeqCst);
+    for _ in 0..20 {
+        if LOCAL_RUNNING.load(SeqCst) == 0 { return; }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }
 
 /// `grant` is the server's single-use clone grant. It is used only in SSH mode, where the helper redeems it for the
@@ -60,7 +69,14 @@ pub async fn repo_clone(
 /// Clones into `<root>/code/`. A destination that is already a clone of the same repository is returned as the
 /// result, so the caller records its path; any other refusal (another repository there, a bad URL) stands.
 fn local_clone(root: &Path, req: &CloneRequest, git: &Path) -> Result<CloneResult, String> {
-    LOCAL_CANCEL.store(false, std::sync::atomic::Ordering::SeqCst);
+    use std::sync::atomic::Ordering::SeqCst;
+    struct Running;
+    impl Drop for Running {
+        fn drop(&mut self) { LOCAL_RUNNING.fetch_sub(1, SeqCst); }
+    }
+    LOCAL_CANCEL.store(false, SeqCst);
+    LOCAL_RUNNING.fetch_add(1, SeqCst);
+    let _running = Running;
     match plan(root, req) {
         Ok(clone_plan) => run(&clone_plan, req.token.as_ref(), &LOCAL_CANCEL, git),
         Err(refusal) => adopt_existing(root, req, git).ok_or(refusal),
