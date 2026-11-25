@@ -27,9 +27,10 @@ const CONFORM = "skills/refactor-conform";
 
 const BATCH_HEADER = /^###\s+R(\d+)\b.*\(status:\s*(todo|done|skipped|blocked)\)\s*$/;
 // The Test loop's plan mode names its step first: `Covered: T3 src/a.py — x`, `Covered: none — T3 trivial`.
-// Agents often set the whole line, or its label, in bold: `**Covered: T3 src/a.py — x**`. A line in code marks is
-// not read: that is how the prompt's own example comes back when it is quoted.
-const COVERED = /^\s*[*_]*Covered:[*_]*\s*(?:T\d+\s+)?(\S+)/;
+// Agents often set the whole line, or its label, in bold or code: `**Covered: T3 src/a.py — x**`.
+const COVERED = /^\s*[*_`]*Covered:[*_`]*\s*(?:T\d+\s+)?(\S+)/;
+// The prompt's own example, quoted back (`Covered: T<n> <path> — <behaviours>`), is not a result.
+const PLACEHOLDER = /<[a-z][a-z ]*>/i;
 const APPLIED = /Applied:\s*R(\d+)/;
 const CONFORMED = /Conformed:\s*R\d+/;
 
@@ -53,7 +54,7 @@ async function checkPlanner(input: SkillResultInput): Promise<string | null> {
 
 async function checkTestWriter(input: SkillResultInput): Promise<string | null> {
   const covered = lines(input.reply).flatMap((l) => {
-    const m = COVERED.exec(l);
+    const m = PLACEHOLDER.test(l) ? null : COVERED.exec(l);
     // The path is the first word: `Covered: a.py — x`, `Covered: a.py, b.py — x`, `Covered: **a.py**`, `Covered: ./a.py`.
     return m ? [m[1].replace(/[`*]/g, "").replace(/^_+|_+$/g, "").replace(/[,;:]+$/, "").replace(/^\.\//, "")] : [];
   });

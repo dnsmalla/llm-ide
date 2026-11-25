@@ -207,10 +207,17 @@ test("test-gap-writer: the plan mode's Covered line names its step before the pa
   assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply: "Covered: T3 src/missing.py — x", exists })), "Covered names src/missing.py but that file does not exist");
 });
 
-test("test-gap-writer: a Covered line set in bold is still read; a quoted example in code marks is not", async () => {
+test("test-gap-writer: a Covered line set in bold or code is still read; the prompt's example quoted back is not", async () => {
   const exists = async (p) => p === "src/a.py";
-  for (const reply of ["**Covered: T2 src/a.py — totals.**", "**Covered:** T2 src/a.py — totals", "__Covered:__ none — T2 trivial"]) {
+  for (const reply of ["`Covered: T2 src/a.py — totals`", "**Covered: T2 src/a.py — totals.**", "**Covered:** T2 src/a.py — totals", "__Covered:__ none — T2 trivial"]) {
     assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply, exists })), null, reply);
   }
   assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply: "End with `Covered: none — T<n> <reason>`.", exists })), "the reply has no 'Covered:' line");
+});
+
+test("test-gap-writer: only the example line with placeholders is ignored, wherever it sits", async () => {
+  const exists = async (p) => p === "src/a.py";
+  const quoted = "I will end with `Covered: T<n> <path> — <behaviours>`.";
+  assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply: quoted, exists })), "the reply has no 'Covered:' line");
+  assert.equal(await checkSkillResult(input({ skillId: "skills/test-gap-writer", reply: `${quoted}\nCovered: T2 src/a.py — totals`, exists })), null);
 });

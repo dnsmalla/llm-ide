@@ -255,12 +255,24 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     // would not let it rewrite the test file it made. The step fails, is rolled back and blocked with the failure as
     // its reason.
     const stepStages = (k === 1 ? batch : [...snapshot, ...batch]).map((s) => (r.noRepair ? { ...s, allowsRepair: false } : s));
+    // "Touch no other step" is only asked of the agent. A mark it put on another step would hide that step's work
+    // for good (only todo steps are ever re-read), so every other step's status is put back, right after the apply
+    // skill: later stages (Test Map Check) may rightly finish another step by code, and that must stand.
+    let marksKept = false;
+    const keepMarks = async (): Promise<void> => {
+      marksKept = true;
+      const now = await opts.readPlan();
+      const kept = now === null ? null : keepOtherMarks(r, planText, now, todo.id);
+      if (now !== null && kept !== now) { await opts.writePlan(kept!); opts.log(`${todo.id} changed the marks of other ${r.nouns}; they were put back`); }
+    };
     // A step the agent skipped without writing anything has nothing to check: the run ends after the apply skill, so
     // its Test, map and prune stages (a full suite run each time) are not run. Any other step runs all its stages.
-    const stepDeps: RunnerDeps = !r.skipChecksWhenSkipped ? deps : {
+    const stepDeps: RunnerDeps = !(r.skipChecksWhenSkipped || r.blockById) ? deps : {
       ...deps,
       async endAfter(stage) {
         if (!(stage.kind === "skill" && stage.skillId === r.applySkill)) return false;
+        if (r.blockById) await keepMarks();
+        if (!r.skipChecksWhenSkipped) return false;
         const untouched = stepStatus(r, await opts.readPlan(), todo.id) === "skipped" && (await opts.checkpoint()) === tree;
         if (untouched) opts.log(`${todo.id} was skipped and changed nothing: its checks are not run`);
         return untouched;
@@ -274,16 +286,16 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     stepReviews.push(...(sub.stepReviews ?? []));
     last = sub;
     replanned = false;
-    // "Touch no other step" is only asked of the agent. A mark it put on another step would hide that step's work
-    // for good (only todo steps are ever re-read), so every other step's status is put back.
-    if (r.blockById) {
-      const now = await opts.readPlan();
-      const kept = now === null ? null : keepOtherMarks(r, planText, now, todo.id);
-      if (now !== null && kept !== now) { await opts.writePlan(kept!); opts.log(`${todo.id} changed the marks of other ${r.nouns}; they were put back`); }
-    }
+    // The apply skill failed before the hook ran: its marks are still checked.
+    if (r.blockById && !marksKept) await keepMarks();
 
     if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
-    if (sub.passed) {
+    // With one round, a review that asks for changes ends the step's run as "not passed" although its tests are
+    // green. Rolling back a working test over a review note would lose it for good, so the step is kept and the
+    // review stays open (it is counted as unresolved in the run summary).
+    const reviewOnly = r.noRepair === true && !sub.passed && sub.loopback?.reason === "review";
+    if (reviewOnly) opts.log(`${todo.id}: the review asked for changes; its tests pass, so the ${r.noun} is kept and the review stays open`);
+    if (sub.passed || reviewOnly) {
       pending = null;
       const status = stepStatus(r, await opts.readPlan(), todo.id);
       blockedStreak = 0;
@@ -305,9 +317,10 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     }
 
     failed = true;
-    // An unrepaired step's summary only says the round ended: name the first failing line, so the plan's Blocked
-    // reason tells the person which test failed.
-    const failing = r.noRepair ? ([...sub.stages].reverse().find((o) => !o.ok)?.output ?? "").split("\n").find((l) => /^\s*(not ok\b|FAIL\b|FAILED\b|✖|E\s{2,}|\w*Error\b|\S+ … FAILED)/.test(l)) : undefined;
+    // An unrepaired step's summary only says the round ended: add the failing stage's own first line, so the plan's
+    // Blocked reason says which test failed (a shell stage) or which contract check refused the reply (an agent stage).
+    const failedOut = r.noRepair ? [...sub.stages].reverse().find((o) => !o.ok) : undefined;
+    const failing = failedOut?.output.split("\n").find((l) => (failedOut.stage.kind === "shellCommand" ? /^\s*(not ok\b|FAIL\b|FAILED\b|✖|E\s{2,}|\w*Error\b)/.test(l) : l.trim() !== ""));
     const reason = oneLine(sub.statusSummary) + (failing ? ` (${oneLine(failing).slice(0, 160)})` : "");
     // A red Test Baseline or a failed agent/transport call says nothing about the step itself: it is restored and left
     // todo to be retried as-is. Anything else blocks it, so the next plan works around it.

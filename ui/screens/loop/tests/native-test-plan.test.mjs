@@ -266,14 +266,17 @@ test("a step skipped without a file change does not run the suite; one that wrot
   assert.deepEqual(c.st.ran, ["map", "test", "write", "test", "custom"], "a done step is always checked");
 });
 
-test("a failing new test is never repaired: the step is rolled back and blocked, and no repair agent runs", async () => {
-  const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
+test("a Test Write that fails its own check is never repaired: rolled back, blocked with the check's reason, next step", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"));
   let repairs = 0;
+  const run = deps.runStage;
+  // With repair on, this is the path that reaches the repair agent (a failing Test goes through the round limit).
+  deps.runStage = async (s) => { const r = await run(s); return s.id === "write" && st.current === "T1" ? { ok: false, output: "the reply has no 'Covered:' line\nI wrote some tests." } : r; };
   deps.repair = async () => { repairs += 1; return { ok: true, output: "edited the source until it passed" }; };
   const out = await runTestSteps(cfg({ maxRepairsPerStage: 3 }), deps, opts);
-  assert.equal(repairs, 0, "a repair could change source or build config to make the test pass");
+  assert.equal(repairs, 0, "a repair could change source or build config");
   assert.match(out.statusSummary, /1 step done \(T2\); T1 rolled back: /);
-  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: write — .*\(the reply has no 'Covered:' line\)/);
 });
 
 test("a failing new test gets no second round and no repair, whatever the loop's settings: rolled back, blocked, next step", async () => {
@@ -307,4 +310,26 @@ test("a blocked step's reason names the first failing test line", async () => {
   const { st, deps, opts } = fake(T("T1"), { fail: ["T1"] });
   await runTestSteps(cfg(), deps, opts);
   assert.match(st.plan, /- Blocked: test — .*\(not ok 2 - totals add the tax\)/);
+});
+
+test("a review that asks for changes does not roll back a step whose tests pass", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"));
+  let reviews = 0;
+  deps.snapshotBefore = async () => ({ tree: "t0" });
+  deps.reviewStep = async () => { reviews += 1; return { verdict: "changes", findings: "[medium] name the test after the behaviour" }; };
+  const out = await runTestSteps(cfg({ maxIterations: 3, maxPassesPerRun: 1 }), deps, opts);
+  assert.equal(reviews, 1, "the review did run");
+  assert.equal(st.restores.length, 0, "nothing is rolled back");
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: done\)/);
+  assert.match(out.statusSummary, /^1 step done \(T1\)/);
+  assert.equal(out.passed, true);
+});
+
+test("another step finished by code after the apply skill keeps its mark", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2") + T("T3"));
+  const run = deps.runStage;
+  // Test Map Check (the stage after Test here) sees that T1's new test also covers T3's file.
+  deps.runStage = async (s) => { const r = await run(s); if (s.id === "custom" && st.current === "T1") st.plan = st.plan.replace("### T3 a/T3.py (status: todo)", "### T3 a/T3.py (status: done)"); return r; };
+  await runTestSteps(cfg({ maxPassesPerRun: 1 }), deps, opts);
+  assert.match(st.plan, /### T3 a\/T3\.py \(status: done\)/);
 });
