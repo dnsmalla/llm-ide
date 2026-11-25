@@ -1,0 +1,19 @@
+# Applies to src-tauri, workspace-core and workspace-helper (cargo merges this with workspace-helper/.cargo/config.toml).
+# Goal: smallest disk footprint, at the cost of slower rebuilds.
+
+[build]
+# One target dir so the three crates share compiled dependencies instead of keeping 3 copies.
+# Relative to this file's parent (desktop/). CARGO_TARGET_DIR still overrides it (build-desktop-mac.sh, rebuild-desktop-features.sh).
+target-dir = "src-tauri/target"
+
+[profile.dev]
+# Line tables keep panic backtraces readable; full debug info is most of a debug target.
+debug = "line-tables-only"
+# Incremental caches were 300-500 MB per crate.
+incremental = false
+
+[profile.dev.package."*"]
+debug = false
+
+[profile.release]
+strip = true
