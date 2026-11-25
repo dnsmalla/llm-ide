@@ -5,6 +5,10 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Loop: Refactoring area roadmap
+
+- Pointed at a whole repository, the Refactoring loop keeps an area roadmap (`REFACTOR-AREAS.md`), plans batches for one area at a time and re-plans into the next area within the same run; "Steps per run" (1–50) now applies to the Refactoring and Test loops. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#the-refactoring-area-roadmap).
+
 ### Loop: Test step plan
 
 - A worktree run of the Test loop now divides the repository at plan time into one step per untested source file (`llm-doc/loop/test/TEST-PLAN.md`, `### T<n>` steps) and runs one step at a time through the shared step driver; "Passes per run" becomes "Steps per run" for it. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#the-test-step-plan).

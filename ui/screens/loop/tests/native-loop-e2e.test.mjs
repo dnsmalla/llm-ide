@@ -106,7 +106,8 @@ function scriptedAgent(workTree, calls, opts = {}) {
     if (skill === "skills/refactor-planner") {
       const r1 = ["### R1 — remove the dead legacy module (status: todo)", "", `- Files: ${opts.planFiles ?? "legacy.py"}`, "- Expect: none", "- Tests: tests/test_golden.py", "- Rules: AGENTS.md", ""];
       const r2 = ["### R2 — add a money formatter (status: todo)", "", "- Files: fmt.py", "- Expect: none", "- Tests: tests/test_golden.py", "- Rules: AGENTS.md", ""];
-      write(PLAN, ["# Refactor plan", "", ...r1, ...(opts.twoBatches ? r2 : [])].join("\n"));
+      // A re-plan keeps the plan as it is (the real planner updates it); only a first plan is written.
+      if (!fs.existsSync(path.join(workTree, PLAN))) write(PLAN, ["# Refactor plan", "", ...r1, ...(opts.twoBatches ? r2 : [])].join("\n"));
       reply = opts.twoBatches ? "Planned: R1, R2" : "Planned: R1";
       if (opts.emptyPlan) reply = "";
     } else if (skill === "skills/test-gap-writer") {
@@ -329,8 +330,8 @@ test("two batches are both applied in one Refactoring run, each with its own bas
   const summary = outcome.stages.map((o) => `${o.ok ? "ok  " : "FAIL"} ${o.stage.name}`).join("\n");
   if (DISCOVER) console.log(`--- two batches: ${outcome.statusSummary}\n${summary}\n--- log ---\n${log.join("\n")}`);
   assert.equal(outcome.passed, true, `${outcome.statusSummary}\n${summary}\n--- log tail ---\n${log.slice(-25).join("\n")}`);
-  assert.match(outcome.statusSummary, /^2 batches applied \(R1, R2\)( · |$)/);
-  assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform"]);
+  assert.match(outcome.statusSummary, /^2 batches applied \(R1, R2\)(; plan complete: no todo batches left)?( · |$)/);
+  assert.deepEqual(agentCalls, ["skills/refactor-planner", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/test-gap-writer", "skills/refactor-apply", "skills/refactor-conform", "skills/refactor-planner"], "the plan ran out, so the planner ran once more");
   const plan = fs.readFileSync(path.join(worktree, PLAN_REL), "utf8");
   assert.match(plan, /### R1 .*\(status: done\)/);
   assert.match(plan, /### R2 .*\(status: done\)/);

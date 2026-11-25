@@ -16,6 +16,8 @@ export const REFACTOR_RECIPE: StepRecipe = {
   baselineStageKey: "refactor-test-baseline",
   limitOf: (c) => c.refactorBatchesPerRun,
   noun: "batch", nouns: "batches", doneWord: "applied", blockById: false, blockedStreak: 0,
+  // A whole-repository plan holds one area at a time: when its batches are used up the planner opens the next area.
+  replanWhenDone: true,
 };
 
 /** Splits the stages into the planning phase and the batch phase by defaultKey (see `splitPhases`). */

@@ -102,6 +102,16 @@ export function maxPassesOf(config: Pick<LoopEngineConfig, "maxPassesPerRun">): 
   return Math.min(10, Math.max(1, Math.floor(n)));
 }
 
+/** Most steps one step-driver run (Refactoring batches, Test steps) may take. */
+export const MAX_STEPS_PER_RUN = 50;
+
+/** Steps per run for the Test loop (kept in maxPassesPerRun): default 3, whole number, clamped to 1..50. */
+export function stepLimitOf(config: Pick<LoopEngineConfig, "maxPassesPerRun">): number {
+  const n = config.maxPassesPerRun;
+  if (typeof n !== "number" || !Number.isFinite(n)) return 3;
+  return Math.min(MAX_STEPS_PER_RUN, Math.max(1, Math.floor(n)));
+}
+
 /** The improvement-review cadence in runs: default 5, whole number, clamped to 1..50. */
 export function reviewEveryRunsOf(config: Pick<LoopEngineConfig, "reviewEveryRuns">): number {
   const n = config.reviewEveryRuns;

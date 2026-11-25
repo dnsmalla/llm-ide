@@ -678,6 +678,23 @@ A Test loop run in its own worktree does not hand the agent the whole repository
 - **Continues next run.** At most "Steps per run" steps run (`maxPassesPerRun`, default 3), also bounded by the time budget and cost ceiling. The plan lives in the worktree's state folder, so the next run continues where this one stopped. The plan files never reach the merge request. A "One item I name" run does not use the plan: it is one plain pass on the task you typed.
 - **A suite that was already failing.** The suite runs once after planning. If it was already red, a step that then fails at Test is rolled back, left `todo`, and ends the run with that reason, instead of being blocked.
 
+## The refactoring area roadmap
+
+Pointed at a whole repository (or a folder with more than one area), the Refactor Plan stage divides the work in two levels. It keeps `llm-doc/loop/refactor/REFACTOR-AREAS.md` beside the plan, one heading per area:
+
+```text
+### A2 svc/billing (status: active)
+- Files: 84
+- Signals: 2 cycles, 3 files over 500 lines, top fan-in invoice.py (14)
+```
+
+- **Areas.** A top-level folder, split one level further when it holds more than about 150 source files; every source folder belongs to exactly one area, vendored and generated folders are left out. Areas are ordered by measured value: cycles, then oversized files, then fan-in and role mixing, then rule violations. IDs are stable and statuses survive every update. `### A` is used for nothing else.
+- **One active area.** Exactly one area is `active`, and `REFACTOR.md` holds batches (`### R<n>`, each with `- Area:`) only for it, at most about 15 todo ones. A single file or single-area Input has no roadmap.
+- **Next area.** When the active area has no todo batch left and a fresh look finds nothing worthwhile, the planner marks it `done` (with a `- Done:` reason), makes the next `todo` area `active` and writes its batches. When every area is done the plan starts with `All areas are done.` and has no todo batch.
+- **Re-planning within a run.** When a run has used up the plan's todo batches after applying or skipping at least one, the planning stages run once more (not the dependency Setup or any run-once stage), so the planner can open the next area, and the run continues into its batches. A re-plan that yields no todo batch ends the run with `plan complete: no todo batches left`; a failed re-plan keeps the applied batches. There is never a second re-plan without a batch in between, and none after `All areas are done.`
+- **Steps per run (1–50).** The Refactoring loop (`refactorBatchesPerRun`, default 3) and the Test loop (`maxPassesPerRun`) take at most this many steps per run, across a re-plan. The time budget and cost ceiling still end a run early; the plan continues next run. Passes per run for other loops stays 1–10.
+- **Not validated by code.** The artifact check cannot express cross-file rules, so the roadmap contract is held by the prompt alone.
+
 ## Four budgets
 
 | Budget | Field | Terminal status |

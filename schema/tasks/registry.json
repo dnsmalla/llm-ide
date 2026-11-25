@@ -722,7 +722,7 @@
       "id": "loop.refactor_planner",
       "label": "Refactor planner",
       "group": "Maintenance",
-      "description": "Loop stage: write a batched, ordered, behaviour-preserving refactor plan without touching code.",
+      "description": "Loop stage: write a batched, ordered, behaviour-preserving refactor plan (area by area for a whole repository) without touching code.",
       "aliases": [],
       "runner": {
         "kind": "agent",
@@ -752,10 +752,11 @@
         "status": "available",
         "reason": null
       },
-      "revision": 5,
+      "revision": 6,
       "knownPromptHashes": [
         "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050",
-        "b698d420392b8fa77f43e9e48d2b188333f7a143811f2d1fa68e490f6a6c1cbb"
+        "b698d420392b8fa77f43e9e48d2b188333f7a143811f2d1fa68e490f6a6c1cbb",
+        "eb5f6b3a95ea4c96a5af500d5d39331462a20ccb2c0f4a21b92b850a49949d5d"
       ]
     },
     {

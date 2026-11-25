@@ -386,7 +386,7 @@
           },
           {
             "defaultKey": "refactor-plan",
-            "defaultRevision": 5,
+            "defaultRevision": 6,
             "enabled": true,
             "id": "refactor/refactor-plan",
             "isDefault": true,

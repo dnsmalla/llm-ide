@@ -4,7 +4,8 @@
 // passed stays, even when a later one is rolled back. A user Stop is not rolled back: the person is looking at the tree.
 // What differs between the loops is one StepRecipe: refactor batches depend on each other (one blocked batch ends the
 // run), test steps do not (the run goes on, up to a streak of blocked ones).
-import type { LoopEngineConfig, LoopStage } from "./model.ts";
+import { isSetupStage } from "./loop-setup.ts";
+import { MAX_STEPS_PER_RUN, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { pauseBetween, runBudget, runNativeLoop, stepReviewNote, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome, type StepReviewOutcome } from "./runner.ts";
 
 export interface StepDriverOpts {
@@ -44,6 +45,8 @@ export interface StepRecipe {
   blockById: boolean;
   /** Steps are independent: after a blocked step go on with the next, up to this many in a row (0 = stop at the first). */
   blockedStreak: number;
+  /** When the plan has no todo step but this run applied some, re-run the planning stages once: the plan may open a next area. */
+  replanWhenDone?: boolean;
 }
 
 const headerOf = (r: StepRecipe) => new RegExp(`^###\\s+(${r.prefix}\\d+)\\b.*\\(status:\\s*(todo|done|skipped|blocked)\\)\\s*$`);
@@ -99,11 +102,14 @@ function markBlocked(r: StepRecipe, plan: string, id: string, reason: string, an
   return lines.join("\n");
 }
 
+/** The planner's end-of-roadmap marker, in the plan's first lines: nothing is left to re-plan. */
+const ALL_DONE = /^All areas are done\./m;
+
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
 
 export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: RunnerDeps, opts: StepDriverOpts): Promise<LoopRunOutcome> {
   const requested = opts.maxBatches ?? r.limitOf(config) ?? 3;
-  const max = Number.isFinite(requested) ? Math.min(10, Math.max(1, Math.trunc(requested))) : 3;
+  const max = Number.isFinite(requested) ? Math.min(MAX_STEPS_PER_RUN, Math.max(1, Math.trunc(requested))) : 3;
   // A loop that applies nothing (no test command, or Apply turned off) only plans and checks: run it as one loop.
   if (!config.stages.some((s) => s.enabled && s.kind === "skill" && s.skillId === r.applySkill)) return runNativeLoop(config, deps);
   const { planning, batch } = splitPhases(r, config.stages);
@@ -167,12 +173,31 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
   let note = "";
   // The checkpoint of the batch in flight, until it passed or was restored: a host error mid-batch restores it.
   let pending: string | null = null;
+  // Planning stages again for a re-plan: the one-time dependency Setup and any runOnce stage already ran in this run.
+  const replanStages = planning.filter((s) => !s.runOnce && !isSetupStage(s));
+  let replanned = false;
 
   try {
   for (let k = 1; ; k++) {
     const planText = await opts.readPlan();
     if (planText === null) { note = "the plan file is missing after planning"; failed = true; break; }
-    const todo = nextTodo(r, planText);
+    let todo = nextTodo(r, planText);
+    if (!todo && r.replanWhenDone && !replanned && applied.length + skipped.length > 0 && k <= max && !exhausted(remaining(costUsd)) && !ALL_DONE.test(planText.split("\n").slice(0, 6).join("\n"))) {
+      replanned = true;
+      opts.log(`— re-planning: the plan has no todo ${r.nouns} left —`);
+      await pauseBetween(deps, config.stageDelaySeconds);
+      const re = await runNativeLoop({ ...config, ...remaining(costUsd), stages: replanStages }, deps);
+      stages.push(...re.stages);
+      iterations.push(...re.iterations);
+      iterationsUsed += re.iterationsUsed;
+      costUsd += re.costUsd ?? 0;
+      stepReviews.push(...(re.stepReviews ?? []));
+      // A failed re-plan keeps the applied batches (the run still passes); a Stop is a Stop.
+      if (re.cancelled) { last = re; note = re.statusSummary; break; }
+      if (!re.passed) { failed = true; note = `re-plan failed: ${oneLine(re.statusSummary)}`; break; }
+      todo = nextTodo(r, await opts.readPlan());
+      if (!todo) { note = `plan complete: no todo ${r.nouns} left`; break; }
+    }
     if (!todo) { note = applied.length ? "" : `no todo ${r.nouns} in the plan`; break; }
     if (k > max) { note = `${r.noun} limit (${max}) reached`; break; }
     const left = remaining(costUsd);
@@ -191,6 +216,7 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     costUsd += sub.costUsd ?? 0;
     stepReviews.push(...(sub.stepReviews ?? []));
     last = sub;
+    replanned = false;
 
     if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
     if (sub.passed) {

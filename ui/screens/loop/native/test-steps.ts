@@ -2,7 +2,7 @@
 // written by the Test Map stage; Test Write does one `### T<n>` step per run of the step stages. Test steps are
 // independent, so a blocked step is rolled back and the run goes on with the next one (3 blocked in a row stop it).
 import type { LoopEngineConfig } from "./model.ts";
-import { maxPassesOf } from "./model.ts";
+import { stepLimitOf } from "./model.ts";
 import type { LoopRunOutcome, RunnerDeps } from "./runner.ts";
 import { runSteps, type StepDriverOpts, type StepRecipe } from "./step-driver.ts";
 
@@ -19,7 +19,7 @@ export const TEST_RECIPE: StepRecipe = {
   baselineStageKey: null,
   baselineAfterPlanning: true,
   // The Test loop's "Steps per run" is the existing per-run limit (maxPassesPerRun, default 3), which it no longer uses for passes.
-  limitOf: (c) => maxPassesOf(c),
+  limitOf: (c) => stepLimitOf(c),
   noun: "step", nouns: "steps", doneWord: "done", blockById: true, blockedStreak: 3,
 };
 
