@@ -7,6 +7,18 @@ export const GRANT_TTL_MS = 30 * 60 * 1000;
 export const APPROVAL_HEADER = "x-llmide-host-approval";
 export const BYPASS_NEEDS_APPROVAL_NOTICE = "Bypass needs your approval again. The chat is back on Ask.";
 
+/** The prompt-box notice for Bypass. `skipConfirm` is the host-owned "Don't ask before Bypass" switch: the host then
+ *  signs without a dialog, so the text must not say the user approves anything. */
+export function bypassModeNotice(live: boolean, skipConfirm: boolean): { tone: "danger" | "warn"; text: string } {
+  if (live) return { tone: "danger", text: "Bypass is on: tools run without asking, including commands that change or delete files." };
+  return {
+    tone: "warn",
+    text: skipConfirm
+      ? "Bypass turns on when you send (it then lasts 30 minutes). You chose not to be asked first in Settings > Security."
+      : "Bypass: you approve it once for this chat when you send (it then lasts 30 minutes).",
+  };
+}
+
 /** Asks the host for a token bound to `chatId` (format v2, purpose `bypass:<chatId>`); null when the user declined. */
 export type SignedConfirm = (chatId: string, summary: string) => Promise<string | null>;
 

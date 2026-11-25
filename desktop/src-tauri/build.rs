@@ -226,6 +226,7 @@ const COMMANDS: &[&str] = &[
     "attach_read",
     "attach_release",
     "bypass_confirm_signed",
+    "bypass_skip_confirm_set",
     "trust_confirm",
     "host_bus_proof",
     "mermaid_runtime_status",

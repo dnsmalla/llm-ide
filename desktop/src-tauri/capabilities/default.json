@@ -220,6 +220,7 @@
     "allow-attach-read",
     "allow-attach-release",
     "allow-bypass-confirm-signed",
+    "allow-bypass-skip-confirm-set",
     "allow-trust-confirm",
     "allow-host-bus-proof",
     "allow-mermaid-runtime-status",

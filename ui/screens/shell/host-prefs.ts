@@ -97,6 +97,9 @@ export interface HostPrefs {
   updateChecks: boolean;
   /** Per-category notification switches; apply at once. */
   notifications: NotifyPrefs;
+  /** Host-owned "Don't ask before Bypass": the host signs Bypass without its dialog. Read-only here: only the host command
+   *  `bypass_skip_confirm_set` (which asks in a native dialog) can turn it on; `set_prefs` refuses the key. */
+  bypassSkipConfirm: boolean;
 }
 
 export interface HostPrefsView {
@@ -107,7 +110,7 @@ export interface HostPrefsView {
   persisted: boolean;
 }
 
-export type HostPrefsPatch = Partial<HostPrefs>;
+export type HostPrefsPatch = Partial<Omit<HostPrefs, "bypassSkipConfirm">>;
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
@@ -171,7 +174,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
     hostApiTls: raw.hostApiTls === true, hostApiRead: raw.hostApiRead === true, hostApiCompose: raw.hostApiCompose === true, hostApiPush: raw.hostApiPush === true, hostApiToolApprovals: raw.hostApiToolApprovals === true,
     hostApiWorkspaceWrite: raw.hostApiWorkspaceWrite === true, hostApiShell: raw.hostApiShell === true,
     hostApiWebOrigins: Array.isArray(raw.hostApiWebOrigins) ? raw.hostApiWebOrigins.filter((x): x is string => typeof x === "string" && x.length <= 300).slice(0, 10) : [],
-    hostApiCapsMigrated: raw.hostApiCapsMigrated === true, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications) };
+    hostApiCapsMigrated: raw.hostApiCapsMigrated === true, loopDefaults, graphAutoUpdateMinutes, updateChecks, notifications: decodeNotifyPrefs(raw.notifications), bypassSkipConfirm: raw.bypassSkipConfirm === true };
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {

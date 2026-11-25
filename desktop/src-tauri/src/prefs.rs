@@ -475,6 +475,9 @@ pub struct Prefs {
     pub update_checks: bool,
     /// Per-category notification switches. Applies at once.
     pub notifications: NotifyPrefs,
+    /// Host-owned, default OFF: `bypass_confirm_signed` signs without its dialog. Never in `PrefsPatch`, so only
+    /// `confirm::bypass_skip_confirm_set` (which shows its own dialog to turn it on) can write it. Applies at once.
+    pub bypass_skip_confirm: bool,
 }
 
 impl Default for Prefs {
@@ -486,6 +489,7 @@ impl Default for Prefs {
             host_api_tls: false, host_api_read: true, host_api_compose: true, host_api_push: false, host_api_tool_approvals: true, host_api_workspace_write: false, host_api_shell: false, host_api_caps_migrated: true,
             host_api_web_origins: Vec::new(),
             loop_defaults: LoopDefaults::default(), graph_auto_update_minutes: 0, update_checks: true, notifications: NotifyPrefs::default(),
+            bypass_skip_confirm: false,
         }
     }
 }
@@ -725,6 +729,8 @@ fn from_stored(p: &Prefs) -> Prefs {
         });
         out.backend_node = p.backend_node.trim().to_string();
         out.backend_dir = p.backend_dir.trim().to_string();
+        // Not patchable from the webview, so a read from the file must carry it over explicitly.
+        out.bypass_skip_confirm = p.bypass_skip_confirm;
         // `patched` deliberately keeps the host-verified hub URL/pin across a WEBVIEW patch. On a
         // file read there is no earlier verified value, so the file's own block must win or remote
         // mode would lose its URL (and the keychain binding) on every restart.
@@ -912,7 +918,7 @@ pub struct PrefsView {
 fn view(stored: Prefs, persisted: bool) -> PrefsView {
     let launch = launch();
     // The theme (and the stored remote choice, which phase 1 does not act on) applies at once; only the others need a restart.
-    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, update_checks: launch.update_checks, notifications: launch.notifications, remote_server: launch.remote_server.clone(), ..stored.clone() } != launch;
+    let restart_needed = Prefs { theme: launch.theme, loop_defaults: launch.loop_defaults.clone(), graph_auto_update_minutes: launch.graph_auto_update_minutes, update_checks: launch.update_checks, notifications: launch.notifications, bypass_skip_confirm: launch.bypass_skip_confirm, remote_server: launch.remote_server.clone(), ..stored.clone() } != launch;
     PrefsView { stored, launch, restart_needed, persisted }
 }
 
@@ -960,6 +966,25 @@ fn apply(patch: PrefsPatch) -> Result<PrefsView, FsError> {
     if let Some(dir) = &st.dir {
         save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?;
     }
+    st.stored = next.clone();
+    let persisted = st.dir.is_some();
+    drop(g);
+    Ok(view(next, persisted))
+}
+
+/// True while the host-owned "don't ask before Bypass" pref is on (default false).
+pub(crate) fn bypass_skip_confirm() -> bool {
+    stored().bypass_skip_confirm
+}
+
+/// Host-side writer for `bypass_skip_confirm` only. Not reachable from `set_prefs` (`PrefsPatch` has no such field);
+/// its one caller is `confirm::bypass_skip_confirm_set`, which has already shown the dialog when turning it on.
+pub(crate) fn set_bypass_skip_confirm(value: bool) -> Result<PrefsView, FsError> {
+    let mut g = state();
+    let st = g.get_or_insert_with(|| State { dir: None, stored: Prefs::default() });
+    let mut next = st.stored.clone();
+    next.bypass_skip_confirm = value;
+    if let Some(dir) = &st.dir { save_to(dir, &next).map_err(|e| herr("io", format!("cannot save preferences: {e}")))?; }
     st.stored = next.clone();
     let persisted = st.dir.is_some();
     drop(g);

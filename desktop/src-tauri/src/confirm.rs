@@ -188,19 +188,98 @@ pub(crate) fn mint_bypass_token(chat_id: &str) -> Result<String, FsError> {
     crate::host_approval::mint(&purpose).map_err(|e| herr("io", e))
 }
 
+/// The token step shared by the command and its tests: with `skip` (the host-owned pref) the dialog is never built;
+/// otherwise `dialog` decides. The chat id is validated first either way, and the token is the same chat-bound,
+/// 60 s, single-use v2 token.
+pub(crate) async fn signed_for<F, Fut>(chat_id: &str, skip: bool, silent_limit: &RateLimit, dialog: F) -> Result<Option<String>, FsError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<bool, FsError>>,
+{
+    if crate::host_approval::bypass_purpose(chat_id).is_none() {
+        return Err(herr("invalid", "not a valid chat id"));
+    }
+    if skip {
+        if !silent_limit.allow() {
+            return Err(herr("rate_limited", "too many Bypass approvals requested"));
+        }
+    } else if !dialog().await? {
+        return Ok(None);
+    }
+    mint_bypass_token(chat_id).map(Some)
+}
+
 /// Same dialog for ONE chat; on accept returns a 60 s, single-use, host-signed token (format v2, purpose
 /// `bypass:<chatId>`, see `host_approval`) for the core's `x-llmide-host-approval` header, else `None`. The core refuses
 /// the token for any other chat, requires `x-llmide-client: desktop-ui` and the bus host proof alongside it. An
-/// invalid chat id is refused BEFORE the dialog is shown.
+/// invalid chat id is refused BEFORE the dialog is shown. While the host-owned `bypassSkipConfirm` pref is on (only
+/// `bypass_skip_confirm_set`, behind its own dialog, can turn it on) the token is signed without the dialog.
 #[tauri::command]
 pub async fn bypass_confirm_signed(chat_id: String, summary: Option<String>) -> Result<Option<String>, FsError> {
-    if crate::host_approval::bypass_purpose(&chat_id).is_none() {
-        return Err(herr("invalid", "not a valid chat id"));
+    signed_for(&chat_id, crate::prefs::bypass_skip_confirm(), &SILENT_MINT_LIMIT, || bypass_dialog(summary)).await
+}
+
+// ---- bypass_skip_confirm_set --------------------------------------------------------------
+
+static SKIP_LIMIT: RateLimit = RateLimit::new(1_000, 6);
+// C: minting with the pref on shows no dialog, so it gets its own cap.
+static SILENT_MINT_LIMIT: RateLimit = RateLimit::new(0, 30);
+/// A: declined "Stop asking" dialogs since launch; at the cap the host stops asking until the app restarts.
+static SKIP_DECLINES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub(crate) const SKIP_MAX_DECLINES: u32 = 3;
+
+/// Fixed text of the dialog that turns "Don't ask before Bypass" on. No webview-supplied text reaches it.
+pub(crate) const BYPASS_SKIP_TEXT: &str = "Bypass will turn on without asking in every chat. Tools then run without asking, \
+    including commands that change or delete files, until you turn it off in Settings > Security.";
+
+/// Refuses once the user declined `SKIP_MAX_DECLINES` times since launch (a page cannot nag until someone gives in).
+pub(crate) fn check_declines(declines: &std::sync::atomic::AtomicU32) -> Result<(), FsError> {
+    if declines.load(std::sync::atomic::Ordering::SeqCst) >= SKIP_MAX_DECLINES {
+        return Err(herr("declined_too_many", "Declined too many times; restart LLM-IDE to ask again."));
     }
-    if !bypass_dialog(summary).await? {
-        return Ok(None);
+    Ok(())
+}
+
+/// Writes the pref. Turning it ON asks first (`ask` is the host's native dialog) and writes nothing on a decline;
+/// turning it OFF (or setting the value it already has) never asks. Returns the value now stored.
+pub(crate) fn skip_confirm_apply(
+    enabled: bool,
+    current: bool,
+    declines: &std::sync::atomic::AtomicU32,
+    ask: impl FnOnce() -> bool,
+    write: impl FnOnce(bool) -> Result<(), FsError>,
+) -> Result<bool, FsError> {
+    if enabled == current {
+        return Ok(current);
     }
-    mint_bypass_token(&chat_id).map(Some)
+    if enabled {
+        check_declines(declines)?;
+        if !ask() {
+            declines.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            return Ok(current);
+        }
+    }
+    write(enabled)?;
+    Ok(enabled)
+}
+
+/// Turns the host-owned `bypassSkipConfirm` pref on (after its own native, Cancel-first dialog) or off (no dialog).
+/// Returns the value now stored. The generic `set_prefs` cannot write this key.
+#[tauri::command]
+pub async fn bypass_skip_confirm_set(enabled: bool) -> Result<bool, FsError> {
+    let current = crate::prefs::bypass_skip_confirm();
+    if enabled && !current {
+        check_declines(&SKIP_DECLINES)?; // before any dialog is built
+        if !SKIP_LIMIT.allow() {
+            return Err(herr("rate_limited", "too many confirmation requests"));
+        }
+        let _open = BYPASS_OPEN.acquire().ok_or_else(|| herr("busy", "a confirmation is already open"))?;
+        let ok = tauri::async_runtime::spawn_blocking(|| ask("Stop asking before Bypass?", BYPASS_SKIP_TEXT, "Stop asking", true))
+            .await
+            .map_err(|e| herr("io", format!("task failed: {e}")))?;
+        return skip_confirm_apply(true, current, &SKIP_DECLINES, || ok, |v| crate::prefs::set_bypass_skip_confirm(v).map(|_| ()));
+    }
+    skip_confirm_apply(enabled, current, &SKIP_DECLINES, || false, |v| crate::prefs::set_bypass_skip_confirm(v).map(|_| ()))
 }
 
 // ---- trust_confirm ------------------------------------------------------------------------
@@ -290,6 +369,92 @@ mod tests {
         for bad in ["", "a|b", "a b"] {
             assert_eq!(mint_bypass_token(bad).unwrap_err().code, "invalid");
         }
+    }
+
+    use std::sync::atomic::AtomicU32;
+
+    #[test]
+    fn the_silent_mint_is_rate_limited() {
+        let limit = RateLimit::new(0, 2);
+        for _ in 0..2 {
+            assert!(tauri::async_runtime::block_on(signed_for("chat-4", true, &limit, || -> std::future::Ready<Result<bool, FsError>> { panic!("no dialog") })).unwrap().is_some());
+        }
+        let err = tauri::async_runtime::block_on(signed_for("chat-4", true, &limit, || -> std::future::Ready<Result<bool, FsError>> { panic!("no dialog") })).unwrap_err();
+        assert_eq!(err.code, "rate_limited");
+    }
+
+    #[test]
+    fn three_declines_stop_the_skip_dialog_until_restart() {
+        let declines = AtomicU32::new(0);
+        for _ in 0..SKIP_MAX_DECLINES {
+            assert!(!skip_confirm_apply(true, false, &declines, || false, |_| panic!("no write")).unwrap());
+        }
+        let err = skip_confirm_apply(true, false, &declines, || panic!("must not ask again"), |_| panic!("no write")).unwrap_err();
+        assert_eq!(err.code, "declined_too_many");
+        assert_eq!(check_declines(&declines).unwrap_err().code, "declined_too_many");
+        // turning off is still allowed
+        assert!(!skip_confirm_apply(false, true, &declines, || panic!("off asks nothing"), |_| Ok(())).unwrap());
+    }
+
+    fn ready(v: bool) -> impl std::future::Future<Output = Result<bool, FsError>> {
+        std::future::ready(Ok(v))
+    }
+
+    #[test]
+    fn with_the_pref_on_the_token_is_signed_without_a_dialog_and_stays_chat_bound() {
+        let t = tauri::async_runtime::block_on(signed_for("chat-4", true, &RateLimit::new(0, 30), || -> std::future::Ready<Result<bool, FsError>> { panic!("no dialog while the pref is on") }))
+            .unwrap()
+            .expect("a token");
+        assert!(t.starts_with("v2."));
+        let key = crate::host_approval::key().unwrap();
+        let v = crate::host_approval::Verifier::default();
+        let now = now_ms();
+        assert!(!v.verify_at(key, &t, "bypass:chat-5", now), "another chat");
+        assert!(v.verify_at(key, &t, "bypass:chat-4", now));
+        assert!(!v.verify_at(key, &t, "bypass:chat-4", now), "single use");
+        let bad = tauri::async_runtime::block_on(signed_for("a|b", true, &RateLimit::new(0, 30), || ready(true))).unwrap_err();
+        assert_eq!(bad.code, "invalid", "a bad chat id is refused even with the pref on");
+    }
+
+    #[test]
+    fn with_the_pref_off_the_dialog_decides() {
+        assert!(tauri::async_runtime::block_on(signed_for("chat-4", false, &RateLimit::new(0, 30), || ready(false))).unwrap().is_none());
+        assert!(tauri::async_runtime::block_on(signed_for("chat-4", false, &RateLimit::new(0, 30), || ready(true))).unwrap().is_some());
+        let bad = tauri::async_runtime::block_on(signed_for("a b", false, &RateLimit::new(0, 30), || -> std::future::Ready<Result<bool, FsError>> { panic!("invalid id: no dialog") })).unwrap_err();
+        assert_eq!(bad.code, "invalid");
+    }
+
+    #[test]
+    fn the_skip_pref_is_written_true_only_after_the_dialog_is_accepted() {
+        let wrote = std::cell::Cell::new(None);
+        let write = |v: bool| { wrote.set(Some(v)); Ok(()) };
+        assert!(!skip_confirm_apply(true, false, &AtomicU32::new(0), || false, write).unwrap(), "declined: stays off");
+        assert_eq!(wrote.get(), None, "a decline writes nothing");
+        assert!(skip_confirm_apply(true, false, &AtomicU32::new(0), || true, write).unwrap());
+        assert_eq!(wrote.get(), Some(true));
+    }
+
+    #[test]
+    fn turning_the_skip_pref_off_needs_no_dialog() {
+        let wrote = std::cell::Cell::new(None);
+        let write = |v: bool| { wrote.set(Some(v)); Ok(()) };
+        assert!(!skip_confirm_apply(false, true, &AtomicU32::new(0), || panic!("off asks nothing"), write).unwrap());
+        assert_eq!(wrote.get(), Some(false));
+        assert!(skip_confirm_apply(true, true, &AtomicU32::new(0), || panic!("already on"), |_| panic!("no write")).unwrap());
+    }
+
+    #[test]
+    fn a_failed_write_is_an_error_not_a_false_success() {
+        let err = skip_confirm_apply(true, false, &AtomicU32::new(0), || true, |_| Err(herr("io", "disk"))).unwrap_err();
+        assert_eq!(err.code, "io");
+    }
+
+    #[test]
+    fn the_skip_dialog_text_names_the_risk_and_cancel_is_first() {
+        assert!(BYPASS_SKIP_TEXT.starts_with("Bypass will turn on without asking in every chat."));
+        assert!(BYPASS_SKIP_TEXT.contains("change or delete files"));
+        assert!(BYPASS_SKIP_TEXT.ends_with("until you turn it off in Settings > Security."));
+        assert_eq!(button_labels("Stop asking").0, "Cancel");
     }
 
     #[test]

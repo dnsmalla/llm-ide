@@ -336,7 +336,7 @@ fn no_password_field_exists() {
     }
     let mut keys = Vec::new();
     collect_keys(&value, &mut keys);
-    let with_pass: Vec<&String> = keys.iter().filter(|k| k.to_lowercase().contains("pass")).collect();
+    let with_pass: Vec<&String> = keys.iter().filter(|k| k.as_str() != "bypassSkipConfirm" && k.to_lowercase().contains("pass")).collect(); // "bypass" is not "password"
     assert!(with_pass.is_empty(), "{with_pass:?}");
     assert_eq!(value["remoteServer"]["sshAuth"], "password");
 }
@@ -597,4 +597,33 @@ fn an_unparseable_file_is_copied_aside_before_defaults_can_overwrite_it() {
 
 fn apply_to_dir_for_test(dir: &Path) {
     save_to(dir, &Prefs::default()).unwrap();
+}
+
+#[test]
+fn bypass_skip_confirm_defaults_off_and_round_trips_through_the_file() {
+    assert!(!Prefs::default().bypass_skip_confirm);
+    assert!(!parse("{}").bypass_skip_confirm, "an old file has no such key");
+    let d = tmp("bypass-skip");
+    save_to(&d, &Prefs { bypass_skip_confirm: true, ..Default::default() }).unwrap();
+    assert!(load_from(&d).bypass_skip_confirm, "the host's own file keeps it across a restart");
+}
+
+#[test]
+fn the_generic_prefs_save_cannot_set_bypass_skip_confirm() {
+    // The patch type is strict: the key is refused at deserialisation, so the webview has no way to send it.
+    assert!(serde_json::from_str::<PrefsPatch>(r#"{"bypassSkipConfirm":true}"#).is_err());
+    // And an unrelated patch leaves a host-written value alone (neither cleared nor raised).
+    let on = Prefs { bypass_skip_confirm: true, ..Default::default() };
+    assert!(on.patched(&PrefsPatch { learn: Some(true), ..Default::default() }).bypass_skip_confirm);
+    assert!(!Prefs::default().patched(&PrefsPatch { learn: Some(true), ..Default::default() }).bypass_skip_confirm);
+}
+
+#[test]
+fn the_host_writer_sets_and_clears_bypass_skip_confirm_without_needing_a_restart() {
+    let _guard = prefs_guard();
+    let v = set_bypass_skip_confirm(true).unwrap();
+    assert!(v.stored.bypass_skip_confirm && bypass_skip_confirm());
+    assert!(!v.restart_needed, "applies at once");
+    let v = set_bypass_skip_confirm(false).unwrap();
+    assert!(!v.stored.bypass_skip_confirm && !bypass_skip_confirm());
 }

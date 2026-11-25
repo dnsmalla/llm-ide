@@ -13,6 +13,7 @@ import { CoreMirrorChatStore } from "./merged-store.ts";
 import { TauriChatStore } from "./tauri-store";
 import { isRemoteCoreMode } from "../shell/host";
 import { coreStatusStore } from "../shell/runtime";
+import { decodePrefsView } from "../shell/host-prefs.ts";
 import { projectStore } from "../shell/project-store.ts";
 import { chatApprovalStore } from "../shell/chat-approvals";
 import { safeHref } from "./markdown";
@@ -189,7 +190,7 @@ export function useChatSurface(projectRoot: string | null, active: boolean, init
       ...BASE_HOST,
       compose,
       // Bypass needs the host's signed, default-Cancel approval (`bypass_confirm_signed`); without the host it fails closed.
-      ...(bypass ? { bypass } : {}),
+      ...(bypass ? { bypass, bypassSkipsConfirm: () => invokeHost<unknown>("get_prefs").then((v) => decodePrefsView(v)?.stored.bypassSkipConfirm === true) } : {}),
       projectRoot: () => rt.root.current,
       graphSummary: async () => {
         if (!shellHost.isAvailable()) return null;

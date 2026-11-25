@@ -536,6 +536,7 @@ macro_rules! product_handlers {
                 attach::attach_read,
                 attach::attach_release,
                 confirm::bypass_confirm_signed,
+                confirm::bypass_skip_confirm_set,
                 confirm::trust_confirm,
                 host_approval::host_bus_proof,
                 mermaid_runtime::mermaid_runtime_status,

@@ -305,6 +305,10 @@ export interface SettingsHost {
   checkForUpdate?(): Promise<UpdateStatusView>;
   /** false = the user cancelled the native dialog. */
   installUpdate?(): Promise<boolean>;
+  /** "Don't ask before Bypass" (host pref, applies at once). Turning it ON shows the host's own native dialog; the
+   *  answer is the value now stored, so a declined dialog resolves false. Turning it off asks nothing. */
+  getBypassSkipConfirm?(): Promise<boolean>;
+  setBypassSkipConfirm?(on: boolean): Promise<boolean>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
   /** The optional-component store (Mermaid): status, and install/remove behind the host's native dialogs. */

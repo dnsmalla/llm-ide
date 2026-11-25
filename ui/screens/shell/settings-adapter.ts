@@ -113,6 +113,9 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
         setGraphAutoUpdate: async (graphAutoUpdateMinutes) => (await writePrefs({ graphAutoUpdateMinutes })).stored.graphAutoUpdateMinutes,
         getUpdateChecks: async () => (await readPrefs()).stored.updateChecks,
         setUpdateChecks: async (updateChecks) => (await writePrefs({ updateChecks })).stored.updateChecks,
+        getBypassSkipConfirm: async () => (await readPrefs()).stored.bypassSkipConfirm,
+        // The host shows the dialog itself; only a boolean `true` back counts as "now on".
+        setBypassSkipConfirm: async (on) => (await d.invoke<unknown>("bypass_skip_confirm_set", { enabled: on })) === true,
         updateStatus: async () => mustDecode(decodeUpdateStatus(await d.invoke<unknown>("update_status"))),
         checkForUpdate: async () => mustDecode(decodeUpdateStatus(await d.invoke<unknown>("update_check"))),
         installUpdate: async () => (await d.invoke<unknown>("update_install")) === true,

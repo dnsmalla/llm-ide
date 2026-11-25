@@ -23,7 +23,7 @@ before(async () => {
 
 const LOOP = { maxIterations: 3, consecutiveFailureStop: 2, wallClockMinutes: 0, maxRepairsPerStage: 3, pauseTimeoutMinutes: 30, protectedPathPolicy: "revert", writeSummaryNote: false };
 const REMOTE = { mode: "local", host: "", port: 22, user: "", keyPath: "", label: "", hubUrl: "", tlsPin: "" };
-const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: { ...REMOTE, sshAuth: "key", sshHostPin: "" }, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, hostApiWorkspaceWrite: false, hostApiShell: false, hostApiWebOrigins: [], hostApiCapsMigrated: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true } };
+const P = { ltaMode: "off", router: false, cap: false, compress: false, learn: false, continueSummary: false, terminal: true, theme: "dark", features: [], backendSource: false, backendNode: "", backendDir: "", backendPort: 0, backendAutoStart: true, remoteServer: { ...REMOTE, sshAuth: "key", sshHostPin: "" }, hostApiTls: false, hostApiRead: false, hostApiCompose: false, hostApiPush: false, hostApiToolApprovals: false, hostApiWorkspaceWrite: false, hostApiShell: false, hostApiWebOrigins: [], hostApiCapsMigrated: true, loopDefaults: LOOP, graphAutoUpdateMinutes: 0, updateChecks: true, notifications: { approvals: true, tasks: true, sync: true, updates: true, core: true }, bypassSkipConfirm: false };
 const view = (stored = P, launch = P) => ({ stored, launch, restartNeeded: JSON.stringify(stored) !== JSON.stringify(launch), persisted: true });
 
 function env(over = {}) {
@@ -144,6 +144,23 @@ test("confirmTrust is true only for an exact boolean yes", async () => {
     assert.equal(await host.confirmTrust("/p"), want);
     assert.deepEqual(calls[0], ["trust_confirm", { path: "/p" }]);
   }
+});
+
+test("Don't ask before Bypass: read from the prefs; the host command decides, and set_prefs is never used", async () => {
+  const { host, calls } = env({ invoke: async (cmd, args, state) => {
+    if (cmd === "bypass_skip_confirm_set") return args.enabled ? false : false; // the user cancelled the host dialog
+    if (cmd === "get_prefs") return view({ ...state.stored, bypassSkipConfirm: true }, state.launch);
+  } });
+  assert.equal(await host.getBypassSkipConfirm(), true);
+  assert.equal(await host.setBypassSkipConfirm(true), false, "declined: off");
+  assert.deepEqual(calls.at(-1), ["bypass_skip_confirm_set", { enabled: true }]);
+  assert.ok(!calls.some(([cmd]) => cmd === "set_prefs"), "the generic prefs save is not a path to this key");
+  const on = env({ invoke: async (cmd) => (cmd === "bypass_skip_confirm_set" ? true : undefined) });
+  assert.equal(await on.host.setBypassSkipConfirm(true), true);
+  const junk = env({ invoke: async (cmd) => (cmd === "bypass_skip_confirm_set" ? "true" : undefined) });
+  assert.equal(await junk.host.setBypassSkipConfirm(true), false, "only an exact boolean true counts");
+  assert.equal(m.decodePrefs({ ...P, bypassSkipConfirm: "yes" }).bypassSkipConfirm, false);
+  assert.equal(m.decodePrefs(P).bypassSkipConfirm, false);
 });
 
 test("diagnostics carry the core log path (never its contents)", async () => {

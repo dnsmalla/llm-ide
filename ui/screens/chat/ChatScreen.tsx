@@ -24,7 +24,7 @@ import { Floating } from "../shell/Floating";
 import { addTargetGroup, addUserModel, afterRefusedPin, forgetUserModel, loadUserModels, saveUserModels, withUserModels, type UserModels } from "./custom-models";
 import { MODE_EXPLANATION } from "./approvals/ModeBanner";
 import { remoteProjectId, subscribeRemoteProject } from "../shell/remote-selection";
-import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassSummary, type BypassGate } from "./bypass";
+import { BYPASS_NEEDS_APPROVAL_NOTICE, bypassModeNotice, bypassSummary, type BypassGate } from "./bypass";
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
 import { chatApprovalStore } from "../shell/chat-approvals";
@@ -67,6 +67,8 @@ export interface ChatHost {
    * is the controller's `bypass` dep, so the token the dialog returns reaches only that chat's next turn.
    */
   bypass?: BypassGate;
+  /** True while the host-owned "Don't ask before Bypass" switch is on (reads the host pref); absent = the dialog is asked. */
+  bypassSkipsConfirm?: () => Promise<boolean>;
   /** The open project folder (named in the dialog's summary). */
   projectRoot?: () => string | null;
   /** A compact summary of the project graph, or null when there is no graph. */
@@ -440,6 +442,17 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     return () => clearTimeout(t);
   }, [msLeft, activeId]);
   const bypassLive = !!(gate && activeId && gate.live(activeId));
+  // Read the host switch whenever Bypass is picked, so the notice never claims an approval the host will not ask for.
+  const [bypassSkips, setBypassSkips] = useState(false);
+  useEffect(() => {
+    if (permission !== "bypass" || !host.bypassSkipsConfirm) return;
+    let live = true;
+    const read = () => { host.bypassSkipsConfirm?.().then((v) => { if (live) setBypassSkips(v); }, () => { if (live) setBypassSkips(false); }); };
+    read();
+    // Settings is another screen of this window: re-read when focus returns so a chat already in Bypass stays accurate.
+    window.addEventListener("focus", read);
+    return () => { live = false; window.removeEventListener("focus", read); };
+  }, [permission, host]);
   const changePermission = async (m: PermissionMode) => {
     if (m !== "bypass") {
       if (activeId) gate?.end(activeId);
@@ -470,8 +483,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     groupsLoaded && providerCannotChat(current.provider, groups) ? { id: "provider", tone: "warn", text: PROVIDER_BLOCKED_NOTE } : null,
     // A live, visible notice while Bypass is active: the dialog is shown once, this stays on screen.
     permission === "bypass" && gate
-      ? (bypassLive ? { id: "mode", tone: "danger", text: "Bypass is on: tools run without asking, including commands that change or delete files." }
-        : { id: "mode", tone: "warn", text: "Bypass: you approve it once for this chat when you send (it then lasts 30 minutes)." })
+      ? { id: "mode", ...bypassModeNotice(bypassLive, bypassSkips) }
       : permission === "accept-edits" ? { id: "mode", tone: "info", text: MODE_EXPLANATION["accept-edits"] } : null,
     budgetWarns && state.budget ? { id: "budget", tone: "warn", text: `You've used ${budgetPercent(state.budget)}% of this chat's token budget · ${state.budget.remaining.toLocaleString("en-US")} left${state.budget.level === "exceeded" ? " · this chat is at its limit" : ""}`, action: { label: "Start a fresh chat", run: () => void newChat() } } : null,
     ...modelNotices({ plainChat: plain, routerOn: route?.enabled, groups }).map((k): PromptNotice => (k === "tools"

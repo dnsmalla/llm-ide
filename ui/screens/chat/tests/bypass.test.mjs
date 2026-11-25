@@ -222,3 +222,15 @@ test("the host is asked to sign for THIS chat (the token is chat-bound), and a l
   assert.equal(await gate.request("chat-b", "s"), "declined", "v1 shape is not accepted");
   assert.deepEqual(asked, ["chat-a", "chat-b"]);
 });
+
+test("the Bypass prompt notice says 'approve' only while the host still asks", () => {
+  assert.match(c.bypassModeNotice(false, false).text, /you approve it once for this chat/);
+  const skip = c.bypassModeNotice(false, true);
+  assert.doesNotMatch(skip.text, /approve/i);
+  assert.match(skip.text, /30 minutes/);
+  for (const s of [false, true]) {
+    const live = c.bypassModeNotice(true, s);
+    assert.equal(live.tone, "danger");
+    assert.equal(live.text, "Bypass is on: tools run without asking, including commands that change or delete files.");
+  }
+});
