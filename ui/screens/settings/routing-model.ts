@@ -12,6 +12,29 @@ export const TIERS: readonly { id: string; label: string; hint: string }[] = [
   { id: "cheap", label: "Cheap", hint: "Background and bulk work. Optional." },
 ];
 
+/** Roles that start on Standard in the draft while no tier is saved for them (Decision is never preselected). */
+const PRESELECT_ROLES: readonly string[] = ["subagents", "internal", "loop", "autoTasks"];
+
+/** The text of a role's empty option. */
+export function roleEmptyOptionLabel(role: string): string {
+  return PRESELECT_ROLES.includes(role) ? "Default (built-in)" : "Default";
+}
+
+/** The saved routing as a draft; with Standard set, roles that have no saved tier start on Standard. */
+export function draftFromLoaded(l: { tiers: Record<string, TierChoice>; features: Record<string, string> }): RoutingDraft {
+  const features = { ...l.features };
+  if ("standard" in l.tiers) for (const role of PRESELECT_ROLES) if (!features[role]) features[role] = "standard";
+  return { tiers: { ...l.tiers }, features };
+}
+
+/** Roles the draft put on Standard that are not saved that way yet. */
+export function preselectedRoles(loaded: RoutingTiers | null, draft: RoutingDraft | null): string[] {
+  if (!loaded || !draft) return [];
+  return PRESELECT_ROLES.filter((role) => draft.features[role] === "standard" && !loaded.features[role]);
+}
+
+export const PRESELECT_HINT = "Roles without a saved tier are set to Standard; press Save to keep it.";
+
 export const ROLES: readonly { id: string; label: string }[] = [
   { id: "subagents", label: "Sub-agents" },
   { id: "internal", label: "Internal tasks" },
@@ -60,6 +83,7 @@ const REASONS: Record<string, string> = {
   not_agent_capable: "it cannot run on the Claude engine",
   unset: "no model is set for it",
   unknown_provider: "the provider is not known",
+  cli_untrusted_input: "a signed-in CLI is not used for text from outside, such as tickets and documents",
 };
 
 export function reasonText(reason: string | undefined): string {
@@ -125,6 +149,9 @@ export function roleFallbackWarning(d: RoutingDraft): string | null {
 /** One sentence for a role row when its tier is not set, else null. */
 export function roleStatusText(role: string, d: RoutingDraft): string | null {
   const tier = d.features[role];
+  if (!tier && role === "decisions") return "Decisions use the default model until you choose a Decision model.";
+  // Loop and Auto Tasks leave the answer to the server: an unsaved one runs on Standard there.
+  if (!tier && (role === "subagents" || role === "internal")) return "No tier saved; the built-in default runs.";
   if (!tier || tier in d.tiers) return null;
   return `Uses ${tierLabel(tier)}, which is not set; the default runs.`;
 }
@@ -166,7 +193,7 @@ export function validateDraft(d: RoutingDraft): string | null {
     if (bad) return `${tierLabel(id)}: ${bad}`;
   }
   for (const [role, tier] of Object.entries(d.features)) {
-    if (!(tier in d.tiers)) return `${roleLabel(role)} uses ${tierLabel(tier)}, which is not set. Set ${tierLabel(tier)}, or change ${roleLabel(role)} to Default.`;
+    if (!(tier in d.tiers)) return `${roleLabel(role)} uses ${tierLabel(tier)}, which is not set. Set ${tierLabel(tier)}, or change ${roleLabel(role)} to ${roleEmptyOptionLabel(role)}.`;
   }
   return null;
 }
@@ -195,7 +222,7 @@ export class RoutingModel extends Store<RoutingState> {
         this.set({ phase: "ready", loaded });
         return;
       }
-      this.set({ phase: "ready", loaded, draft: { tiers: { ...loaded.tiers }, features: { ...loaded.features } } });
+      this.set({ phase: "ready", loaded, draft: draftFromLoaded(loaded) });
     } catch (e) {
       if (gen !== this.#generation) return;
       this.set({ phase: this.getState().loaded ? "ready" : "failed", error: describeError(e) });

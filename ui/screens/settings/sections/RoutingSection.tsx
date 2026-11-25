@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
-import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, SWITCH_TEXT, TIERS, isDirty, roleFallbackWarning, roleStatusText, tierStatusText } from "../routing-model.ts";
+import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, roleEmptyOptionLabel, preselectedRoles, PRESELECT_HINT, SWITCH_TEXT, TIERS, isDirty, roleFallbackWarning, roleStatusText, tierStatusText } from "../routing-model.ts";
 import { ModelListsModel, OTHER_MODEL, pickerView, type ModelListEntry } from "../routing-models.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { CatalogMigration, ProviderSettings, TierChoice } from "../decoders.ts";
@@ -89,6 +89,7 @@ export default function RoutingSection() {
               })}
             </tbody>
           </table>
+          {dirty && preselectedRoles(r.loaded, r.draft).length > 0 ? <p className="st-hint" role="status">{PRESELECT_HINT}</p> : null}
           {roleFallbackWarning(r.draft) ? <StatusBanner severity="warning" message={roleFallbackWarning(r.draft)!} /> : null}
           <table className="st-table" aria-label="Roles">
             <thead><tr><th scope="col">Role</th><th scope="col">Tier</th><th scope="col">Status</th></tr></thead>
@@ -98,7 +99,7 @@ export default function RoutingSection() {
                   <th scope="row">{role.label}</th>
                   <td>
                     <select className="st-select" aria-label={`${role.label} tier`} value={r.draft!.features[role.id] ?? ""} onChange={(e) => routing.setRole(role.id, e.target.value || null)}>
-                      <option value="">Default</option>
+                      <option value="">{roleEmptyOptionLabel(role.id)}</option>
                       {r.draft!.features[role.id] && !(r.draft!.features[role.id]! in r.draft!.tiers) ? <option value={r.draft!.features[role.id]}>{`${[...TIERS, ...EXTRA_TIERS].find((t) => t.id === r.draft!.features[role.id])?.label ?? r.draft!.features[role.id]} (not set)`}</option> : null}
                       {(role.id === "decisions" ? EXTRA_TIERS.filter((t) => t.id === "decision") : TIERS).filter((t) => t.id in r.draft!.tiers).map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
                     </select>

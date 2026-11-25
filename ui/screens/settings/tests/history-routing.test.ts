@@ -158,7 +158,8 @@ test("routing: draft starts from the loaded table; saving sends the WHOLE table 
   });
   const m = new RoutingModel(client);
   await m.load();
-  assert.equal(isDirty(m.getState().loaded, m.getState().draft), false);
+  // The fixture saves no tier for some roles, so Standard is preselected for them and Save is offered.
+  assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
   m.setTier("cheap", { provider: "deepseek", model: "deepseek-reasoner" });
   assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
   const r = await m.save();

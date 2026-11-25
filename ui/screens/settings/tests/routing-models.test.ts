@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RoutingModel, dropReasonText, modelIdProblem, roleFallbackWarning, roleFallbacks, roleStatusText, validateDraft } from "../routing-model.ts";
+import { RoutingModel, dropReasonText, modelIdProblem, roleFallbackWarning, roleFallbacks, roleStatusText, roleEmptyOptionLabel, draftFromLoaded, preselectedRoles, isDirty, validateDraft } from "../routing-model.ts";
 import { ModelListsModel, decodeBuiltinModels, pickerView, OTHER_MODEL } from "../routing-models.ts";
 import { fakeClient, reply } from "./helpers.ts";
 
@@ -201,9 +201,9 @@ test("roles on an unset tier: status text and the list used by the save banner",
   ]);
   assert.equal(roleFallbackWarning(draft), "These roles run the default because their tier is not set: Sub-agents (Cheap), Loop and Factory (Strong).");
   assert.equal(roleFallbackWarning({ tiers: {}, features: {} }), null);
-  assert.equal(validateDraft({ tiers: {}, features: { subagents: "cheap" } }), "Sub-agents uses Cheap, which is not set. Set Cheap, or change Sub-agents to Default.");
+  assert.equal(validateDraft({ tiers: {}, features: { subagents: "cheap" } }), "Sub-agents uses Cheap, which is not set. Set Cheap, or change Sub-agents to Default (built-in).");
   assert.equal(roleStatusText("subagents", draft), "Uses Cheap, which is not set; the default runs.");
-  assert.equal(roleStatusText("internal", draft), null);
+  assert.equal(roleStatusText("internal", draft), "No tier saved; the built-in default runs.");
   assert.equal(roleStatusText("subagents", { tiers: { cheap: { provider: "anthropic", model: "x" } }, features: { subagents: "cheap" } }), null);
 });
 
@@ -224,5 +224,53 @@ test("save banner names the roles that now fall back to the default", async () =
 });
 
 test("validateDraft: a role on an unset tier is named with labels and the way out", () => {
-  assert.equal(validateDraft({ tiers: {}, features: { subagents: "cheap" } }), "Sub-agents uses Cheap, which is not set. Set Cheap, or change Sub-agents to Default.");
+  assert.equal(validateDraft({ tiers: {}, features: { subagents: "cheap" } }), "Sub-agents uses Cheap, which is not set. Set Cheap, or change Sub-agents to Default (built-in).");
+});
+
+test("roles: the empty option says Default (built-in), Decision keeps Default", () => {
+  for (const role of ["subagents", "internal", "loop", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
+  assert.equal(roleEmptyOptionLabel("decisions"), "Default");
+});
+
+test("roles: unset Sub-agents/Internal say no tier is saved; Decision says it uses the default model", () => {
+  const draft = { tiers: {}, features: {} };
+  assert.equal(roleStatusText("subagents", draft), "No tier saved; the built-in default runs.");
+  assert.equal(roleStatusText("internal", draft), "No tier saved; the built-in default runs.");
+  assert.equal(roleStatusText("loop", draft), null);
+  assert.equal(roleStatusText("decisions", draft), "Decisions use the default model until you choose a Decision model.");
+});
+
+const STD = { provider: "anthropic", model: "x" };
+const loadedOf = (tiers: Record<string, typeof STD>, features: Record<string, string>) => ({ tiers, features, status: {}, featureStatus: {} }) as never;
+
+test("draft: with Standard set, roles without a saved tier start on Standard; Decision never does", () => {
+  const d = draftFromLoaded({ tiers: { standard: STD }, features: { loop: "standard", subagents: "standard" } });
+  assert.deepEqual(d.features, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
+  const kept = draftFromLoaded({ tiers: { standard: STD, cheap: STD }, features: { internal: "cheap" } });
+  assert.equal(kept.features.internal, "cheap");
+  assert.equal(kept.features.decisions, undefined);
+});
+
+test("draft: without Standard nothing is preselected", () => {
+  assert.deepEqual(draftFromLoaded({ tiers: { cheap: STD }, features: {} }).features, {});
+});
+
+test("draft: preselecting makes the section dirty (with the roles named); nothing to preselect is clean", () => {
+  const loaded = loadedOf({ standard: STD }, { loop: "standard" });
+  const draft = draftFromLoaded(loaded);
+  assert.equal(isDirty(loaded, draft), true);
+  assert.deepEqual(preselectedRoles(loaded, draft), ["subagents", "internal", "autoTasks"]);
+  const full = loadedOf({ standard: STD }, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
+  assert.equal(isDirty(full, draftFromLoaded(full)), false);
+  assert.deepEqual(preselectedRoles(full, draftFromLoaded(full)), []);
+});
+
+test("draft: RoutingModel.load puts Standard on unsaved roles and Save sends it explicitly", async () => {
+  const client = fakeClient({
+    "GET /kb/routing-tiers": () => ({ status: 200, body: { tiers: { standard: STD }, features: {}, status: {}, featureStatus: {} } }),
+  });
+  const m = new RoutingModel(client);
+  await m.load();
+  assert.equal(m.getState().draft!.features.subagents, "standard");
+  assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
 });
