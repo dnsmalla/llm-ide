@@ -34,12 +34,12 @@ export interface RunRecordFacts {
   reviewedPatchId: string | null; endedAt: string | null; entry: { id: string; startedAt: string } | null;
 }
 
-export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; /** The step an interrupted run's marker names. */ interruptedStage?: string | null; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
+export interface ItemFacts { live: LiveRun | null; lastRecord: RunRecordFacts | null; worktreeExists: boolean; interrupted?: boolean; /** The run finished but its record is not on disk yet (the run manager holds it for a retry). */ recordPending?: boolean; /** Its record failed every try; the board offers "Retry record". */ recordStuck?: boolean; /** The step an interrupted run's marker names. */ interruptedStage?: string | null; ship: ShipStatus | null; shipStatusError: boolean; lastKnownColumn: Column | null }
 
 export const COLUMNS: readonly Column[] = ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"];
 export const COLUMN_LABELS: Readonly<Record<Column, string>> = { inbox: "Inbox", needsDecision: "Needs decision", working: "Working", needsYou: "Needs you", readyToShip: "Ready to ship", shipped: "Shipped", done: "Done" };
 export const NOTE = {
-  queued: "Queued", paused: "Paused", interrupted: "Interrupted", intakeReady: "Intake ready",
+  queued: "Queued", paused: "Paused", interrupted: "Interrupted", recordPending: "Record pending", recordStuck: "Record not written", intakeReady: "Intake ready",
   statusUnavailable: "status unavailable", ciFailed: "CI failed", newComments: "New review comments",
   ciFailedAndComments: "CI failed, new review comments", closedUnmerged: "Closed without merge", ciRunning: "CI running",
   failed: "Failed", stopped: "Stopped", error: "Error", blocked: "Blocked", notShipped: "Not shipped", awaitingReview: "Awaiting your review",
@@ -150,6 +150,8 @@ function finishedNote(statusCode: string): string {
 /** The spec's column table. Order matters: live run, then no record, then the PR/MR, then the run result. */
 export function columnFor(f: ItemFacts): { column: Column; note: string | null } {
   if (f.live) return { column: "working", note: f.live.state === "queued" ? (f.live.note === NOTE.continuingAutomatically ? NOTE.continuingAutomatically : NOTE.queued) : f.live.state === "paused" ? NOTE.paused : null };
+  // A finished run whose record is still being written is not interrupted: Resume would start a second run on its worktree.
+  if (f.recordPending) return f.recordStuck ? { column: "needsYou", note: NOTE.recordStuck } : { column: "needsYou", note: NOTE.recordPending };
   // A run marker with no live run means the app stopped mid-run, whatever older record exists.
   if (f.interrupted) return { column: "needsYou", note: NOTE.interrupted };
   const rec = f.lastRecord;

@@ -2,7 +2,7 @@
 // month-rotated (`index-YYYY-MM.jsonl`) with the legacy `index.jsonl` read oldest. A missing journal is normal.
 import type { FsApi } from "../../explorer/fs";
 import type { LoopIterationOutcome } from "./runner.ts";
-import { parseTestResults } from "./testmap.ts";
+import { ensureDir, parseTestResults } from "./testmap.ts";
 
 export interface LoopRunIndexEntry {
   id: string;
@@ -71,18 +71,45 @@ export async function appendRunRecord(fs: WriteHistoryFs, entry: LoopRunIndexEnt
   const d = new Date(entry.startedAt);
   const month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   const dir = `system/loop-runs/${month}`;
-  try { await fs.create(dir, "dir"); } catch (e) { if (typeof e === "object" && e !== null && (e as { code?: unknown }).code !== "exists") throw e; }
-  await fs.write(`${dir}/${entry.id}.json`, JSON.stringify(record, null, 2) + "\n", { expected_hash: null });
+  // The host's create is not recursive, so every segment is made (a project that never ran a Loop has no system/loop-runs).
+  await ensureDir(fs, dir);
+  // Idempotent and never an overwrite: a retry (possibly from a stored, truncated copy) after the first attempt died
+  // past this write finds the record there already, and that one stays.
+  try { await fs.write(`${dir}/${entry.id}.json`, JSON.stringify(record, null, 2) + "\n", { expected_hash: null }); } catch (e) { if (errorCode(e) !== "exists") throw e; }
   const idx = `system/loop-runs/index-${month}.jsonl`;
-  let prior = "";
-  let hash: string | null = null;
-  try {
-    const r = await fs.read(idx, 2_000_000);
-    if (r.status === "ok" && r.text !== null) { prior = r.text; hash = r.hash; }
-  } catch { /* new index */ }
-  const lines = (prior + JSON.stringify(entry) + "\n").split("\n").filter((l) => l.trim() !== "");
-  const body = lines.slice(-MAX_RUN_RECORDS).join("\n") + "\n";
-  await fs.write(idx, body, { expected_hash: hash });
+  for (let attempt = 1; ; attempt++) {
+    let prior = "";
+    let hash: string | null = null;
+    try {
+      const r = await fs.read(idx, 2_000_000);
+      if (r.status !== "ok" || r.text === null) throw new Error(`the run index could not be read (${r.status})`);
+      prior = r.text; hash = r.hash;
+    } catch (e) {
+      // Only a missing index is a new one; any other failure would surface later as a misleading "already exists".
+      if (!["not_found", "missing"].includes(errorCode(e))) throw e;
+    }
+    if (prior.split("\n").some((l) => indexLineHasId(l, entry.id))) return;
+    const lines = (prior + JSON.stringify(entry) + "\n").split("\n").filter((l) => l.trim() !== "");
+    const body = lines.slice(-MAX_RUN_RECORDS).join("\n") + "\n";
+    try {
+      await fs.write(idx, body, { expected_hash: hash });
+      return;
+    } catch (e) {
+      // Another run finished at the same time and changed the index between this read and write: re-read and re-apply.
+      const code = errorCode(e);
+      if ((code === "conflict" || code === "exists") && attempt < 5) continue;
+      throw e;
+    }
+  }
+}
+
+function errorCode(e: unknown): string {
+  return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
+}
+
+function indexLineHasId(line: string, id: string): boolean {
+  if (!line.trim()) return false;
+  try { return (JSON.parse(line) as { id?: unknown }).id === id; } catch { return false; }
 }
 
 

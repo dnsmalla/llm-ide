@@ -100,3 +100,96 @@ test("R-050: a ship override is recorded with rule, file, line and time", () => 
   const f = h.decodeFactoryFields({ ship: { provider: "github", url: "https://github.com/o/r/pull/1", commit: "abc", reused: false, secretOverride: { rule: "GitHub token", file: "src/a.ts", line: 2, at: "2026-11-10T09:00:00.000Z" } } });
   assert.deepEqual(f.ship.secretOverride, { rule: "GitHub token", file: "src/a.ts", line: 2, at: "2026-11-10T09:00:00.000Z" });
 });
+
+// A fs like workspace-core: create is NOT recursive (not_found when the parent is missing, exists when present).
+function strictFs(dirs) {
+  const files = new Map();
+  const miss = (code) => Object.assign(new Error(code), { code });
+  return {
+    files,
+    async create(p) { const parent = p.split("/").slice(0, -1).join("/"); if (dirs.has(p)) throw miss("exists"); if (parent && !dirs.has(parent)) throw miss("not_found"); dirs.add(p); return "dir"; },
+    async read(p) { if (!files.has(p)) throw miss("not_found"); return { status: "ok", text: files.get(p), hash: "h" }; },
+    async write(p, text) { const parent = p.split("/").slice(0, -1).join("/"); if (parent && !dirs.has(parent)) throw miss("not_found"); files.set(p, text); return { path: p, hash: "h" }; },
+  };
+}
+const ENTRY = { id: "r1", loopId: "l", loopName: "L", startedAt: "2026-09-30T12:00:00Z", durationSeconds: 1, iterationsUsed: 1, statusCode: "success", statusSummary: "ok", trigger: "manual" };
+
+test("appendRunRecord creates system/loop-runs when only system exists", async () => {
+  const fs = strictFs(new Set(["system"]));
+  await h.appendRunRecord(fs, ENTRY, { id: "r1" });
+  assert.ok(fs.files.has("system/loop-runs/2026-09/r1.json"));
+  assert.match(fs.files.get("system/loop-runs/index-2026-09.jsonl"), /"id":"r1"/);
+});
+
+test("appendRunRecord creates every missing folder when nothing exists", async () => {
+  const fs = strictFs(new Set());
+  await h.appendRunRecord(fs, ENTRY, { id: "r1" });
+  assert.ok(fs.files.has("system/loop-runs/2026-09/r1.json"));
+});
+
+// A fs with hash-checked writes: expected_hash null = create-only (exists), a stale hash = conflict, force overwrites.
+function hashFs(opts = {}) {
+  const dirs = new Set(["system", "system/loop-runs", "system/loop-runs/2026-09"]);
+  const files = new Map();
+  let version = 0;
+  const err = (code) => Object.assign(new Error(code), { code });
+  return {
+    files,
+    async create(p) { if (dirs.has(p)) throw err("exists"); dirs.add(p); return "dir"; },
+    async read(p) { if (!files.has(p)) throw err("not_found"); return { status: "ok", text: files.get(p).text, hash: files.get(p).hash }; },
+    async write(p, text, o = {}) {
+      if (opts.beforeWrite) await opts.beforeWrite(p);
+      const cur = files.get(p);
+      if (!o.force) {
+        if (cur && (o.expected_hash === null || o.expected_hash === undefined)) throw err("exists");
+        if (cur && o.expected_hash !== cur.hash) throw err("conflict");
+        if (!cur && o.expected_hash) throw err("conflict");
+      }
+      files.set(p, { text, hash: `h${++version}` });
+      return { path: p, hash: `h${version}` };
+    },
+  };
+}
+
+test("a retry after the index write failed once leaves one record and one index line", async () => {
+  const fs = hashFs();
+  const realWrite = fs.write;
+  let failed = false;
+  fs.write = async (p, t, o) => { if (p.endsWith(".jsonl") && !failed) { failed = true; throw new Error("disk"); } return realWrite(p, t, o); };
+  await assert.rejects(h.appendRunRecord(fs, ENTRY, { id: "r1" }), /disk/);
+  await h.appendRunRecord(fs, ENTRY, { id: "r1" });
+  await h.appendRunRecord(fs, ENTRY, { id: "r1" });
+  const idx = fs.files.get("system/loop-runs/index-2026-09.jsonl").text.trim().split("\n");
+  assert.equal(idx.length, 1);
+  assert.ok(fs.files.has("system/loop-runs/2026-09/r1.json"));
+});
+
+test("two concurrent appends for the same month keep both index lines", async () => {
+  let gate;
+  const both = new Promise((r) => { gate = r; });
+  let n = 0;
+  const fs = hashFs({ beforeWrite: async (p) => { if (p.endsWith(".jsonl") && n++ < 2) { if (n === 2) gate(); await both; } } });
+  await Promise.all([
+    h.appendRunRecord(fs, { ...ENTRY, id: "a1" }, { id: "a1" }),
+    h.appendRunRecord(fs, { ...ENTRY, id: "b1" }, { id: "b1" }),
+  ]);
+  const ids = fs.files.get("system/loop-runs/index-2026-09.jsonl").text.trim().split("\n").map((l) => JSON.parse(l).id).sort();
+  assert.deepEqual(ids, ["a1", "b1"]);
+});
+
+test("a retry never overwrites a record the first attempt already wrote", async () => {
+  const fs = hashFs();
+  await fs.write("system/loop-runs/2026-09/r1.json", "FULL RECORD", { expected_hash: null });
+  await h.appendRunRecord(fs, ENTRY, { id: "r1", truncated: true });
+  assert.equal(fs.files.get("system/loop-runs/2026-09/r1.json").text, "FULL RECORD");
+  assert.match(fs.files.get("system/loop-runs/index-2026-09.jsonl").text, /"id":"r1"/);
+});
+
+test("an index read that fails for a reason other than not found is rethrown, not retried as a new index", async () => {
+  const fs = hashFs();
+  let reads = 0;
+  const realRead = fs.read;
+  fs.read = async (p) => { if (p.endsWith(".jsonl")) { reads++; throw Object.assign(new Error("permission denied"), { code: "io" }); } return realRead(p); };
+  await assert.rejects(h.appendRunRecord(fs, ENTRY, { id: "r1" }), /permission denied/);
+  assert.equal(reads, 1);
+});

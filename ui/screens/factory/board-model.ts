@@ -11,7 +11,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
-export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer" | "approve" | "requestChanges";
+export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer" | "approve" | "requestChanges" | "retryRecord";
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   /** The board lane the card sits in (a process step, or backlog / MR / done). */
@@ -38,7 +38,7 @@ export function loopbackTitle(l: LoopbackFacts): string {
   if (l.reason === "review") return `Review still requests changes after ${l.rounds} rounds`;
   return `Stopped at its limit in round ${l.rounds} of ${l.maxRounds}`;
 }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes" };
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes", retryRecord: "Retry record" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -53,6 +53,10 @@ export function actionsFor(column: Column, note: string | null, process: { intak
     case "needsYou":
       // Continue (finishChecks) tests and reviews the work already done instead of rerunning the whole Loop, or resumes
       // the run when it stopped before its work was written. Open diff shows what the interrupted run changed.
+      // The record is being written; Resume, Continue and Run again would race that write.
+      // Discard deletes the worktree of a finished run, so the read-only diff stays available.
+      if (note === NOTE.recordPending) return ["openDiff", "discard"];
+      if (note === NOTE.recordStuck) return ["retryRecord", "openDiff", "discard"];
       if (note === NOTE.interrupted) return ["finishChecks", "openDiff", "rerun", "discard"];
       if (note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments) return ["sendBack", "openRequest", "openDiff", "discard"];
       if (note === NOTE.closedUnmerged || note === NOTE.statusUnavailable) return ["openRequest", "discard"];
@@ -210,7 +214,7 @@ export function decodeWorktreeList(body: unknown): Map<string, WorktreeInfo> {
   return out;
 }
 
-export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; interrupted?: ReadonlySet<string>; interruptedStages?: ReadonlyMap<string, string>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
+export interface FactsContext { projectRoot: string; live: readonly LiveRun[]; records: ReadonlyMap<string, RunRecordFacts>; worktrees: ReadonlyMap<string, unknown>; interrupted?: ReadonlySet<string>; recordPending?: ReadonlySet<string>; recordStuck?: ReadonlySet<string>; interruptedStages?: ReadonlyMap<string, string>; ship: ReadonlyMap<string, ShipStatus | "error">; lastKnown: ReadonlyMap<string, Column> }
 
 /** The facts of one card: its last run's record, its worktree, the PR/MR status and its last known column. */
 export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFacts {
@@ -224,6 +228,8 @@ export function assembleFacts(item: WorkItemRecord, ctx: FactsContext): ItemFact
     lastRecord,
     worktreeExists: runId !== null && ctx.worktrees.has(runId),
     interrupted: runId !== null && ctx.interrupted?.has(runId) === true,
+    recordPending: runId !== null && ctx.recordPending?.has(runId) === true,
+    recordStuck: runId !== null && ctx.recordStuck?.has(runId) === true,
     interruptedStage: runId !== null ? ctx.interruptedStages?.get(runId) ?? null : null,
     ship: entry !== undefined && entry !== "error" ? entry : null,
     shipStatusError: entry === "error",

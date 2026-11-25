@@ -16,6 +16,8 @@ export interface PendingRecord {
   marker: string;
   /** A run that threw has no record; only its marker still has to be removed once its project is open. */
   markerOnly?: boolean;
+  /** How many times writing this record has failed, so a record that never succeeds is reported, not retried silently. */
+  attempts?: number;
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

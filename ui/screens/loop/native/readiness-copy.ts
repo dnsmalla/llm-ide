@@ -33,6 +33,7 @@ export async function copyReadiness(fs: ReadinessFs, runRootPrefix: string, runI
     dir = dir ? `${dir}/${seg}` : seg;
     try { await fs.create(dir, "dir"); } catch (e) { if (codeOf(e) !== "exists") throw e; }
   }
-  await fs.write(path, text, { expected_hash: null });
+  // A retried record write comes back here with the copy already made.
+  try { await fs.write(path, text, { expected_hash: null }); } catch (e) { if (codeOf(e) !== "exists") throw e; }
   return true;
 }

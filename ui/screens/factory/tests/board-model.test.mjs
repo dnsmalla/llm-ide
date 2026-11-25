@@ -436,3 +436,22 @@ test("visibleLanes cuts each lane to its cap, so keyboard navigation never targe
   assert.equal(nextCardKey(v, `k${LANE_PAGE - 1}`, "down"), `k${LANE_PAGE - 1}`);
   assert.equal(visibleLanes(lanes, { a: LANE_PAGE + 100 })[0].cards.length, LANE_PAGE + 5);
 });
+
+test("a run whose record is pending shows Record pending with only Discard, not Interrupted or Resume", () => {
+  const it = item("issue:a", { runIds: ["r1"] });
+  const f = assembleFacts(it, { projectRoot: "/p", live: [], records: new Map(), worktrees: new Map([["r1", {}]]), interrupted: new Set(["r1"]), recordPending: new Set(["r1"]), ship: new Map(), lastKnown: new Map() });
+  assert.equal(f.recordPending, true);
+  const board = buildBoard([it], new Map([["issue:a", f]]));
+  const card = board.needsYou[0];
+  assert.equal(card.note, "Record pending");
+  assert.deepEqual(card.actions, ["openDiff", "discard"]);
+});
+
+test("a run whose record stayed unwritten after the last try also offers Retry record", () => {
+  const it = item("issue:a", { runIds: ["r1"] });
+  const f = assembleFacts(it, { projectRoot: "/p", live: [], records: new Map(), worktrees: new Map([["r1", {}]]), recordPending: new Set(["r1"]), recordStuck: new Set(["r1"]), ship: new Map(), lastKnown: new Map() });
+  const card = buildBoard([it], new Map([["issue:a", f]])).needsYou[0];
+  assert.equal(card.note, "Record not written");
+  assert.deepEqual(card.actions, ["retryRecord", "openDiff", "discard"]);
+  assert.equal(ACTION_LABELS.retryRecord, "Retry record");
+});

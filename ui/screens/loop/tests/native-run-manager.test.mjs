@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import * as rm from "../native/run-manager.ts";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, configFor } from "../native/factory.ts";
@@ -946,4 +946,240 @@ test("log lines are coalesced into one notification, reads are never stale, and 
   assert.equal(notes, 2, "the pending log notification was absorbed");
   off();
   await finish(a);
+});
+
+test("a record that cannot be written is held with its marker, announced, and not replayed", async () => {
+  const storage = memoryStorage();
+  const marks = [];
+  setup({ storage, fsFor: markerFs(marks), appendRecord: async () => { throw new Error("cannot resolve parent folder"); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  const marker = "system/loop-worktrees/" + a + "/.factory/RUN.json";
+  const held = JSON.parse(storage.getItem("llmide.factory.pendingRecords"));
+  assert.equal(held.length, 1);
+  assert.equal(held[0].marker, marker);
+  assert.equal(held[0].record.worktree.runId, a);
+  assert.equal(held[0].markerOnly, undefined);
+  assert.match(rm.takeRunNotice(), /Run record not written: cannot resolve parent folder/);
+  assert.equal(rm.liveRuns().length, 0);
+  // storedPendingRunIds (auto-resume) reads record.worktree.runId, asserted above, so the run is not replayed
+  // the next launch retries it and clears the marker
+  const after = [];
+  setup({ storage, fsFor: markerFs(after) });
+  await settle();
+  assert.equal(world.records.length, 1);
+  assert.deepEqual(after.filter(([k]) => k === "remove").map(([, p]) => p), [marker]);
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+});
+
+const LOGS = "system/loop-runs/logs";
+// A project fs for the run log: files in a map, directories tolerated, list/remove for the pruning.
+function logFs(files, opts = {}) {
+  const writes = [];
+  const api = {
+    writes,
+    write: async (path, text, o) => {
+      if (path.endsWith(".log")) {
+        if (opts.hang) return new Promise(() => {});
+        if (opts.fail) throw new Error("disk full");
+      }
+      writes.push({ path, text, opts: o });
+      files.set(path, text);
+    },
+    remove: async (path) => { files.delete(path); },
+    create: async () => "dir",
+    read: async (path) => { if (!files.has(path)) throw Object.assign(new Error("missing"), { code: "not_found" }); return { status: "ok", text: files.get(path), hash: "h" }; },
+    list: async (dir) => ({ entries: [...files.keys()].filter((k) => k.startsWith(`${dir}/`)).map((k) => ({ name: k.slice(dir.length + 1), path: k, mtime_ms: opts.mtimes?.get(k) ?? 0 })) }),
+  };
+  return () => api;
+}
+const lastLog = (api) => api.writes.filter((w) => w.path.endsWith(".log")).pop();
+
+test("run log lines are written to the project's loop-runs/logs and survive the run", async () => {
+  const files = new Map();
+  const fsf = logFs(files);
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("$ npm test"); deps.log("FAIL one"); return PASSED; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const last = lastLog(fsf());
+  assert.equal(last.path, `${LOGS}/${a}.log`);
+  assert.match(last.text, /\$ npm test\nFAIL one/);
+  assert.equal(last.opts.force, true);
+  assert.equal([...files.keys()].some((k) => k.includes(".factory/run.log")), false);
+});
+
+test("a failing run.log write never changes the run's outcome", async () => {
+  const fsf = logFs(new Map(), { fail: true });
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("hello"); return PASSED; } });
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  assert.equal(world.records.length, 1);
+  assert.equal(world.records[0].record.statusCode, "success");
+});
+
+test("run.log keeps only the last 256 KiB, counted in bytes", async () => {
+  const fsf = logFs(new Map());
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { for (let i = 0; i < 100; i++) deps.log(`行${i} ` + "あ".repeat(3000)); return PASSED; } });
+  rm.startRun("/p", item(1), "full");
+  await settle();
+  const last = lastLog(fsf());
+  assert.ok(new TextEncoder().encode(last.text).length <= 256 * 1024);
+  assert.match(last.text, /行99 /);
+  assert.doesNotMatch(last.text, /行0 /);
+});
+
+test("a resumed run appends to its log after a separator", async () => {
+  const files = new Map();
+  const fsf = logFs(files);
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("first run line"); return PASSED; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("second run line"); return PASSED; } });
+  world.list = [{ runId: a, project: "/p", repo: "/p", worktree: `/p/system/loop-worktrees/${a}`, branch: "b", baseCommit: "abc1234def" }];
+  rm.startRun("/p", item(1), "sendBack", { runId: a });
+  await settle();
+  const text = files.get(`${LOGS}/${a}.log`);
+  assert.match(text, /first run line\n(.*\n)*--- resumed \d{4}-\d{2}-\d{2}T[\d:.]+Z ---\n(.*\n)*second run line/);
+});
+
+test("only the newest 50 run logs are kept, by modification time", async () => {
+  const files = new Map();
+  const mtimes = new Map();
+  // Names run oldest to newest, but the OLDEST-named log was written to most recently (a resumed run).
+  for (let i = 0; i < 60; i++) { const path = `${LOGS}/20260101-0000${String(i).padStart(2, "0")}-aaaaaa.log`; files.set(path, "x"); mtimes.set(path, 1000 + i); }
+  mtimes.set(`${LOGS}/20260101-000000-aaaaaa.log`, 999999);
+  const fsf = logFs(files, { mtimes });
+  setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("l"); return PASSED; } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const logs = [...files.keys()].filter((k) => k.endsWith(".log"));
+  assert.ok(logs.length <= 50, `kept ${logs.length}`);
+  assert.ok(files.has(`${LOGS}/${a}.log`));
+  assert.ok(files.has(`${LOGS}/20260101-000000-aaaaaa.log`), "the recently written old-named log stays");
+  assert.equal(files.has(`${LOGS}/20260101-000001-aaaaaa.log`), false, "the least recently written goes first");
+});
+
+test("the debounce writes the log during the run, not only at the end", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const fsf = logFs(new Map());
+    let release;
+    setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("midway"); await new Promise((r) => { release = r; }); return PASSED; } });
+    rm.startRun("/p", item(1), "full");
+    await settle();
+    assert.equal(lastLog(fsf()), undefined, "nothing before the debounce");
+    mock.timers.tick(1000);
+    await settle();
+    assert.match(lastLog(fsf()).text, /midway/);
+    release();
+    await settle();
+  } finally { mock.timers.reset(); }
+});
+
+test("a stalled log write cannot keep a finished run live", async () => {
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const fsf = logFs(new Map(), { hang: true });
+    setup({ fsFor: fsf, runLoop: async (config, deps) => { deps.log("x"); return PASSED; } });
+    rm.startRun("/p", item(1), "full");
+    await settle();
+    mock.timers.tick(6000);
+    await settle();
+    assert.equal(rm.liveRuns().length, 0);
+  } finally { mock.timers.reset(); }
+});
+
+test("a held record that keeps failing posts a notice each time and says so after 5 tries, and stays stored", async () => {
+  const storage = memoryStorage();
+  {
+    setup({ storage, fsFor: markerFs([]), appendRecord: async () => { throw new Error("disk"); } });
+    const a = rm.startRun("/p", item(1), "full");
+    await settle();
+    await finish(a);
+    assert.match(rm.takeRunNotice(), /Run record not written: disk/);
+    for (let n = 2; n <= 4; n++) { await switchProject("/p"); assert.match(rm.takeRunNotice(), new RegExp(`attempt ${n}.*disk`)); }
+    await switchProject("/p");
+    assert.match(rm.takeRunNotice(), /could not be written after 5 tries.*disk/);
+    const held = JSON.parse(storage.getItem("llmide.factory.pendingRecords"));
+    assert.equal(held.length, 1);
+    assert.equal(held[0].attempts, 5);
+  }
+  rm.resetRunManagerForTests(); // drops the retry timer so it cannot outlive the test
+});
+
+test("a held record is retried a few seconds later while the project stays open", async () => {
+  const storage = memoryStorage();
+  mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    let fail = true;
+    const marks = [];
+    setup({ storage, fsFor: markerFs(marks), appendRecord: async (fs, entry, record) => { if (fail) throw new Error("conflict"); world.records.push({ entry, record }); } });
+    const a = rm.startRun("/p", item(1), "full");
+    await settle();
+    await finish(a);
+    assert.equal(world.records.length, 0);
+    fail = false;
+    mock.timers.tick(5000);
+    await settle();
+    assert.equal(world.records.length, 1);
+    assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+    assert.deepEqual(marks.filter(([k]) => k === "remove").map(([, p]) => p), ["system/loop-worktrees/" + a + "/.factory/RUN.json"]);
+    assert.deepEqual(rm.heldRunIds("/p").size, 0);
+  } finally { mock.timers.reset(); }
+});
+
+test("heldRunIds names the runs whose record is waiting, for the board", async () => {
+  setup({ fsFor: markerFs([]), appendRecord: async () => { throw new Error("disk"); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.deepEqual([...rm.heldRunIds("/p")], [a]);
+  assert.equal(rm.heldRunIds("/other").size, 0);
+});
+
+test("a record stuck after the last try is reported by stuckRunIds, and retryHeldRecords writes it", async () => {
+  const storage = memoryStorage();
+  let fail = true;
+  setup({ storage, fsFor: markerFs([]), appendRecord: async (fs, entry, record) => { if (fail) throw new Error("disk"); world.records.push({ entry, record }); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  assert.equal(rm.stuckRunIds("/p").size, 0);
+  for (let n = 2; n <= 5; n++) await switchProject("/p");
+  assert.deepEqual([...rm.stuckRunIds("/p")], [a]);
+  fail = false;
+  await rm.retryHeldRecords("/p");
+  assert.equal(world.records.length, 1);
+  assert.equal(rm.heldRunIds("/p").size, 0);
+  rm.resetRunManagerForTests();
+});
+
+test("dropHeldRecords forgets a held record in memory and storage", async () => {
+  const storage = memoryStorage();
+  setup({ storage, fsFor: markerFs([]), appendRecord: async () => { throw new Error("disk"); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  rm.dropHeldRecords("/p", [a]);
+  assert.equal(rm.heldRunIds("/p").size, 0);
+  assert.deepEqual(JSON.parse(storage.getItem("llmide.factory.pendingRecords")), []);
+  rm.takeRunNotice();
+  await switchProject("/p");
+  assert.equal(rm.takeRunNotice(), null, "no retry, no notice");
+  rm.resetRunManagerForTests();
+});
+
+test("startRun with a runId whose record is still held is refused with a notice", async () => {
+  setup({ fsFor: markerFs([]), appendRecord: async () => { throw new Error("disk"); } });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  await finish(a);
+  rm.takeRunNotice();
+  world.list = [{ runId: a, project: "/p", repo: "/p", worktree: `/p/system/loop-worktrees/${a}`, branch: "b", baseCommit: "abc" }];
+  rm.startRun("/p", item(1), "sendBack", { runId: a });
+  await settle();
+  assert.equal(rm.liveRuns().length, 0);
+  assert.match(rm.takeRunNotice(), /record is still being saved/);
+  rm.resetRunManagerForTests();
 });

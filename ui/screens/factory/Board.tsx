@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { setRunRecordShip } from "../loop/native/history.ts";
-import { LOOP_PAGE_NOTE, cancelRun, concurrency, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { LOOP_PAGE_NOTE, cancelRun, concurrency, dropHeldRecords, heldRunIds, retryHeldRecords, stuckRunIds, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
@@ -66,6 +66,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [records, setRecords] = useState<Map<string, RunRecordFacts>>(() => new Map());
   const [worktrees, setWorktrees] = useState<Map<string, WorktreeInfo>>(() => new Map());
   const [interrupted, setInterrupted] = useState<ReadonlySet<string>>(() => new Set());
+  const [recordPending, setRecordPending] = useState<ReadonlySet<string>>(() => new Set());
+  const [recordStuck, setRecordStuck] = useState<ReadonlySet<string>>(() => new Set());
+  const heldKey = useRef("");
   const [interruptedStages, setInterruptedStages] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
   const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
@@ -183,6 +186,11 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
       setRecords(recs);
       setWorktrees(wts);
       setInterrupted(marks);
+      const held = heldRunIds(projectRoot);
+      const stuck = stuckRunIds(projectRoot);
+      heldKey.current = `${[...held].sort().join(",")}|${[...stuck].sort().join(",")}`;
+      setRecordStuck(stuck);
+      setRecordPending(held);
       setInterruptedStages(markStages);
       setError(null);
       setOffline(false);
@@ -237,11 +245,13 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
     const why = takeRunNotice();
     if (why) setNotice(why);
     const ids = now.map((r) => `${r.runId}:${r.state}`).join(",");
-    if (ids !== liveIds.current) {
+    // A held record is written (or fails) without a run changing state, so its set is compared too.
+    const held = projectRoot ? `${[...heldRunIds(projectRoot)].sort().join(",")}|${[...stuckRunIds(projectRoot)].sort().join(",")}` : "|";
+    if (ids !== liveIds.current || held !== heldKey.current) {
       liveIds.current = ids;
       void loadFacts();
     }
-  }), [loadFacts]);
+  }), [loadFacts, projectRoot]);
 
   useEffect(() => {
     if (focus.key) setSelectedKey(focus.key);
@@ -270,9 +280,9 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
 
   const facts = useMemo(() => {
     const m = new Map<string, ItemFacts>();
-    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, interruptedStages, ship, lastKnown: lastKnown.current }));
+    for (const item of items) m.set(item.key, assembleFacts(item, { projectRoot: projectRoot ?? "", live, records, worktrees, interrupted, recordPending, recordStuck, interruptedStages, ship, lastKnown: lastKnown.current }));
     return m;
-  }, [items, live, records, worktrees, interrupted, interruptedStages, ship, projectRoot]);
+  }, [items, live, records, worktrees, interrupted, recordPending, recordStuck, interruptedStages, ship, projectRoot]);
   useEffect(() => {
     if (!active || (!live.some((r) => r.state === "running" || r.state === "paused") && retryAt === null)) return;
     const t = setInterval(() => setNowMs(Date.now()), 1000);
@@ -387,8 +397,12 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
         if (url) void invokeHost("open_external_url", { url }).catch(() => setError("The PR/MR link could not be opened."));
         return;
       }
+      case "retryRecord":
+        void act(async () => { await retryHeldRecords(root); await loadFacts(); });
+        return;
       case "discard":
         void act(async () => {
+          dropHeldRecords(root, item.runIds);
           for (const runId of item.runIds) if (worktrees.has(runId)) await invokeHost("loop_worktree_remove", { runId });
           await removeItem(fs, item.key);
           setSelectedKey((k) => (k === item.key ? null : k));

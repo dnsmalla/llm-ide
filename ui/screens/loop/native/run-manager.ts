@@ -19,6 +19,7 @@ import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
 import { newRunId, repoPrefixFor } from "./worktree-run.ts";
+import { createRunLogWriter, runLogPath, type RunLogWriter } from "./run-log-file.ts";
 import { stepReviewRecords } from "./review.ts";
 import { countStepReviews, summarizeSteps, type StepReviewCounts } from "./issue-trail.ts";
 
@@ -91,7 +92,7 @@ export interface RunManagerDeps {
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
 interface WorktreeInfo { runId: string; project: string; repo: string; worktree: string; branch: string; baseCommit: string }
-interface ManagedRun { live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void }
+interface ManagedRun { live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void; /** Mirrors the log to system/loop-runs/logs/<runId>.log once the worktree exists; execute flushes it before the run is dropped. */ logWriter?: RunLogWriter }
 interface Finished { loop: LoopDefinition; info: WorktreeInfo; config: LoopEngineConfig; outcome: LoopRunOutcome }
 
 export const CONCURRENCY_KEY = "llmide.factory.concurrency";
@@ -180,7 +181,13 @@ let cap: number | null = null;
 const listeners = new Set<() => void>();
 let snapshot: readonly LiveRun[] = Object.freeze([]);
 /** Record writes for runs that ended while another project was open, keyed by project root. */
-const pending = new Map<string, Array<{ id: string; write: () => Promise<void> }>>();
+const pending = new Map<string, Array<{ id: string; runId: string | null; write: () => Promise<void> }>>();
+/** Failed write attempts per held record id (also stored on the record, so a restart keeps the count). */
+const attemptsById = new Map<string, number>();
+/** One delayed retry per project while its project stays open. */
+const retryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const FLUSH_RETRY_MS = 5000;
+export const MAX_RECORD_ATTEMPTS = 5;
 /** Entry ids being written by a flush right now, so a second flush (configure + project change) cannot write them twice. */
 const flushing = new Set<string>();
 let unsubscribeProject: (() => void) | null = null;
@@ -220,6 +227,9 @@ export function resetRunManagerForTests(): void {
   listeners.clear();
   pending.clear();
   flushing.clear();
+  attemptsById.clear();
+  for (const t of retryTimers.values()) clearTimeout(t);
+  retryTimers.clear();
   unsubscribeProject?.();
   unsubscribeProject = null;
   deps = { ...PURE_DEFAULTS };
@@ -333,6 +343,7 @@ export function takeRunNotice(): string | null {
 
 function appendLog(run: ManagedRun, line: string): void {
   run.live.log.push(line);
+  run.logWriter?.add(line);
   if (run.live.log.length > MAX_LOG_LINES) run.live.log.splice(0, run.live.log.length - MAX_LOG_LINES);
   emitSoon();
 }
@@ -349,6 +360,11 @@ export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts
   if ((mode === "continue" || mode === "sendBack" || mode === "check" || mode === "rework" || mode === "humanReview") && !opts.runId) throw new Error(`${mode} needs the runId of an existing worktree`);
   const runId = opts.runId ?? newRunId(d.now(), d.rand);
   if (runs.has(runId)) return runId;
+  // Starting again would race the pending record write (and its marker clear would delete the new run's marker).
+  if (opts.runId !== undefined && heldRunIds(projectRoot).has(runId)) {
+    postRunNotice("This run's record is still being saved; try again in a moment.");
+    return runId;
+  }
   // A new run for a work item that already has a live run of the same kind would cut a second worktree, branch and
   // draft MR for it (a double click, or the phone starting an issue whose card is already running).
   if (opts.runId === undefined) {
@@ -429,6 +445,15 @@ async function clearOrHoldMarker(d: RunManagerDeps, run: ManagedRun, fs: FsApi):
   writePending(store, [...readPending(store).filter((p) => p.entry.id !== id), held]);
 }
 
+/** A stalled host write must not keep a finished run live: wait for the log at most this long. */
+const LOG_FLUSH_TIMEOUT_MS = 5000;
+async function boundedFlush(writer: RunLogWriter | undefined): Promise<void> {
+  if (!writer) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<void>((resolve) => { timer = setTimeout(resolve, LOG_FLUSH_TIMEOUT_MS); (timer as { unref?: () => void }).unref?.(); });
+  try { await Promise.race([writer.flush(), timeout]); } finally { if (timer !== undefined) clearTimeout(timer); }
+}
+
 async function execute(run: ManagedRun): Promise<void> {
   const d = requireDeps();
   const started = d.now();
@@ -445,9 +470,12 @@ async function execute(run: ManagedRun): Promise<void> {
   if (finished) {
     let entry: { id: string; startedAt: string } | null = null;
     try { entry = await saveRecord(d, run, fs, finished, started); }
-    catch (e) { appendLog(run, `run record not written: ${e instanceof Error ? e.message : String(e)}`); }
+    catch (e) {
+      // saveRecord already held the record (and its marker) for the next flush; say so instead of dropping the run silently.
+      fail(run, `Run record not written: ${e instanceof Error ? e.message : String(e)}`);
+    }
     // Only a record written now can carry the MR. A held record (project closed) is not auto-shipped: its card keeps
-    // the manual Ship. The run stays live meanwhile, so the board hides Ship and cannot ship it twice.
+    // the manual Ship. The board shows a held run as "Record pending" and offers no Ship or Resume for it.
     let shipLine = "";
     // A stopped run opens no MR, so there is nothing to ship and no "Opening the MR" note.
     if (entry && d.autoShip && runStatusCode(finished.outcome) !== LOOPBACK_STOPPED_CODE) {
@@ -467,6 +495,7 @@ async function execute(run: ManagedRun): Promise<void> {
       });
     } catch { /* a listener must never change the run's own outcome */ }
   }
+  await boundedFlush(run.logWriter);
   runs.delete(run.live.runId);
   emit();
   pump();
@@ -490,6 +519,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   if (run.cancelled) { log("Run cancelled before it started."); return null; }
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
+  run.logWriter = createRunLogWriter(fs, runLogPath(run.live.runId), run.live.log);
   // The project root often holds the clone under code/<name>, so detect the test command in the run worktree, not only at the project root.
   const runPrefix = repoPrefixFor(run.live.projectRoot, info.worktree);
   const detected = await detectTestCommand(fs, runPrefix).catch(() => null);
@@ -661,13 +691,101 @@ async function saveRecord(d: RunManagerDeps, run: ManagedRun, fs: FsApi, f: Fini
     // Cleared by the same write as the record, so flushPending also clears the marker when the project is reopened.
     marker: `${prefix}/.factory/RUN.json`,
   };
-  if (d.activeProject() === live.projectRoot) { await writeHeld(d, fs, held); return { id: entry.id, startedAt: entry.startedAt }; }
+  if (d.activeProject() === live.projectRoot) {
+    try { await writeHeld(d, fs, held); } catch (e) {
+      // Held like a closed project's record, so the next launch or project change retries it and auto-resume does not replay the run.
+      holdRecord(d, fs, held, 1);
+      throw e;
+    }
+    return { id: entry.id, startedAt: entry.startedAt };
+  }
   appendLog(run, "The run's project is not open; its record is saved when you open it again.");
-  pending.set(live.projectRoot, [...(pending.get(live.projectRoot) ?? []), { id: entry.id, write: () => writeHeld(d, fs, held) }]);
-  // Also stored, so quitting before the project reopens does not lose the record. The in-memory entry stays for this session.
-  const store = storage();
-  writePending(store, [...readPending(store).filter((p) => p.entry.id !== entry.id), held]);
+  holdRecord(d, fs, held, 0);
   return null;
+}
+
+/** Keeps a record that is not on disk: in memory for this session and in storage so a quit does not lose it. */
+function holdRecord(d: RunManagerDeps, fs: FsApi, held: PendingRecord, attempts: number): void {
+  const root = held.projectRoot;
+  const runId = (held.record.worktree as { runId?: unknown } | undefined)?.runId;
+  pending.set(root, [...(pending.get(root) ?? []), { id: held.entry.id, runId: typeof runId === "string" ? runId : null, write: () => writeHeld(d, fs, held) }]);
+  attemptsById.set(held.entry.id, attempts);
+  const store = storage();
+  writePending(store, [...readPending(store).filter((p) => p.entry.id !== held.entry.id), { ...held, attempts }]);
+  scheduleRetry(root);
+}
+
+/** Run ids whose record (or marker clear) is waiting to be written in this project: the board shows them as "Record pending". */
+/** Held runs whose record failed every try: the board offers "Retry record" for them. */
+export function stuckRunIds(projectRoot: string): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const p of readPending(storage())) {
+    if (p.projectRoot !== projectRoot || (p.attempts ?? 0) < MAX_RECORD_ATTEMPTS) continue;
+    const runId = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
+    if (typeof runId === "string") ids.add(runId);
+  }
+  return ids;
+}
+
+/** The "Retry record" action: one more try now, for every record held in this project. */
+export async function retryHeldRecords(projectRoot: string): Promise<void> {
+  if (deps.fsFor && deps.appendRecord) await flushPending(projectRoot);
+}
+
+/** Forgets the held records of these runs (Discard): their retries and notices stop. */
+export function dropHeldRecords(projectRoot: string, runIds: readonly string[]): void {
+  const drop = new Set(runIds);
+  const runOf = (p: PendingRecord): string | null => {
+    const fromRecord = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
+    return typeof fromRecord === "string" ? fromRecord : p.entry.id.startsWith("marker:") ? p.entry.id.slice("marker:".length) : null;
+  };
+  const mem = pending.get(projectRoot) ?? [];
+  for (const m of mem) if (m.runId && drop.has(m.runId)) attemptsById.delete(m.id);
+  pending.set(projectRoot, mem.filter((m) => !(m.runId && drop.has(m.runId))));
+  const store = storage();
+  const all = readPending(store);
+  const gone = all.filter((p) => p.projectRoot === projectRoot && drop.has(runOf(p) ?? ""));
+  for (const p of gone) attemptsById.delete(p.entry.id);
+  if (gone.length > 0) writePending(store, all.filter((p) => !gone.includes(p)));
+  emit();
+}
+
+export function heldRunIds(projectRoot: string): ReadonlySet<string> {
+  const ids = new Set<string>();
+  for (const m of pending.get(projectRoot) ?? []) if (m.runId) ids.add(m.runId);
+  for (const p of readPending(storage())) {
+    if (p.projectRoot !== projectRoot) continue;
+    const fromRecord = (p.record.worktree as { runId?: unknown } | undefined)?.runId;
+    if (typeof fromRecord === "string") ids.add(fromRecord);
+    if (p.entry.id.startsWith("marker:")) ids.add(p.entry.id.slice("marker:".length));
+  }
+  return ids;
+}
+
+/** Retries a held record a few seconds later while its project stays open (a transient conflict usually clears). */
+function scheduleRetry(root: string): void {
+  if (retryTimers.has(root)) return;
+  const timer = setTimeout(() => {
+    retryTimers.delete(root);
+    if ((deps.activeProject?.() ?? null) === root && deps.fsFor && deps.appendRecord) void flushPending(root);
+  }, FLUSH_RETRY_MS);
+  (timer as { unref?: () => void }).unref?.();
+  retryTimers.set(root, timer);
+}
+
+/** Counts a failed write of a held record, tells the user, and keeps the record for the next try. */
+function noteFlushFailure(root: string, id: string, e: unknown): void {
+  const store = storage();
+  const all = readPending(store);
+  const cur = all.find((p) => p.entry.id === id);
+  const n = Math.max(cur?.attempts ?? 0, attemptsById.get(id) ?? 0) + 1;
+  attemptsById.set(id, n);
+  if (cur) writePending(store, all.map((p) => (p.entry.id === id ? { ...p, attempts: n } : p)));
+  const why = e instanceof Error ? e.message : String(e);
+  postRunNotice(n >= MAX_RECORD_ATTEMPTS
+    ? `Run record could not be written after ${n} tries: ${why}. It is kept and tried again when the project is opened.`
+    : n === 1 ? `Run record not written: ${why}` : `Run record still not written (attempt ${n}): ${why}`);
+  if (n < MAX_RECORD_ATTEMPTS) scheduleRetry(root);
 }
 
 async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Promise<void> {
@@ -720,10 +838,10 @@ async function flushPending(projectRoot: string): Promise<void> {
   const written = new Set<string>();
   const failed: typeof memory = [];
   for (const m of memory) {
-    try { await m.write(); written.add(m.id); } catch { failed.push(m); }
+    try { await m.write(); written.add(m.id); } catch (e) { failed.push(m); noteFlushFailure(projectRoot, m.id, e); }
   }
   for (const p of stored) {
-    try { await writeHeld(d, d.fsFor(projectRoot), p); written.add(p.entry.id); } catch { /* stays stored for the next flush */ }
+    try { await writeHeld(d, d.fsFor(projectRoot), p); written.add(p.entry.id); } catch (e) { noteFlushFailure(projectRoot, p.entry.id, e); /* stays stored for the next flush */ }
   }
   for (const id of [...memoryIds, ...stored.map((p) => p.entry.id)]) flushing.delete(id);
   // A failed write is retried on the next project change instead of being dropped.
@@ -731,6 +849,9 @@ async function flushPending(projectRoot: string): Promise<void> {
   if (written.size > 0) {
     const store = storage();
     writePending(store, readPending(store).filter((p) => !written.has(p.entry.id)));
+    for (const id of written) attemptsById.delete(id);
+    // The board shows a held run as "Record pending" until now.
+    emit();
   }
 }
 
