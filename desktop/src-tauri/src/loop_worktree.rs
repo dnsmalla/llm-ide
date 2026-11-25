@@ -210,9 +210,9 @@ fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
         .env("GIT_TERMINAL_PROMPT", "0");
     let out = crate::loop_runner::run_git_guarded(dir, cmd)?;
     if out.code != Some(0) {
-        return Err(format!("git {} failed: {}", args.first().copied().unwrap_or(""), out.stderr.lines().next().unwrap_or("unknown error")));
+        return Err(format!("git {} failed: {}", args.first().copied().unwrap_or(""), String::from_utf8_lossy(&out.stderr).lines().next().unwrap_or("unknown error")));
     }
-    Ok(out.stdout.into_bytes())
+    Ok(out.stdout)
 }
 
 fn worktrees_dir(project: &Path) -> PathBuf {

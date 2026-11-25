@@ -466,7 +466,14 @@ pub(crate) fn run_hub_program(program: &str, args: &[String], stdin: Option<&[u8
     run_command(command, stdin, deadline)
 }
 
-pub(crate) fn run_command(mut command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
+pub(crate) fn run_command(command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<RawOutput> {
+    let (code, stdout, stderr) = run_command_bytes(command, stdin, deadline)?;
+    Ok(RawOutput { code, stdout: String::from_utf8_lossy(&stdout).into_owned(), stderr: String::from_utf8_lossy(&stderr).into_owned() })
+}
+
+/// [`run_command`] with the output as the child wrote it: (exit code, stdout, stderr). For callers that hash or
+/// store the bytes (a git patch), where a lossy text conversion would change them.
+pub(crate) fn run_command_bytes(mut command: Command, stdin: Option<&[u8]>, deadline: Duration) -> std::io::Result<(Option<i32>, Vec<u8>, Vec<u8>)> {
     command
         .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
@@ -483,13 +490,7 @@ pub(crate) fn run_command(mut command: Command, stdin: Option<&[u8]>, deadline: 
     let stdout = child.stdout.take().map(drain);
     let stderr = child.stderr.take().map(drain);
     let status = wait_until(&mut child, deadline)?;
-    let stdout = collect(stdout)?;
-    let stderr = collect(stderr)?;
-    Ok(RawOutput {
-        code: status.code(),
-        stdout: String::from_utf8_lossy(&stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&stderr).into_owned(),
-    })
+    Ok((status.code(), collect(stdout)?, collect(stderr)?))
 }
 
 /// Reads one pipe to its end on a detached thread and sends the bytes back. The thread ends when the pipe closes.
