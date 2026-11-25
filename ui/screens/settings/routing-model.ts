@@ -35,6 +35,19 @@ export function preselectedRoles(loaded: RoutingTiers | null, draft: RoutingDraf
 
 export const PRESELECT_HINT = "Roles without a saved tier are set to Standard; press Save to keep it.";
 
+/**
+ * Whether `draft` holds an edit beyond what preselection alone would produce for `loaded`: `isDirty` also counts a
+ * fresh preselection as dirty (so Save is offered and the hint shows), but a background refresh (`load(true)`) must
+ * tell the two apart — preselection noise is not an edit worth protecting from a refresh, or a focus event would
+ * freeze the draft and hide tiers changed elsewhere (another window, another device). A draft with no edits beyond
+ * preselection, revert()'s bare copy of `loaded` included, reads as "no edits" here even where `isDirty` reads true.
+ */
+function hasExplicitEdits(loaded: RoutingTiers | null, draft: RoutingDraft | null): boolean {
+  if (!loaded || !draft) return false;
+  const baseline = draftFromLoaded(loaded);
+  return JSON.stringify(sortKeys({ t: baseline.tiers, f: baseline.features })) !== JSON.stringify(sortKeys({ t: draft.tiers, f: draft.features }));
+}
+
 export const ROLES: readonly { id: string; label: string }[] = [
   { id: "subagents", label: "Sub-agents" },
   { id: "internal", label: "Internal tasks" },
@@ -218,7 +231,7 @@ export class RoutingModel extends Store<RoutingState> {
       const loaded = decodeRoutingTiers(await call(this.#client, "GET", "/kb/routing-tiers"));
       if (gen !== this.#generation) return;
       const now = this.getState();
-      if (keepEdits && isDirty(now.loaded, now.draft)) {
+      if (keepEdits && hasExplicitEdits(now.loaded, now.draft)) {
         this.set({ phase: "ready", loaded });
         return;
       }

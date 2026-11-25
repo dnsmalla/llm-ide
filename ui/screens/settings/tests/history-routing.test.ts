@@ -186,6 +186,30 @@ test("routing: a focus refresh keeps unsaved edits; a plain load and a clean dra
   assert.equal(JSON.stringify(m.getState().draft), clean, "an explicit load replaces the draft");
 });
 
+test("routing: a focus refresh with only the Standard preselection (no real edit) still picks up a tier changed elsewhere", async () => {
+  let tiers = tiersBody();
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiers }) });
+  const m = new RoutingModel(client);
+  await m.load();
+  // The fixture leaves autoTasks unset, so Standard is preselected for it and the draft is "dirty" with no real edit.
+  assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
+  // Another window saves a different Cheap provider while this one is still open.
+  tiers = { ...tiersBody(), tiers: { ...tiersBody().tiers, cheap: { provider: "deepseek", model: "deepseek-coder" } } };
+  await m.load(true);
+  assert.deepEqual(m.getState().draft!.tiers.cheap, { provider: "deepseek", model: "deepseek-coder" }, "preselection alone must not freeze the draft against a focus refresh");
+});
+
+test("routing: after Revert, a focus refresh does not silently re-add the Standard preselection", async () => {
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }) });
+  const m = new RoutingModel(client);
+  await m.load();
+  assert.equal(m.getState().draft!.features.autoTasks, "standard", "preselected on first load");
+  m.revert();
+  assert.equal(m.getState().draft!.features.autoTasks, undefined, "Revert clears the preselection");
+  await m.load(true);
+  assert.equal(m.getState().draft!.features.autoTasks, undefined, "a focus refresh must not reintroduce it behind the user's back");
+});
+
 test("routing: removing a tier resets roles that used it; invalid drafts never reach the network", async () => {
   const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: tiersBody() }), "POST /kb/routing-tiers": () => ({ status: 200, body: { success: true, dropped: [] } }) });
   const m = new RoutingModel(client);
