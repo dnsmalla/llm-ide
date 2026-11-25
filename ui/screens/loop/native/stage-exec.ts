@@ -8,6 +8,7 @@ import type { CoreClient } from "../../shell/core";
 import { agentRunSucceeded } from "../../autotasks/native/model.ts";
 import { guardedAgentCall, type AgentWrites, type GuardedCallOutcome } from "./agent-call.ts";
 import { evaluateArtifact } from "./artifact.ts";
+import { checkRoadmap } from "./refactor-areas.ts";
 import { TEST_PLAN_PATH, mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
@@ -72,15 +73,15 @@ type ShellRun = { exitCode: number | null; stdout: string; stderr: string; timed
 type Prior = readonly StageOutcome[];
 
 /** The refactor plan's path under the run's root. */
-function planPathFor(ctx: StageExecContext): string {
+function planPathFor(ctx: StageExecContext, file = "REFACTOR.md"): string {
   const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
-  return prefix ? `${prefix}/llm-doc/loop/refactor/REFACTOR.md` : "llm-doc/loop/refactor/REFACTOR.md";
+  return prefix ? `${prefix}/llm-doc/loop/refactor/${file}` : `llm-doc/loop/refactor/${file}`;
 }
 
 /** The plan's text, or null when it is missing or unreadable. */
-async function readPlanText(ctx: StageExecContext): Promise<string | null> {
+async function readPlanText(ctx: StageExecContext, file?: string): Promise<string | null> {
   try {
-    const text = (await ctx.fs.read(planPathFor(ctx), 8_000_000)).text;
+    const text = (await ctx.fs.read(planPathFor(ctx, file), 8_000_000)).text;
     return typeof text === "string" ? text : null;
   } catch {
     return null;
@@ -446,6 +447,12 @@ async function runArtifact(ctx: StageExecContext, s: LoopStage, target: LoopDefi
   // A worktree run must not accept a stale file from the main tree, so the project-root fallback is off there.
   const check = ctx.runId !== null ? { ...s.check, projectRootFallback: false } : s.check;
   const r = await evaluateArtifact(ctx.fs, check, target.config.stages, { repoPrefix: prefix, projectPrefix: "" });
+  if (r.passed && s.defaultKey === "refactor-plan-check") {
+    // Same root as the check's plan (the worktree's, never the main tree's); a missing plan was already accepted above.
+    const plan = await readPlanText(ctx);
+    const problems = plan === null ? [] : checkRoadmap(plan, await readPlanText(ctx, "REFACTOR-AREAS.md"));
+    if (problems.length > 0) return { ok: false, output: ["The refactor plan breaks the area roadmap contract:", ...problems].join("\n") };
+  }
   return { ok: r.passed, output: r.passed ? "Artifact check passed." : r.failures.join("\n") };
 }
 
