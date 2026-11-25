@@ -145,7 +145,7 @@ export class ChatController {
   private evictIdle(keep: string): void {
     for (const [id, r] of this.runtimes) {
       if (this.runtimes.size <= MAX_IDLE_RUNTIMES) return;
-      const safe = id !== keep && r.loaded && (r.state.phase === "idle" || r.state.phase === "error") && r.queued.length === 0 && r.state.queue.length === 0 && r.state.pendingApprovals.length === 0 && r.view.draft.trim() === "";
+      const safe = id !== keep && r.loaded && (r.state.phase === "idle" || r.state.phase === "error") && r.queued.length === 0 && r.state.queue.length === 0 && r.state.pendingApprovals.length === 0 && r.view.draft.trim() === "" && r.ac === null && !r.detached;
       if (safe) this.runtimes.delete(id); // no emit (forget() would): rt() can run during a render, and an idle runtime shows nothing new
     }
   }
