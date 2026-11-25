@@ -115,6 +115,23 @@ fn confine(root: &Path, dir: &Path) -> Result<PathBuf, String> {
     if real.starts_with(&root) { Ok(real) } else { Err("the graph output folder is outside the project".into()) }
 }
 
+/// Creates `dir` (under `root`) and returns it resolved. Existing folders on the way are checked BEFORE anything is
+/// created, so a symlinked `system/loop-runs/<id>` never makes a folder at its target.
+fn create_confined(root: &Path, dir: &Path, label: &str) -> Result<PathBuf, String> {
+    let rel = dir.strip_prefix(root).map_err(|_| "the graph output folder is outside the project".to_string())?;
+    let mut walk = root.to_path_buf();
+    for part in rel.components() {
+        walk.push(part);
+        match std::fs::symlink_metadata(&walk) {
+            Ok(m) if m.file_type().is_symlink() => return Err("the graph output folder is outside the project".into()),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {label}: {e}"))?;
+    confine(root, dir)
+}
+
 /// `graph-kit code` arguments. A Loop run (`light`) passes `--no-calls`: call edges are most of a large graph
 /// and the Loop never reads them, while the Graph screen keeps the full graph.
 fn code_args(scan: &str, out: &str, light: bool) -> Vec<String> {
@@ -137,8 +154,7 @@ fn generate(app: &tauri::AppHandle, mode: &str, target: Option<&str>, out: Optio
         Some(o) => root.join(o),
         None => root.join("system").join("graph"),
     };
-    std::fs::create_dir_all(&out_dir).map_err(|e| format!("cannot create {}: {e}", out.unwrap_or("system/graph")))?;
-    let out_dir = confine(&root, &out_dir)?;
+    let out_dir = create_confined(&root, &out_dir, out.unwrap_or("system/graph"))?;
     let explicit = match target.map(str::trim).filter(|t| !t.is_empty()) {
         Some(t) => {
             let p = crate::fs_ops::resolve_existing(&root, t).map_err(|e| e.message)?;
@@ -337,6 +353,23 @@ mod tests {
         assert!(confine(&root, &root.join("system/loop-runs/r1")).is_err());
         std::fs::create_dir_all(root.join("system/loop-runs/r2")).unwrap();
         assert!(confine(&root, &root.join("system/loop-runs/r2")).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_output_parent_is_refused_before_any_folder_is_created() {
+        let base = std::env::temp_dir().join(format!("llmide-create-confined-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, outside) = (base.join("p"), base.join("outside"));
+        std::fs::create_dir_all(root.join("system")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("system/loop-runs")).unwrap();
+        let dir = root.join("system/loop-runs/r1");
+        assert!(create_confined(&root, &dir, "x").is_err());
+        assert!(!outside.join("r1").exists());
+        let fine = root.join("system/graph");
+        assert!(create_confined(&root, &fine, "x").is_ok());
         let _ = std::fs::remove_dir_all(&base);
     }
 
