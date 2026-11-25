@@ -643,6 +643,7 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
     }
     let mut cmd = stage_shell(command);
     strip_git_env(&mut cmd);
+    crate::loop_env_cache::apply_env(work, &mut cmd);
     cmd
         // cmd.exe cannot start in a `\\?\` folder (it falls back to the Windows folder).
         .current_dir(crate::fsutil::plain_path(work))
@@ -910,9 +911,20 @@ pub(crate) fn changed_paths_for(run_id: Option<&str>, expected_root: Option<&str
     changed_paths_in(&work)
 }
 
+/// `since_base: true` answers "what did this run change in total": its uncommitted work PLUS what it committed since
+/// its base (Ship commits inside the worktree, and a send-back or rework reuses it), with the Loop's own files left
+/// out. Only a worktree run (`run_id`) has a base; otherwise, and for every other caller, it is `git status` alone.
+pub(crate) fn run_changes_for(run_id: Option<&str>, expected_root: Option<&str>, since_base: bool) -> Result<Vec<String>, String> {
+    if !since_base { return changed_paths_for(run_id, expected_root); }
+    let Some(id) = run_id else { return changed_paths_for(run_id, expected_root); };
+    let (project, _) = root_for(Some(id))?;
+    check_expected_root(Some(id), &project, expected_root)?;
+    crate::loop_worktree::changed_since_base_in(&crate::loop_worktree::resolve(id)?)
+}
+
 #[tauri::command]
-pub async fn loop_changed_paths(run_id: Option<String>, expected_root: Option<String>) -> Result<Vec<String>, String> {
-    tauri::async_runtime::spawn_blocking(move || changed_paths_for(run_id.as_deref(), expected_root.as_deref()))
+pub async fn loop_changed_paths(run_id: Option<String>, expected_root: Option<String>, since_base: Option<bool>) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || run_changes_for(run_id.as_deref(), expected_root.as_deref(), since_base.unwrap_or(false)))
         .await.map_err(|e| format!("changed paths task failed: {e}"))?
 }
 

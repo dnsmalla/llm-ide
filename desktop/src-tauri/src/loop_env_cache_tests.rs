@@ -363,3 +363,109 @@ fn a_real_python_venv_still_runs_after_it_is_restored_into_another_worktree() {
     assert!(String::from_utf8_lossy(&out.stdout).contains(&b.display().to_string()), "pip runs from the new worktree's venv: {}", String::from_utf8_lossy(&out.stdout));
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[cfg(unix)]
+#[test]
+fn stage_commands_run_with_the_prepared_environment_first_on_path() {
+    let setup = "mkdir -p .venv/bin && printf '#!/bin/sh\\necho from-the-cached-env\\n' > .venv/bin/envtool && chmod +x .venv/bin/envtool && touch .venv/pyvenv.cfg";
+    let project = project_with(setup);
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+
+    let a = worktree(&project, "a", "x\n");
+    let run = |wt: &Path| crate::loop_runner::run_command_keyed(wt, "envtool && echo venv=$VIRTUAL_ENV", Some(30), "k").unwrap();
+    let before = run(&a);
+    assert_ne!(before.exit_code, Some(0), "an unprepared worktree does not see the tool: {before:?}");
+
+    assert_eq!(prepare_gated(&project, &a, "a", "l1", Some(60), &store, Some(&token)).unwrap().status, "built");
+    let built = run(&a);
+    assert!(built.stdout.contains("from-the-cached-env"), "{built:?}");
+    assert!(built.stdout.contains(&format!("venv={}", a.join(".venv").display())), "{built:?}");
+
+    let b = worktree(&project, "b", "x\n");
+    assert_eq!(prepare_gated(&project, &b, "b", "l1", Some(60), &store, None).unwrap().status, "restored");
+    let restored = run(&b);
+    assert!(restored.stdout.contains("from-the-cached-env"), "a restored environment is used too: {restored:?}");
+    assert!(restored.stdout.contains(&format!("venv={}", b.join(".venv").display())), "{restored:?}");
+
+    let c = worktree(&project, "c", "y\n");
+    assert_ne!(run(&c).exit_code, Some(0), "another worktree is not affected");
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_restore_is_evicted_and_falls_back_to_setup() {
+    use std::os::unix::fs::PermissionsExt;
+    let setup = "mkdir -p .venv && echo fresh > .venv/marker";
+    let project = project_with(setup);
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+    let a = worktree(&project, "a", "x\n");
+    let s = spec(setup);
+    std::fs::create_dir_all(a.join(".venv")).unwrap();
+    // A copy of this file keeps its mode and names the old worktree, so rewriting it has to cope with read-only.
+    std::fs::write(a.join(".venv/cfg"), format!("home={}\n", a.display())).unwrap();
+    let key = cache_key(&a, &s).unwrap();
+    save(&project, &a, &s, &key).unwrap();
+    // Make the restore fail for real: a cached folder that cannot be listed breaks the copy.
+    let cached = cache_root(&project).join(&key).join("files/.venv");
+    std::fs::set_permissions(&cached, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let b = worktree(&project, "b", "x\n");
+    let got = prepare_gated(&project, &b, "b", "l1", Some(60), &store, Some(&token));
+    std::fs::set_permissions(&cached, std::fs::Permissions::from_mode(0o755)).ok();
+    let got = got.unwrap();
+    assert_eq!(got.status, "built", "{got:?}");
+    assert!(got.message.contains("could not be restored"), "{}", got.message);
+    assert_eq!(std::fs::read_to_string(b.join(".venv/marker")).unwrap().trim(), "fresh");
+    assert!(!cache_root(&project).join(&key).join("files/.venv/cfg").exists(), "the bad entry was evicted (the new build is a fresh one)");
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_read_only_text_file_is_still_rewritten_and_keeps_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+    let project = temp("readonly");
+    let a = worktree(&project, "a", "x\n");
+    let s = spec("make env");
+    std::fs::create_dir_all(a.join(".venv")).unwrap();
+    std::fs::write(a.join(".venv/cfg"), format!("home={}\n", a.display())).unwrap();
+    std::fs::set_permissions(a.join(".venv/cfg"), std::fs::Permissions::from_mode(0o444)).unwrap();
+    let key = cache_key(&a, &s).unwrap();
+    save(&project, &a, &s, &key).unwrap();
+    let b = worktree(&project, "b", "x\n");
+    assert!(restore(&project, &b, &s, &key).unwrap());
+    let text = std::fs::read_to_string(b.join(".venv/cfg")).unwrap();
+    assert!(text.contains(&b.display().to_string()), "{text}");
+    assert_eq!(std::fs::metadata(b.join(".venv/cfg")).unwrap().permissions().mode() & 0o777, 0o444);
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlinked_parent_makes_restore_refuse_and_save_skip_without_touching_outside() {
+    let project = temp("symparent");
+    let s = EnvCacheSpec { key_files: vec!["requirements.txt".into()], setup: "x".into(), paths: vec!["web/node_modules".into()] };
+    let a = worktree(&project, "a", "x\n");
+    std::fs::create_dir_all(a.join("web/node_modules")).unwrap();
+    std::fs::write(a.join("web/node_modules/m"), "1").unwrap();
+    let key = cache_key(&a, &s).unwrap();
+    save(&project, &a, &s, &key).unwrap();
+
+    let b = worktree(&project, "b", "x\n");
+    let outside = temp("outside");
+    std::os::unix::fs::symlink(&outside, b.join("web")).unwrap();
+    let err = restore(&project, &b, &s, &key).unwrap_err();
+    assert!(err.contains("symlink"), "{err}");
+    assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "nothing was written outside");
+
+    // Save: the built entry sits behind a symlinked parent, so it is not cached.
+    std::fs::create_dir_all(outside.join("node_modules")).unwrap();
+    let other = "1".repeat(64);
+    let err = save(&project, &b, &s, &other).unwrap_err();
+    assert!(err.contains("symlink"), "{err}");
+    assert!(!cache_root(&project).join(&other).exists());
+    let _ = std::fs::remove_dir_all(project);
+}

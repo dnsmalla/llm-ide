@@ -1238,6 +1238,28 @@ test("setting an addendum leaves the built-in stage unedited, so it still follow
   assert.equal({ ...base, promptAddendum: "Be brief." }.promptHash, base.promptHash);
 });
 
+test("a send-back round that writes nothing after Ship's commit loops back instead of stopping as nochange", async () => {
+  // Ship committed the run's work: `git status` is clean, but the run's change since its base is app/main.py.
+  const { host, calls } = fakeHost({ loop_changed_paths: (args) => (args.sinceBase ? [".factory/PLAN.md", "app/main.py"] : []) });
+  const code = stage({ id: "c1", name: "Implement", kind: "skill", skillId: "skills/test-driven-development", command: null, runOnce: true });
+  const verify = stage({ id: "v1", name: "Verify" });
+  const loop = loopOf([code, verify]);
+  const deps = createStageDeps(ctxOf({ host }).ctx, loop);
+  let verifies = 0;
+  const out = await runNativeLoop(loop.config, {
+    ...deps,
+    async runStage(s) { if (s.id === "v1") { verifies += 1; return { ok: false, output: `fail ${verifies}` }; } return { ok: true, output: "" }; },
+    snapshotBefore: async () => ({ tree: "t0" }),
+    reviewStep: async () => ({ verdict: "approve", findings: "" }),
+    repair: async () => { throw new Error("no repair"); },
+    log() {},
+  });
+  assert.ok(verifies >= 2, "Verify ran again: a normal loopback");
+  assert.notEqual(out.loopback.reason, "nochange");
+  const asked = calls.filter(([c]) => c === "loop_changed_paths").map(([, a]) => a);
+  assert.ok(asked.some((a) => a.sinceBase === true && a.runId === "r1"), "the code-changed check asks for the change since the base");
+});
+
 test("createStageDeps: a Factory run reports whether it changed project code; other loops leave the dep out", async () => {
   const bookkeepingOnly = fakeHost({ loop_changed_paths: [".factory/PLAN.md", "system/loop/a.json"] });
   const factory = createStageDeps(ctxOf({ host: bookkeepingOnly.host }).ctx, loopOf([stage()]));

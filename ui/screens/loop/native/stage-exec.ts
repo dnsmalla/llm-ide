@@ -23,7 +23,7 @@ import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { noteUnresolvedStep, readRunFile, reviewStepOnce, takeStepSnapshot } from "./step-review-exec.ts";
 import { checkSkillResult, planFiles } from "./step-contract.ts";
-import { AGENT_TRANSPORT_GRACE_MS, changedPathsNow, dirtyBefore, guardProtected, haltOn, normaliseRel, stopReason, wroteReport } from "./stage-guard.ts";
+import { AGENT_TRANSPORT_GRACE_MS, changedPathsNow, dirtyBefore, guardProtected, haltOn, normaliseRel, runChangesNow, stopReason, wroteReport } from "./stage-guard.ts";
 import { buildTestMap, detectTestStructure, ledgerDiff, parseTestResults, readLedger, writeLedger, writeTestMap, writeTestStructure, type TestStructure } from "./testmap.ts";
 import { STEP_REVIEWS_FILE } from "./review.ts";
 import { scanTestPrune, writeTestPrune } from "./testprune.ts";
@@ -582,6 +582,6 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
     noteUnresolvedReview: (s, findings) => noteUnresolvedStep(ctx, s, findings),
     recordFindings: (_stage, entry) => recordRoundFindings(ctx, loop, entry),
     // Factory only: its work item may be no code task at all (closing issues), and a red baseline must not be repaired.
-    ...(isFactoryLoop(loop) ? { codeChanged: async () => changesCode(await changedPathsNow(ctx)) } : {}),
+    ...(isFactoryLoop(loop) ? { codeChanged: async () => changesCode(await runChangesNow(ctx)) } : {}),
   };
 }

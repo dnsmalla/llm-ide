@@ -16,6 +16,10 @@
 //! the folder the environment was built in (a venv's script shebangs, `pyvenv.cfg`, `.pth` files) are rewritten to the
 //! new worktree, because a venv is not relocatable without it.
 //!
+//! A prepared environment is also put to use: while the run is alive, every stage command started in its worktree gets
+//! the environment's `bin` folders (`.venv/bin`, `node_modules/.bin`) first on `PATH` and `VIRTUAL_ENV` set
+//! (`apply_env`), so `make test` runs the cached `pytest`, not whichever one the machine has.
+//!
 //! The cache lives in `<project>/system/loop-env-cache/<key>/`, outside every worktree, and at most `MAX_KEYS_KEPT`
 //! keys are kept (least recently used go first).
 
@@ -254,6 +258,22 @@ fn remove_any(p: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Refuses `rel` when an existing folder between `worktree` and the entry is a symlink: the join would follow it out
+/// of the worktree. The entry itself may be a link (it is copied and removed as one).
+fn parent_link_free(worktree: &Path, rel: &str) -> Result<(), String> {
+    let parts: Vec<&str> = rel.split('/').collect();
+    let mut walk = worktree.to_path_buf();
+    for part in &parts[..parts.len() - 1] {
+        walk.push(part);
+        match std::fs::symlink_metadata(&walk) {
+            Ok(m) if m.file_type().is_symlink() => return Err(format!("{rel}: a parent folder is a symlink")),
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    Ok(())
+}
+
 /// Removes the `paths` entries a failed setup created (they were absent before it ran). A symlink is removed as a link,
 /// and an entry whose parent folders pass through a symlink is left alone, so nothing outside the worktree is touched.
 fn remove_created(worktree: &Path, created: &[&String]) -> Result<(), String> {
@@ -261,18 +281,8 @@ fn remove_created(worktree: &Path, created: &[&String]) -> Result<(), String> {
     for rel in created {
         let rel = safe_rel(rel, "paths")?;
         let target = worktree.join(&rel);
-        let mut walk = worktree.to_path_buf();
-        let parts: Vec<&str> = rel.split('/').collect();
-        let mut through_link = false;
-        for part in &parts[..parts.len() - 1] {
-            walk.push(part);
-            if std::fs::symlink_metadata(&walk).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-                through_link = true;
-                break;
-            }
-        }
-        if through_link {
-            errors.push(format!("{rel}: a parent folder is a symlink"));
+        if let Err(e) = parent_link_free(worktree, &rel) {
+            errors.push(e);
         } else if let Err(e) = remove_any(&target) {
             errors.push(format!("{rel}: {e}"));
         }
@@ -320,7 +330,27 @@ fn rewrite_prefix(dir: &Path, pairs: &[(String, String)], depth: usize, budget: 
     for (old, new) in pairs {
         next = next.replace(old.as_str(), new);
     }
-    std::fs::write(dir, next).map_err(|e| format!("cannot update {}: {e}", dir.display()))
+    write_through_readonly(dir, &meta, next.as_bytes()).map_err(|e| format!("cannot update {}: {e}", dir.display()))
+}
+
+/// Writes `data` to `path`; a read-only file (copies keep their mode) gets owner write for the write only.
+fn write_through_readonly(path: &Path, meta: &std::fs::Metadata, data: &[u8]) -> std::io::Result<()> {
+    let original = meta.permissions();
+    if !original.readonly() {
+        return std::fs::write(path, data);
+    }
+    let mut open = original.clone();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        open.set_mode(original.mode() | 0o200);
+    }
+    #[cfg(not(unix))]
+    open.set_readonly(false);
+    std::fs::set_permissions(path, open)?;
+    let written = std::fs::write(path, data);
+    let restored = std::fs::set_permissions(path, original);
+    written.and(restored)
 }
 
 fn read_origin(entry: &Path) -> Vec<String> {
@@ -347,19 +377,32 @@ pub(crate) fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key:
         }
     }
     pairs.sort_by_key(|(old, _)| std::cmp::Reverse(old.len()));
+    // Refuse before anything is written: a symlinked parent would send the copy outside the worktree.
     for rel in &spec.paths {
-        let dst = worktree.join(rel);
-        if entry_exists(&dst) {
-            continue;
-        }
-        copy_path(&files.join(rel), &dst)?;
-        if !pairs.is_empty() {
-            let mut budget = MAX_ENTRIES;
-            if let Err(e) = rewrite_prefix(&dst, &pairs, 0, &mut budget) {
-                let _ = remove_any(&dst);
-                return Err(e);
+        parent_link_free(worktree, rel)?;
+    }
+    let mut created: Vec<&String> = Vec::new();
+    let restored = (|| -> Result<(), String> {
+        for rel in &spec.paths {
+            let dst = worktree.join(rel);
+            if entry_exists(&dst) {
+                continue;
+            }
+            created.push(rel);
+            copy_path(&files.join(rel), &dst)?;
+            if !pairs.is_empty() {
+                let mut budget = MAX_ENTRIES;
+                rewrite_prefix(&dst, &pairs, 0, &mut budget)?;
             }
         }
+        Ok(())
+    })();
+    if let Err(e) = restored {
+        // Never leave a half-restored environment that looks ready to the next prepare.
+        return Err(match remove_created(worktree, &created) {
+            Ok(()) => e,
+            Err(rm) => format!("{e} (and the partial restore could not be removed: {rm})"),
+        });
     }
     #[cfg(unix)]
     if let Ok(f) = std::fs::OpenOptions::new().write(true).open(entry.join("meta.json")) {
@@ -381,6 +424,7 @@ pub(crate) fn save(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &s
     let tmp = root.join(format!(".tmp-{}-{nanos}", std::process::id()));
     let built = (|| -> Result<(), String> {
         for rel in &spec.paths {
+            parent_link_free(worktree, rel).map_err(|e| format!("not cached, {e}"))?;
             let src = worktree.join(rel);
             if !entry_exists(&src) {
                 return Err(format!("the setup command did not create {rel}"));
@@ -402,6 +446,18 @@ pub(crate) fn save(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &s
     }
     prune(&root, key);
     Ok(())
+}
+
+/// Drops a cache key. When it cannot be deleted (unreadable folders), it is renamed out of the way so the key is
+/// free again; `prune` removes such `.tmp-` leftovers once they are stale.
+fn evict(project: &Path, key: &str) {
+    let root = cache_root(project);
+    let entry = root.join(key);
+    if remove_any(&entry).is_ok() {
+        return;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+    let _ = std::fs::rename(&entry, root.join(format!(".tmp-evicted-{}-{nanos}", std::process::id())));
 }
 
 /// Keeps the `MAX_KEYS_KEPT` most recently used keys (and always `keep`); drops stale half-built folders.
@@ -436,9 +492,79 @@ fn tail(s: &str) -> String {
     if n <= OUTPUT_TAIL_CHARS { s.to_string() } else { s.chars().skip(n - OUTPUT_TAIL_CHARS).collect() }
 }
 
+/// What stage commands in one worktree get from a prepared environment.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct EnvUse {
+    path_dirs: Vec<PathBuf>,
+    virtual_env: Option<PathBuf>,
+}
+
+static ENV_USE: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, EnvUse>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn env_use() -> std::sync::MutexGuard<'static, std::collections::HashMap<PathBuf, EnvUse>> {
+    ENV_USE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// The `bin` folders of the declared paths that exist now, and the venv root when one of them is a Python venv.
+fn env_use_of(worktree: &Path, spec: &EnvCacheSpec) -> EnvUse {
+    let mut out = EnvUse::default();
+    for rel in &spec.paths {
+        let root = worktree.join(rel);
+        for sub in ["bin", "Scripts", ".bin"] {
+            let dir = root.join(sub);
+            if dir.is_dir() {
+                out.path_dirs.push(dir);
+            }
+        }
+        if out.virtual_env.is_none() && root.join("pyvenv.cfg").is_file() {
+            out.virtual_env = Some(root);
+        }
+    }
+    out
+}
+
+fn register_env_use(worktree: &Path, spec: &EnvCacheSpec) {
+    let key = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
+    let used = env_use_of(&key, spec);
+    let mut map = env_use();
+    if used.path_dirs.is_empty() && used.virtual_env.is_none() {
+        map.remove(&key);
+    } else {
+        map.insert(key, used);
+    }
+}
+
+/// Puts a prepared environment to use for a stage command about to start in `work`: its `bin` folders first on `PATH`
+/// and `VIRTUAL_ENV` set. A folder that is not a registered, prepared worktree is left alone.
+pub(crate) fn apply_env(work: &Path, cmd: &mut std::process::Command) {
+    let key = std::fs::canonicalize(work).unwrap_or_else(|_| work.to_path_buf());
+    let Some(used) = env_use().get(&key).cloned() else { return };
+    if !used.path_dirs.is_empty() {
+        let base = cmd.get_envs().find(|(k, _)| *k == "PATH").and_then(|(_, v)| v.map(|v| v.to_os_string())).or_else(|| std::env::var_os("PATH")).unwrap_or_default();
+        let dirs = used.path_dirs.iter().cloned().chain(std::env::split_paths(&base));
+        if let Ok(joined) = std::env::join_paths(dirs) {
+            cmd.env("PATH", joined);
+        }
+    }
+    if let Some(venv) = used.virtual_env {
+        cmd.env("VIRTUAL_ENV", venv);
+    }
+}
+
 /// Makes the run's environment ready before its first stage. `token` is the loop's approval token (the setup command
 /// is part of that approval); it is needed only on a miss, because only a miss runs a command.
 pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<EnvPrepare, String> {
+    let prepared = prepare_inner(root, worktree, run_id, loop_id, timeout_secs, store, token)?;
+    if matches!(prepared.status, "present" | "restored" | "built") {
+        if let Some(spec) = read_spec(root, loop_id)? {
+            register_env_use(worktree, &spec);
+        }
+    }
+    Ok(prepared)
+}
+
+fn prepare_inner(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, timeout_secs: Option<u64>, store: &ApprovalStore, token: Option<&str>) -> Result<EnvPrepare, String> {
     let Some(spec) = read_spec(root, loop_id)? else {
         return Ok(EnvPrepare::of("none", "No environment cache is set for this loop.", None));
     };
@@ -450,8 +576,15 @@ pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id:
     }
     let key = cache_key(worktree, &spec)?;
     let short = key[..12].to_string();
-    if restore(&project, worktree, &spec, &key)? {
-        return Ok(EnvPrepare::of("restored", format!("Environment restored from the cache ({short})."), Some(key)));
+    let mut note = String::new();
+    match restore(&project, worktree, &spec, &key) {
+        Ok(true) => return Ok(EnvPrepare::of("restored", format!("Environment restored from the cache ({short})."), Some(key))),
+        Ok(false) => {}
+        Err(e) => {
+            // A bad entry would fail every later run with this key, so drop it and fall through to a normal miss.
+            evict(&project, &key);
+            note = format!(" The cached environment ({short}) could not be restored and was discarded: {e}");
+        }
     }
     let token = token.ok_or_else(|| "the environment setup needs a native host approval before it can run".to_string())?;
     store.authorize_stage_at(token, &project, &work, loop_id, ENV_CACHE_STAGE_ID, &spec.setup, crate::confirm::now_ms())?;
@@ -461,7 +594,7 @@ pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id:
     let output = tail(&format!("{}{}", run.stdout, run.stderr));
     if run.cancelled || run.timed_out || run.exit_code != Some(0) {
         let why = if run.cancelled { "was cancelled" } else if run.timed_out { "timed out" } else { "failed" };
-        let mut message = format!("The environment setup {why}.");
+        let mut message = format!("The environment setup {why}.{note}");
         // A half-built environment must not look ready to the next prepare (failed runs keep their worktree).
         if let Err(e) = remove_created(worktree, &absent) {
             message.push_str(&format!(" The half-built environment could not be removed: {e}"));
@@ -469,8 +602,8 @@ pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id:
         return Ok(EnvPrepare { status: "failed", message, key: Some(key), output: Some(output) });
     }
     match save(&project, worktree, &spec, &key) {
-        Ok(()) => Ok(EnvPrepare { status: "built", message: format!("Environment built and cached ({short})."), key: Some(key), output: Some(output) }),
-        Err(e) => Ok(EnvPrepare { status: "built", message: format!("Environment built; it could not be cached: {e}"), key: Some(key), output: Some(output) }),
+        Ok(()) => Ok(EnvPrepare { status: "built", message: format!("Environment built and cached ({short}).{note}"), key: Some(key), output: Some(output) }),
+        Err(e) => Ok(EnvPrepare { status: "built", message: format!("Environment built; it could not be cached: {e}{note}"), key: Some(key), output: Some(output) }),
     }
 }
 
@@ -492,3 +625,7 @@ pub async fn loop_env_prepare(loop_id: String, run_id: String, approval_token: O
 #[cfg(test)]
 #[path = "loop_env_cache_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "loop_env_cache_e2e.rs"]
+mod e2e;

@@ -774,6 +774,30 @@ pub struct WorktreeStatus {
     pub pushed: bool,
 }
 
+/// Everything the run changed in total, for the Factory's "no code was changed" decision: uncommitted and untracked
+/// paths (`git status`) plus the paths that differ between the run's base commit and HEAD, minus the Loop's own files.
+/// `git status` alone reads a worktree whose work Ship already committed as clean, which is how a send-back round that
+/// writes nothing used to look like "the tests already fail before any change". `<base> HEAD` (a tree diff, with
+/// renames split so both sides count) rather than `<base>...HEAD`: it needs no merge-base, and if the branch was ever
+/// rebased it lists MORE paths, which only errs toward "changed" (a normal loopback), never toward a wrong stop.
+/// When the base cannot be named or is gone, the answer is the uncommitted paths if there are any, else an error:
+/// an unknown is never reported as "nothing changed".
+pub fn changed_since_base_in(info: &RunInfo) -> Result<Vec<String>, String> {
+    let wt = PathBuf::from(&info.worktree);
+    let live = |p: &String| !is_excluded_rel(p.trim_end_matches('/'));
+    let mut paths: Vec<String> = crate::loop_runner::changed_paths_in(&wt)?.into_iter().filter(live).collect();
+    let base = diff_base(info);
+    let resolvable = base != "HEAD" && git(&wt, &["rev-parse", "--verify", "--quiet", &format!("{base}^{{commit}}")]).is_ok();
+    if !resolvable {
+        return if paths.is_empty() { Err("the run's base commit is unknown, so whether it changed code is unknown".into()) } else { Ok(paths) };
+    }
+    let out = String::from_utf8_lossy(&git(&wt, &["diff", "--name-only", "-z", "--no-renames", base, "HEAD"])?).into_owned();
+    paths.extend(out.split('\0').filter(|p| !p.is_empty()).map(str::to_string).filter(live));
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
 /// The numbers behind Discard's one honest confirm. `changedFiles` comes from `git status` (uncommitted work),
 /// `localCommits` from the branch against its remote-tracking ref (or the run's base when nothing was pushed), and
 /// `pushed` is true only when HEAD is reachable from `origin/<branch>`. Read-only apart from staging the index.
@@ -1998,6 +2022,50 @@ mod tests {
         assert_eq!(d.files, vec!["llm-doc/loop/refactor/REFACTOR.md".to_string(), "system/loopback/keep.txt".to_string()], "{:?}", d.files);
         assert!(!d.text.contains("TEST-MAP"), "{}", d.text);
         assert_eq!(status_in(&info).unwrap().changed_files, 2, "status counts the same paths");
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changes_since_base_count_committed_work_and_skip_loop_files() {
+        let p = project_repo("sincebase");
+        let info = prepare_in(&p, &p, "sb1", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        // Only the run's own files (the work item) exist: not a change.
+        assert!(changed_since_base_in(&info).unwrap().is_empty());
+        // Ship committed the run's work; the status is clean, but the run did change code.
+        std::fs::write(wt.join("feature.txt"), "x\n").unwrap();
+        sh_git(&wt, &["add", "feature.txt"]);
+        sh_git(&wt, &["commit", "-q", "-m", "run work"]);
+        assert!(crate::loop_runner::changed_paths_in(&wt).unwrap().iter().all(|p| p.starts_with(".factory")), "status is clean of project code");
+        assert_eq!(changed_since_base_in(&info).unwrap(), vec!["feature.txt".to_string()]);
+        // An uncommitted edit on top counts too.
+        std::fs::write(wt.join("a.txt"), "edited\n").unwrap();
+        assert_eq!(changed_since_base_in(&info).unwrap(), vec!["a.txt".to_string(), "feature.txt".to_string()]);
+        remove_in(&info).unwrap();
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn changes_since_base_ignore_committed_loop_files_and_never_say_clean_without_a_base() {
+        let p = project_repo("sincebase2");
+        let info = prepare_in(&p, &p, "sb2", None, "task").unwrap();
+        let wt = PathBuf::from(&info.worktree);
+        std::fs::create_dir_all(wt.join("system/loop")).unwrap();
+        std::fs::write(wt.join("system/loop/state.json"), "{}").unwrap();
+        sh_git(&wt, &["add", "-f", "system/loop/state.json"]);
+        sh_git(&wt, &["commit", "-q", "-m", "only loop files"]);
+        assert!(changed_since_base_in(&info).unwrap().is_empty(), "only excluded paths changed");
+        // No usable base: unknown, not "unchanged" ...
+        let lost = RunInfo { base_commit: String::new(), ..info.clone() };
+        assert!(changed_since_base_in(&lost).is_err());
+        let gone = RunInfo { base_commit: "0123456789abcdef0123456789abcdef01234567".into(), ..info.clone() };
+        assert!(changed_since_base_in(&gone).is_err());
+        // ... unless uncommitted work already proves a change.
+        std::fs::write(wt.join("a.txt"), "edited\n").unwrap();
+        assert_eq!(changed_since_base_in(&lost).unwrap(), vec!["a.txt".to_string()]);
         remove_in(&info).unwrap();
         let _ = std::fs::remove_dir_all(&p);
     }

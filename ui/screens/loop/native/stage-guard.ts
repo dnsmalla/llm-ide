@@ -21,6 +21,15 @@ export async function changedPathsNow(ctx: StageExecContext): Promise<string[] |
   try { return await ctx.host<string[]>("loop_changed_paths", changedPathArgs(ctx.runId, ctx.projectRoot)); } catch { return null; }
 }
 
+/**
+ * Everything the run changed in total: uncommitted work plus what it committed since its base (Ship commits inside the
+ * run worktree, and a send-back reuses it). For the "no code was changed" decision only; the revert snapshot and the
+ * post-throw check keep the uncommitted-only `changedPathsNow`. Null when git cannot say or the base is unknown.
+ */
+export async function runChangesNow(ctx: StageExecContext): Promise<string[] | null> {
+  try { return await ctx.host<string[]>("loop_changed_paths", { ...changedPathArgs(ctx.runId, ctx.projectRoot), sinceBase: true }); } catch { return null; }
+}
+
 /** Protected-path and scope guard for one agent call (the Mac's checkScope + policy). */
 export function guardProtected(ctx: StageExecContext, paths: readonly string[], target: LoopDefinition, before: ReadonlySet<string> | null, created: readonly string[] = []): Promise<string | null> {
   return checkWrites(
