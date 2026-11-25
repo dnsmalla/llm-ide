@@ -33,11 +33,16 @@ use crate::loop_runner::{
     resolve_stage, FaultSpec, StageSpec,
 };
 
-/// How long one approval lasts. The store is in memory only, so in practice an approval lasts until the app quits
-/// (or `loop_revoke_approvals`); the one-year bound only keeps `now + TTL` finite. User decision 2026-11-25: the old
-/// 4 h re-prompt interrupted Factory runs for commands the user had already approved. A changed command still needs
-/// a new approval, because the grant is bound to the exact command hashes.
-pub const GRANT_TTL_MS: u64 = 365 * 24 * 60 * 60 * 1000;
+/// How long one approval lasts. User decision 2026-11-25: the old 4 h re-prompt interrupted Factory runs for
+/// commands the user had already approved. A changed command still needs a new approval, because the grant is bound
+/// to the exact command hashes — but the hash only covers the command STRING (e.g. `make test`), not the scripts
+/// or repo files it runs, which a Loop's own code steps can rewrite mid-run. An unbounded grant (the store is
+/// in-memory, so it otherwise lasts until the app quits) would let a scheduled, unattended run (`loop_approval_status`,
+/// invariants.md "A scheduled run never prompts") reuse a stale approval against rewritten scripts for as long as a
+/// tray app stays open, which can be weeks. 7 days comfortably outlasts any single interactive Factory run while
+/// bounding that exposure; past it, a scheduled run just skips (same path as no grant at all) instead of reusing
+/// something stale.
+pub const GRANT_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 /// The one button that approves a Loop command set.
 pub const APPROVE_ACCEPT: &str = "Run these commands";
 /// A dialog longer than this is refused rather than silently truncating the commands the user is approving.
@@ -313,7 +318,7 @@ fn approval_text(req: &ApprovalRequest) -> Result<String, String> {
     }
     body.push_str(
         "Only these exact commands are approved. If a command changes, the approval no longer matches and nothing runs. \
-         The approval is for this loop, this folder and these command hashes only, and it lasts until you quit LLM-IDE.",
+         The approval is for this loop, this folder and these command hashes only, and it lasts up to 7 days or until you quit LLM-IDE, whichever is sooner.",
     );
     if body.chars().count() > MAX_DIALOG_CHARS {
         return Err("there are too many commands to show in one approval dialog; split the loop or run the stages individually".into());
@@ -559,6 +564,7 @@ mod tests {
         assert!(out.is_none(), "Cancel mints no token");
         assert!(shown.contains("printf approved"), "{shown}");
         assert!(shown.contains("exact commands"), "{shown}");
+        assert!(shown.contains("7 days"), "{shown}");
         assert!(shown.contains("until you quit"), "{shown}");
         assert_eq!(store.len(), 0, "a declined dialog stores nothing");
         let _ = std::fs::remove_dir_all(&root);
