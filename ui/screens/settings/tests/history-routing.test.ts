@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { AgentHistoryModel, CLEAR_CONFIRM_WORD, clearConfirmed, compactSuccess, formatBytes, healthLines, scopeSentence, whenText } from "../agent-history-model.ts";
 import { RoutingModel, TIERS, dropReasonText, isDirty, tierStatusText, validateDraft } from "../routing-model.ts";
-import { decodeCompactResult, decodeRoutingTiers } from "../decoders.ts";
+import { decodeCompactResult, decodeRoutingTiers, type RoutingTiers } from "../decoders.ts";
 import { deferred, fakeClient, fixture, reply } from "./helpers.ts";
 
 const baseRoutes = () => ({
@@ -194,7 +194,8 @@ test("routing: a focus refresh with only the Standard preselection (no real edit
   // The fixture leaves autoTasks unset, so Standard is preselected for it and the draft is "dirty" with no real edit.
   assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
   // Another window saves a different Cheap provider while this one is still open.
-  tiers = { ...tiersBody(), tiers: { ...tiersBody().tiers, cheap: { provider: "deepseek", model: "deepseek-coder" } } };
+  const current = tiersBody() as RoutingTiers;
+  tiers = { ...current, tiers: { ...current.tiers, cheap: { provider: "deepseek", model: "deepseek-coder" } } };
   await m.load(true);
   assert.deepEqual(m.getState().draft!.tiers.cheap, { provider: "deepseek", model: "deepseek-coder" }, "preselection alone must not freeze the draft against a focus refresh");
 });
