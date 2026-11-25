@@ -95,9 +95,10 @@ export function mergeTestPlan(previousText: string | null, map: TestMap, structu
     else if (e.function !== "*" && !f.fns.includes(e.function)) f.fns.push(e.function);
     files.set(e.path, f);
   }
-  const areaOf = areaIndex(files.keys());
   const untested = (path: string) => { const f = files.get(path); return f !== undefined && !f.tested ? f : null; };
   const eligible = (path: string) => !isTestPath(path) && !isTestFileName(path) && !vendored(path);
+  // Source files only: a test Test Write adds beside the code must not push its folder over the split threshold.
+  const areaOf = areaIndex([...files.keys()].filter(eligible));
 
   const bodyOf = (path: string): string[] => {
     const f = files.get(path)!;

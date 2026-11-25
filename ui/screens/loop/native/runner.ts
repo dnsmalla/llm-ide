@@ -30,6 +30,8 @@ export type ProgressEvent =
   | { type: "loopback"; stage: LoopStage; round: number; maxRounds: number; reason: "tests" | "review" }
   | { type: "paused"; paused: boolean };
 export interface RunnerDeps {
+  /** Asked after each passed stage: true ends the run as passed without running the remaining stages. */
+  endAfter?(stage: LoopStage): Promise<boolean>;
   /** Execute one stage once. `prior` is every outcome so far (including earlier iterations). Throws for an unsupported kind. */
   runStage(stage: LoopStage, prior: readonly StageOutcome[], loopback?: LoopbackContext): Promise<StageRunResult>;
   /** Persist one round's findings (the plan notes file) so a re-run code stage and the final record keep every round. */
@@ -328,6 +330,13 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       iterationOutcomes.push(outcome);
       deps.onProgress?.({ type: "stage-result", stage, ok: result.ok, iteration, durationMs: outcome.durationMs ?? 0, costUsd: result.usage?.costUsd });
       deps.log(`${result.ok ? "✓" : "✗"} ${stage.name}: ${result.ok ? "passed" : "failed"}`);
+      // A caller may end the run as passed right after a stage (the step driver: the agent skipped its step and wrote
+      // nothing, so there is nothing for the remaining stages to check). The run stays ONE loop, so a step that does
+      // go on keeps its Verify loopback and its review order.
+      if (result.ok && deps.endAfter && (await deps.endAfter(stage))) {
+        iterations.push({ index: iteration, stages: iterationOutcomes, repair: null });
+        return { passed: true, iterationsUsed, stages: outcomes, iterations, failedStage: null, costUsd: spentUsd, statusSummary: `passed after ${iterationsUsed} iteration${iterationsUsed === 1 ? "" : "s"}` };
+      }
       if (result.ok && runsOncePerRun(stage)) passedOnce.add(stage.id);
       if (result.ok && codeGroup && groupHead && deps.reviewStep && !reviews.closed.has(groupHead.id)) reviewDue.add(codeGroup.closerId);
       if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {

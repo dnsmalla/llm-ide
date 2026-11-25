@@ -8,7 +8,10 @@ const [action, projectArg, name] = process.argv.slice(2);
 const project = path.resolve(projectArg || "");
 const base = path.join(project, ".llmide-loop-worktrees");
 // Same exclusions as the desktop's loop_worktree.rs EXCLUDES: run bookkeeping must never be committed into the live branch.
-const EXCLUDES = [":(exclude,icase).factory", ":(exclude,icase,glob)**/.factory/**", ":(exclude)system/loop", ":(exclude)llm-doc/loop/test"];
+const EXCLUDES = [":(exclude,icase).factory", ":(exclude,icase,glob)**/.factory/**", ":(exclude)system/loop", ":(exclude)llm-doc/loop/test", ":(exclude)llm-doc/loop/runs"];
+// As the desktop's staged_add_args_for: git refuses the whole `add` when an exclude names a folder the repository
+// ignores (`system/`, `.factory/`). An ignored folder is never staged anyway, so its exclude is left out.
+const addExcludes = (cwd) => EXCLUDES.filter((a) => { const m = /^:\(exclude(?:,icase)?\)(.+)$/.exec(a); return !(m && spawnSync("git", ["check-ignore", "-q", "--", m[1]], { cwd }).status === 0); });
 const run = (args, cwd) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const fail = (msg) => { console.error(msg); process.exit(2); };
 if (!fs.existsSync(project) || !fs.existsSync(base)) fail("no loop worktrees");
@@ -57,7 +60,7 @@ if (action === "merge") {
   // can never land on top of the user's edits.
   const live = run(["status", "--porcelain", "--untracked-files=no"], project).stdout.trim();
   if (live) fail("the live checkout has uncommitted changes; commit or stash them before merging");
-  const add = run(["add", "-A", "--", ".", ...EXCLUDES], dir);
+  const add = run(["add", "-A", "--", ".", ...addExcludes(dir)], dir);
   if (add.status !== 0) fail(`git add failed: ${add.stderr.trim()}`);
   const dirty = run(["diff", "--cached", "--name-only"], dir).stdout.trim();
   if (dirty) {

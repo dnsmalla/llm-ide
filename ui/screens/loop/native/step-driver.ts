@@ -34,7 +34,7 @@ export interface StepRecipe {
   baselineStageKey: string | null;
   /** Run the baseline after planning and only to learn whether the suite was already red (see runSteps). */
   baselineAfterPlanning?: boolean;
-  /** Run every step stage with repair off (see runSteps). */
+  /** Run every step stage with repair off and in one round (see runSteps). */
   noRepair?: boolean;
   /** Skip a step's checks (the stages after its apply skill) when the agent marked it skipped and changed no file. */
   skipChecksWhenSkipped?: boolean;
@@ -123,6 +123,18 @@ function setStatus(r: StepRecipe, plan: string, id: string, status: string, line
   lines[at] = lines[at].replace(/\(status:\s*\w+\)/, `(status: ${status})`);
   if (line) lines.splice(at + 1, 0, line);
   return lines.join("\n");
+}
+
+/** `now` with every step except `own` put back to the status it had in `before`: a step may only mark itself. */
+function keepOtherMarks(r: StepRecipe, before: string, now: string, own: string): string {
+  const header = headerOf(r);
+  const was = new Map<string, string>();
+  for (const line of before.split("\n")) { const m = header.exec(line); if (m) was.set(m[1], m[2]); }
+  return now.split("\n").map((line) => {
+    const m = header.exec(line);
+    const old = m && m[1] !== own ? was.get(m[1]) : undefined;
+    return m && old !== undefined && old !== m[2] ? line.replace(/\(status:\s*\w+\)/, `(status: ${old})`) : line;
+  }).join("\n");
 }
 
 const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -238,22 +250,23 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     pending = tree;
     // A later batch retakes the baseline from the tree the previous batch left, so its graph check judges only itself.
     // A recipe that only adds files never repairs a failed step: the generic repair agent may change source and build
-    // config until the suite is green, which is exactly what such a step must not do. The step fails, is rolled back
-    // and blocked with the failure as its reason.
+    // config until the suite is green, which is exactly what such a step must not do. It gets one round too: a second
+    // round would re-run the apply skill, whose step is already marked, so it would take the NEXT step, and the guard
+    // would not let it rewrite the test file it made. The step fails, is rolled back and blocked with the failure as
+    // its reason.
     const stepStages = (k === 1 ? batch : [...snapshot, ...batch]).map((s) => (r.noRepair ? { ...s, allowsRepair: false } : s));
-    // A step the agent skipped without writing anything has nothing to check: its Test, map and prune stages (a full
-    // suite run each time) are not run. The step's stages are split after the apply skill to find that out.
-    const cut = r.skipChecksWhenSkipped ? stepStages.findIndex((s) => s.enabled && s.kind === "skill" && s.skillId === r.applySkill) : -1;
-    let sub = await runNativeLoop({ ...config, ...left, stages: cut >= 0 ? stepStages.slice(0, cut + 1) : stepStages }, deps);
-    if (cut >= 0 && cut + 1 < stepStages.length && sub.passed && !sub.cancelled) {
-      const untouched = stepStatus(r, await opts.readPlan(), todo.id) === "skipped" && (await opts.checkpoint()) === tree;
-      if (untouched) opts.log(`${todo.id} was skipped and changed nothing: its checks are not run`);
-      else {
-        const rest = await runNativeLoop({ ...config, ...remaining(costUsd + (sub.costUsd ?? 0)), stages: stepStages.slice(cut + 1) }, deps);
-        const reviews = [...(sub.stepReviews ?? []), ...(rest.stepReviews ?? [])];
-        sub = { ...rest, stages: [...sub.stages, ...rest.stages], iterations: [...sub.iterations, ...rest.iterations], iterationsUsed: sub.iterationsUsed + rest.iterationsUsed, costUsd: (sub.costUsd ?? 0) + (rest.costUsd ?? 0), ...(reviews.length ? { stepReviews: reviews } : {}) };
-      }
-    }
+    // A step the agent skipped without writing anything has nothing to check: the run ends after the apply skill, so
+    // its Test, map and prune stages (a full suite run each time) are not run. Any other step runs all its stages.
+    const stepDeps: RunnerDeps = !r.skipChecksWhenSkipped ? deps : {
+      ...deps,
+      async endAfter(stage) {
+        if (!(stage.kind === "skill" && stage.skillId === r.applySkill)) return false;
+        const untouched = stepStatus(r, await opts.readPlan(), todo.id) === "skipped" && (await opts.checkpoint()) === tree;
+        if (untouched) opts.log(`${todo.id} was skipped and changed nothing: its checks are not run`);
+        return untouched;
+      },
+    };
+    const sub = await runNativeLoop({ ...config, ...left, ...(r.noRepair ? { maxIterations: 1 } : {}), stages: stepStages }, stepDeps);
     stages.push(...sub.stages);
     iterations.push(...sub.iterations);
     iterationsUsed += sub.iterationsUsed;
@@ -261,6 +274,13 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     stepReviews.push(...(sub.stepReviews ?? []));
     last = sub;
     replanned = false;
+    // "Touch no other step" is only asked of the agent. A mark it put on another step would hide that step's work
+    // for good (only todo steps are ever re-read), so every other step's status is put back.
+    if (r.blockById) {
+      const now = await opts.readPlan();
+      const kept = now === null ? null : keepOtherMarks(r, planText, now, todo.id);
+      if (now !== null && kept !== now) { await opts.writePlan(kept!); opts.log(`${todo.id} changed the marks of other ${r.nouns}; they were put back`); }
+    }
 
     if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
     if (sub.passed) {

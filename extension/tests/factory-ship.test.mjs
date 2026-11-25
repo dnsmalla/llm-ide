@@ -706,8 +706,6 @@ test('staging works in a repository that ignores the excluded folders', async ()
     fs.writeFileSync(path.join(dir, 'new.txt'), 'n');
     assert.throws(() => run(...stagedAddArgs()), /ignored by one of your/, 'git refuses the plain arguments here');
     assert.equal((await stageWorktree(dir)).code, 0);
-    run('reset', '-q');
-    run(...stagedAddArgs().filter((x) => !/^:\(exclude(,icase)?\)(system\/loop|\.factory)$/.test(x)));
     assert.equal(run('diff', '--cached', '--name-only').trim(), 'new.txt');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

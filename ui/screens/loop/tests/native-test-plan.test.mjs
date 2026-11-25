@@ -275,3 +275,30 @@ test("a failing new test is never repaired: the step is rolled back and blocked,
   assert.match(out.statusSummary, /1 step done \(T2\); T1 rolled back: /);
   assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
 });
+
+test("a failing new test gets no second round and no repair, whatever the loop's settings: rolled back, blocked, next step", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
+  let repairs = 0;
+  deps.repair = async () => { repairs += 1; return { ok: true, output: "" }; };
+  const out = await runTestSteps(cfg({ maxIterations: 3, maxRepairsPerStage: 3 }), deps, opts);
+  assert.equal(repairs, 0, "the repair agent is not bound by the test writer's rules");
+  // A second round would re-run Test Write, which would take T2 (T1 is already marked) and leave T1 looking done.
+  assert.equal(st.ran.filter((i) => i === "write").length, 2, "one Test Write per step, none repeated");
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
+  assert.match(out.statusSummary, /^1 step done \(T2\); T1 rolled back: /);
+});
+
+test("a step may only mark itself: a mark it puts on another step is put back", async () => {
+  const { st, deps, opts } = fake(T("T1") + T("T2") + T("T3"));
+  const run = deps.runStage;
+  deps.runStage = async (s) => {
+    const r = await run(s);
+    // The agent also "finishes" T3 while working on T1.
+    if (s.id === "write" && st.current === "T1") st.plan = st.plan.replace("### T3 a/T3.py (status: todo)", "### T3 a/T3.py (status: done)");
+    return r;
+  };
+  const out = await runTestSteps(cfg({ maxPassesPerRun: 1 }), deps, opts);
+  assert.equal(out.statusSummary, "1 step done (T1); step limit (1) reached");
+  assert.match(st.plan, /### T3 a\/T3\.py \(status: todo\)/, "T3 is still to do");
+  assert.match(st.plan, /### T1 a\/T1\.py \(status: done\)/);
+});

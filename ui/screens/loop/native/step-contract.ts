@@ -27,8 +27,9 @@ const CONFORM = "skills/refactor-conform";
 
 const BATCH_HEADER = /^###\s+R(\d+)\b.*\(status:\s*(todo|done|skipped|blocked)\)\s*$/;
 // The Test loop's plan mode names its step first: `Covered: T3 src/a.py — x`, `Covered: none — T3 trivial`.
-// Agents often set the whole line, or its label, in bold or code: `**Covered: T3 src/a.py — x**`.
-const COVERED = /^\s*[*_`]*Covered:[*_`]*\s*(?:T\d+\s+)?(\S+)/;
+// Agents often set the whole line, or its label, in bold: `**Covered: T3 src/a.py — x**`. A line in code marks is
+// not read: that is how the prompt's own example comes back when it is quoted.
+const COVERED = /^\s*[*_]*Covered:[*_]*\s*(?:T\d+\s+)?(\S+)/;
 const APPLIED = /Applied:\s*R(\d+)/;
 const CONFORMED = /Conformed:\s*R\d+/;
 
