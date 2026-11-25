@@ -32,7 +32,7 @@ import { pendingCount, reportChatProblem } from "../shell/self-heal";
 import { reportFromChat } from "./self-heal-report";
 import { chatOutputStore } from "../shell/chat-output";
 import {
-  AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, defaultModelForMode, planProgress, showsPlanProgress, getRoute, loadModelGroups, loadTierRouting, tierRoutingGroup, type TierRoutingStatus, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
+  AUTO_MODE, MODES, READ_ONLY_MODES, PROVIDER_BLOCKED_NOTE, nextDefaultModel, planProgress, showsPlanProgress, getRoute, loadModelGroups, loadTierRouting, tierRoutingGroup, type TierRoutingStatus, modelPickPlan, pickerMode, pickerModeAfterSessionChange, plainChatReason, providerCannotChat, putRoute as putRouteWire, type RoutePatch,
   restoreFailedPick, routeRereadDue, type ModelGroup, type PermissionMode, type RouteView,
 } from "./route";
 import { memoryClient } from "./memory-client";
@@ -137,7 +137,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   // The ids the user added ("Add model…"), kept per connection in this browser and joined onto the listed groups.
   const [userModels, setUserModels] = useState<UserModels>(loadUserModels);
   const [tierRouting, setTierRouting] = useState<TierRoutingStatus | null>(null);
-  // The Standard tier decides a new chat's model, so the default waits until the tier answer is in (or failed).
+  // Set when the tier answer is in (or failed): a chat that has not started then moves to the Standard tier's model.
   const [tierRoutingLoaded, setTierRoutingLoaded] = useState(false);
   // Tiers & Roles models come last and are de-duplicated against everything listed, the user's added ids included.
   const groups = useMemo(() => {
@@ -284,14 +284,18 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
   }, [state.messages, state.phase]);
   const current: ChatPrefs = (activeId && prefs[activeId]) || { mode: readOnly ? "ask" : pickerModeAfterSessionChange(), provider: null, model: null };
   const setCurrent = (patch: Partial<ChatPrefs>) => { if (activeId) setPrefs((p) => ({ ...p, [activeId]: { ...current, ...patch } })); };
-  // A chat with no explicit model starts on the Standard tier's model (else the mode's default). A saved pick (or a
-  // pinned route) always wins.
+  // The picker must not wait for the tier answer (it can wait on a CLI health probe), so a chat starts at once on the
+  // mode rule; the Standard tier's model replaces that auto pick only while the chat has no messages.
+  const autoPicked = useRef<Record<string, { provider: string; model: string }>>({});
+  const hasMessages = state.messages.length > 0 || state.phase !== "idle";
   useEffect(() => {
-    if (!activeId || !groupsLoaded || !tierRoutingLoaded || current.provider || current.model || route?.pinned) return;
-    const pick = defaultModelForMode(groups, current.mode, tierRouting);
-    if (pick) setCurrent({ provider: pick.provider, model: pick.model });
+    if (!activeId || !groupsLoaded || route?.pinned) return;
+    const pick = nextDefaultModel({ groups, mode: current.mode, tiers: tierRouting, tiersLoaded: tierRoutingLoaded, current, autoPicked: autoPicked.current[activeId] ?? null, hasMessages });
+    if (!pick) return;
+    autoPicked.current[activeId] = { provider: pick.provider, model: pick.model };
+    setCurrent({ provider: pick.provider, model: pick.model });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeId, groupsLoaded, tierRoutingLoaded, tierRouting, groups, current.mode, current.provider, current.model, route?.pinned]);
+  }, [activeId, groupsLoaded, tierRoutingLoaded, tierRouting, groups, current.mode, current.provider, current.model, route?.pinned, hasMessages]);
 
   // A viewer has exactly one permitted mode (Ask): the picker never shows Auto and the chat runs as Ask.
   const modeOptions = useMemo(() => allowedModes(perms, MODES).filter((m) => !readOnly || READ_ONLY_MODES.has(m.id)), [perms, readOnly]);
@@ -323,6 +327,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
     const chat = activeId;
     if (!chat) return;
     const plan = modelPickPlan(route, provider, model);
+    delete autoPicked.current[chat]; // a user pick is never swapped for the Standard tier's model
     setModelNotice(null);
     if (plan.composer) setCurrent({ provider: plan.composer.provider || null, model: plan.composer.model || null });
     // A refused pin puts the picker back to the previous choice, so it never shows a model the route does not hold.

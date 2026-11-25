@@ -417,6 +417,24 @@ export function standardTierModel(cfg: TierRoutingStatus | null, groups: readonl
 }
 
 /**
+ * The default model to apply now, or null to leave the chat alone. With no model set the chat starts at once on the
+ * mode rule (Standard once the tier answer is in). A model this effect picked earlier is swapped for the Standard
+ * tier's model ONLY when the tier answer arrives late AND the chat has no messages yet; a user pick (anything that is
+ * not the auto pick) and a chat that already started are never changed. Pure.
+ */
+export function nextDefaultModel(a: {
+  groups: readonly ModelGroup[]; mode: string; tiers: TierRoutingStatus | null; tiersLoaded: boolean;
+  current: { provider: string | null; model: string | null }; autoPicked: { provider: string; model: string } | null; hasMessages: boolean;
+}): ModelChoice | null {
+  const { current, autoPicked } = a;
+  if (!current.provider && !current.model) return defaultModelForMode(a.groups, a.mode, a.tiersLoaded ? a.tiers : null);
+  if (!autoPicked || a.hasMessages || !a.tiersLoaded) return null;
+  if (current.provider !== autoPicked.provider || current.model !== autoPicked.model) return null;
+  const standard = standardTierModel(a.tiers, a.groups);
+  return standard && (standard.provider !== current.provider || standard.model !== current.model) ? standard : null;
+}
+
+/**
  * The model a chat starts on when the user has not picked one: the Standard tier's model in every mode, as Settings
  * promises ("Standard is the default for new chats"). Without a usable Standard tier: Ask/Document/Review prefer a
  * cheap model; Plan/Execute/Auto prefer the strongest listed one. A user pick is stored in the chat prefs and this
