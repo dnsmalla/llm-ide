@@ -235,6 +235,76 @@ fn a_failing_setup_is_reported_and_never_cached() {
     let _ = std::fs::remove_dir_all(project);
 }
 
+/// A loop whose envCache lists several `paths`.
+fn write_loop_paths(root: &Path, setup: &str, paths: &[&str]) {
+    std::fs::create_dir_all(root.join("system")).unwrap();
+    let json = serde_json::json!({
+        "schemaVersion": 2,
+        "loops": [{ "id": "l1", "name": "Factory", "config": {
+            "stages": [{ "id": "s1", "name": "Verify", "kind": "shellCommand", "command": "true", "enabled": true }],
+            "envCache": { "keyFiles": ["requirements.txt"], "setup": setup, "paths": paths }
+        } }]
+    });
+    std::fs::write(root.join("system/loop.json"), json.to_string()).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_setup_removes_what_it_created_and_the_next_prepare_runs_it_again() {
+    let project = temp("failclean");
+    write_loop_paths(&project, "mkdir -p .venv && echo half > .venv/marker && exit 3", &[".venv", "keep"]);
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+    let wt = worktree(&project, "a", "x\n");
+    std::fs::create_dir_all(wt.join("keep")).unwrap();
+    std::fs::write(wt.join("keep/mine"), "mine").unwrap();
+
+    let got = prepare_gated(&project, &wt, "a", "l1", Some(60), &store, Some(&token)).unwrap();
+    assert_eq!(got.status, "failed", "{got:?}");
+    assert!(!wt.join(".venv").exists(), "the half-built environment is gone");
+    assert_eq!(std::fs::read_to_string(wt.join("keep/mine")).unwrap(), "mine", "a path that existed before is untouched");
+
+    write_loop_paths(&project, "mkdir -p .venv && echo ok > .venv/marker", &[".venv", "keep"]);
+    let token = approved(&store, &project);
+    let again = prepare_gated(&project, &wt, "a", "l1", Some(60), &store, Some(&token)).unwrap();
+    assert_eq!(again.status, "built", "setup ran again instead of reporting present: {again:?}");
+    let _ = std::fs::remove_dir_all(project);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failed_setup_removes_a_symlink_as_a_link_and_leaves_its_target() {
+    let outside = temp("linktarget");
+    std::fs::write(outside.join("precious"), "data").unwrap();
+    let project = temp("failsymlink");
+    let setup = format!("ln -s {} .venv && exit 1", outside.display());
+    write_loop_paths(&project, &setup, &[".venv"]);
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+    let wt = worktree(&project, "a", "x\n");
+
+    let got = prepare_gated(&project, &wt, "a", "l1", Some(60), &store, Some(&token)).unwrap();
+    assert_eq!(got.status, "failed", "{got:?}");
+    assert!(std::fs::symlink_metadata(wt.join(".venv")).is_err(), "the link itself is gone");
+    assert_eq!(std::fs::read_to_string(outside.join("precious")).unwrap(), "data", "the target is untouched");
+    let _ = std::fs::remove_dir_all(project);
+    let _ = std::fs::remove_dir_all(outside);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_stale_cancel_flag_does_not_cancel_the_next_prepare() {
+    let project = project_with("mkdir -p .venv && echo ok > .venv/marker");
+    let store = ApprovalStore::new();
+    let token = approved(&store, &project);
+    let wt = worktree(&project, "a", "x\n");
+    crate::loop_runner::request_cancel("a");
+
+    let got = prepare_gated(&project, &wt, "a", "l1", Some(60), &store, Some(&token)).unwrap();
+    assert_eq!(got.status, "built", "{got:?}");
+    let _ = std::fs::remove_dir_all(project);
+}
+
 #[test]
 fn a_loop_without_an_env_cache_is_untouched() {
     let root = temp("none");

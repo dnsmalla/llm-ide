@@ -25,7 +25,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::loop_approval::ApprovalStore;
-use crate::loop_runner::{canonical_roots, read_loop_json, root_for, run_command_keyed};
+use crate::loop_runner::{canonical_roots, clear_cancel, read_loop_json, root_for, run_command_keyed};
 
 /// The reserved stage id under which the setup command is approved. A real stage must not use it.
 pub(crate) const ENV_CACHE_STAGE_ID: &str = "__env_cache_setup__";
@@ -254,6 +254,32 @@ fn remove_any(p: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Removes the `paths` entries a failed setup created (they were absent before it ran). A symlink is removed as a link,
+/// and an entry whose parent folders pass through a symlink is left alone, so nothing outside the worktree is touched.
+fn remove_created(worktree: &Path, created: &[&String]) -> Result<(), String> {
+    let mut errors: Vec<String> = Vec::new();
+    for rel in created {
+        let rel = safe_rel(rel, "paths")?;
+        let target = worktree.join(&rel);
+        let mut walk = worktree.to_path_buf();
+        let parts: Vec<&str> = rel.split('/').collect();
+        let mut through_link = false;
+        for part in &parts[..parts.len() - 1] {
+            walk.push(part);
+            if std::fs::symlink_metadata(&walk).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                through_link = true;
+                break;
+            }
+        }
+        if through_link {
+            errors.push(format!("{rel}: a parent folder is a symlink"));
+        } else if let Err(e) = remove_any(&target) {
+            errors.push(format!("{rel}: {e}"));
+        }
+    }
+    if errors.is_empty() { Ok(()) } else { Err(errors.join("; ")) }
+}
+
 /// The spellings of a worktree path that may be baked into files: as given, and fully resolved.
 fn path_variants(p: &Path) -> Vec<String> {
     let mut out = vec![p.to_string_lossy().into_owned()];
@@ -417,6 +443,8 @@ pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id:
         return Ok(EnvPrepare::of("none", "No environment cache is set for this loop.", None));
     };
     let (project, work) = canonical_roots(root)?;
+    // A Stop pressed during an earlier prepare must not make this one (a Resume of the same run) cancel at once.
+    clear_cancel(run_id);
     if spec.paths.iter().all(|p| entry_exists(&worktree.join(p))) {
         return Ok(EnvPrepare::of("present", "The environment is already in the worktree.", None));
     }
@@ -427,11 +455,18 @@ pub(crate) fn prepare_gated(root: &Path, worktree: &Path, run_id: &str, loop_id:
     }
     let token = token.ok_or_else(|| "the environment setup needs a native host approval before it can run".to_string())?;
     store.authorize_stage_at(token, &project, &work, loop_id, ENV_CACHE_STAGE_ID, &spec.setup, crate::confirm::now_ms())?;
+    // Only what setup itself creates may be undone on failure, so remember what was absent before it ran.
+    let absent: Vec<&String> = spec.paths.iter().filter(|p| !entry_exists(&worktree.join(p))).collect();
     let run = run_command_keyed(worktree, &spec.setup, Some(timeout_secs.unwrap_or(DEFAULT_SETUP_TIMEOUT_SECS)), run_id)?;
     let output = tail(&format!("{}{}", run.stdout, run.stderr));
     if run.cancelled || run.timed_out || run.exit_code != Some(0) {
         let why = if run.cancelled { "was cancelled" } else if run.timed_out { "timed out" } else { "failed" };
-        return Ok(EnvPrepare { status: "failed", message: format!("The environment setup {why}."), key: Some(key), output: Some(output) });
+        let mut message = format!("The environment setup {why}.");
+        // A half-built environment must not look ready to the next prepare (failed runs keep their worktree).
+        if let Err(e) = remove_created(worktree, &absent) {
+            message.push_str(&format!(" The half-built environment could not be removed: {e}"));
+        }
+        return Ok(EnvPrepare { status: "failed", message, key: Some(key), output: Some(output) });
     }
     match save(&project, worktree, &spec, &key) {
         Ok(()) => Ok(EnvPrepare { status: "built", message: format!("Environment built and cached ({short})."), key: Some(key), output: Some(output) }),

@@ -520,6 +520,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const info = run.reuse ? await findWorktree(d, run.live.runId) : await prepareWorktree(d, run);
   if (!info) { fail(run, `The worktree of run ${run.live.runId} no longer exists; the run did not start.`); return null; }
   run.logWriter = createRunLogWriter(fs, runLogPath(run.live.runId), run.live.log);
+  // NOTE: loop_env_prepare clears the host's cancel flag on entry (so a Stop from an earlier attempt can't cancel a
+  // Resume), which would also swallow a Stop pressed while the worktree was being cut; check it here first.
+  if (run.cancelled) { log("Run cancelled before it started."); return null; }
   const envProblem = await prepareEnvironment(d, run.live.runId, loop, token, log);
   if (envProblem) { fail(run, `${envProblem} The run did not start.`); return null; }
   if (run.cancelled) { log("Run cancelled before it started."); return null; }
