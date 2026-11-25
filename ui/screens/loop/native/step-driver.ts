@@ -305,7 +305,10 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     }
 
     failed = true;
-    const reason = oneLine(sub.statusSummary);
+    // An unrepaired step's summary only says the round ended: name the first failing line, so the plan's Blocked
+    // reason tells the person which test failed.
+    const failing = r.noRepair ? ([...sub.stages].reverse().find((o) => !o.ok)?.output ?? "").split("\n").find((l) => /^\s*(not ok\b|FAIL\b|FAILED\b|✖|E\s{2,}|\w*Error\b|\S+ … FAILED)/.test(l)) : undefined;
+    const reason = oneLine(sub.statusSummary) + (failing ? ` (${oneLine(failing).slice(0, 160)})` : "");
     // A red Test Baseline or a failed agent/transport call says nothing about the step itself: it is restored and left
     // todo to be retried as-is. Anything else blocks it, so the next plan works around it.
     const suiteWasRed = redBefore && r.baselineKeys.includes(sub.failedStage?.defaultKey ?? "");

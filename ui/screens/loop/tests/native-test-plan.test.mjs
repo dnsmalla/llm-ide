@@ -97,7 +97,7 @@ function fake(plan, { fail = [], skip = [], leave = [] } = {}) {
         st.current = nextTodo(TEST_RECIPE, st.plan).id;
         if (!leave.includes(st.current)) st.plan = st.plan.replace(`### ${st.current} a/${st.current}.py (status: todo)`, `### ${st.current} a/${st.current}.py (status: ${skip.includes(st.current) ? "skipped" : "done"})`);
       }
-      if (s.id === "test" && fail.includes(st.current)) return { ok: false, output: "red" };
+      if (s.id === "test" && fail.includes(st.current)) return { ok: false, output: "TAP version 13\nok 1 - a\nnot ok 2 - totals add the tax\n  expected 3" };
       return { ok: true, output: "" };
     },
     async repair() { return { ok: false, output: "no" }; }, log() {}, isCancelled() { return false; },
@@ -301,4 +301,10 @@ test("a step may only mark itself: a mark it puts on another step is put back", 
   assert.equal(out.statusSummary, "1 step done (T1); step limit (1) reached");
   assert.match(st.plan, /### T3 a\/T3\.py \(status: todo\)/, "T3 is still to do");
   assert.match(st.plan, /### T1 a\/T1\.py \(status: done\)/);
+});
+
+test("a blocked step's reason names the first failing test line", async () => {
+  const { st, deps, opts } = fake(T("T1"), { fail: ["T1"] });
+  await runTestSteps(cfg(), deps, opts);
+  assert.match(st.plan, /- Blocked: test — .*\(not ok 2 - totals add the tax\)/);
 });
