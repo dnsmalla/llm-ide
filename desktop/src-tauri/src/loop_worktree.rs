@@ -559,6 +559,20 @@ fn staged_add_args() -> Vec<String> {
     v
 }
 
+/// [`staged_add_args`] for this worktree. Git refuses the whole `add` ("paths are ignored by one of your .gitignore
+/// files") when an exclude names a folder the repository ignores, e.g. `system/` or `.factory/`, and a run in such
+/// a repository could take no checkpoint, diff or ship. An ignored folder is never staged anyway, so its exclude
+/// is left out. Glob excludes never trigger the refusal and always stay.
+fn staged_add_args_for(wt: &Path) -> Vec<String> {
+    staged_add_args()
+        .into_iter()
+        .filter(|arg| {
+            let Some(path) = arg.strip_prefix(":(exclude)").or_else(|| arg.strip_prefix(":(exclude,icase)")) else { return true };
+            git(wt, &["check-ignore", "-q", "--", path]).is_err()
+        })
+        .collect()
+}
+
 /// The `git diff` args that turn the staged index into the patch whose sha256 is the run's patch id.
 fn staged_diff_args(binary: bool, base: &str) -> Vec<String> {
     let mut v: Vec<String> = vec!["diff".into(), "--cached".into(), "--no-ext-diff".into(), "--no-textconv".into()];
@@ -577,7 +591,7 @@ fn git_owned(dir: &Path, args: &[String]) -> Result<Vec<u8>, String> {
 
 /// Stages everything outside `.factory/` in the worktree's own index and returns the diff against HEAD.
 fn staged_patch(wt: &Path, base: &str, binary: bool) -> Result<Vec<u8>, String> {
-    git_owned(wt, &staged_add_args())?;
+    git_owned(wt, &staged_add_args_for(wt))?;
     git_owned(wt, &staged_diff_args(binary, base))
 }
 
@@ -658,7 +672,7 @@ pub fn checkpoint_in(info: &RunInfo) -> Result<String, String> {
     let lock = diff_lock(&info.run_id);
     let _guard = lock.lock().unwrap_or_else(|p| p.into_inner());
     let wt = PathBuf::from(&info.worktree);
-    git_owned(&wt, &staged_add_args())?;
+    git_owned(&wt, &staged_add_args_for(&wt))?;
     let tree = text(git(&wt, &["write-tree"])?);
     valid_tree(&tree)?;
     Ok(tree)
@@ -675,7 +689,7 @@ pub fn restore_in(info: &RunInfo, tree: &str) -> Result<(), String> {
     let wt = PathBuf::from(&info.worktree);
     let resolved = resolve_checkpoint(&wt, tree)?;
     // Staging first puts files created since the checkpoint in the index, so read-tree removes them.
-    git_owned(&wt, &staged_add_args())?;
+    git_owned(&wt, &staged_add_args_for(&wt))?;
     git(&wt, &["read-tree", "--reset", "-u", &resolved])?;
     Ok(())
 }
@@ -1807,6 +1821,24 @@ mod tests {
         write_task_file(&wt, "task").unwrap();
         assert_eq!(std::fs::read_to_string(wt.join(TASK_REL)).unwrap(), "task");
         let _ = std::fs::remove_dir_all(&wt);
+    }
+
+    /// A repository that ignores `system/` and `.factory/` (this repository ignores `system/`): staging must still work.
+    #[test]
+    fn staging_works_in_a_repository_that_ignores_the_excluded_folders() {
+        let p = project_repo("ignored-state");
+        std::fs::write(p.join(".gitignore"), "system/\n.factory/\n").unwrap();
+        sh_git(&p, &["add", ".gitignore"]);
+        sh_git(&p, &["commit", "-q", "-m", "ignore"]);
+        for dir in ["system/loop/test", ".factory", "llm-doc/loop/test"] {
+            std::fs::create_dir_all(p.join(dir)).unwrap();
+            std::fs::write(p.join(dir).join("x.md"), "x").unwrap();
+        }
+        std::fs::write(p.join("new.txt"), "n").unwrap();
+        assert!(git_owned(&p, &staged_add_args()).is_err(), "git refuses the plain arguments here");
+        git_owned(&p, &staged_add_args_for(&p)).unwrap();
+        assert_eq!(sh_git(&p, &["diff", "--cached", "--name-only"]).trim(), "new.txt", "only the real change is staged");
+        let _ = std::fs::remove_dir_all(&p);
     }
 
     #[test]

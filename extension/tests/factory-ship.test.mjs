@@ -35,7 +35,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
-const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, STAGED_PATCH_EXCLUDES, stagedAddArgs, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
+const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, STAGED_PATCH_EXCLUDES, stagedAddArgs, stageWorktree, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
@@ -687,4 +687,29 @@ test('the lease is never used for a Factory branch, even when mergedMr is sent',
     assert.equal(seen.some((s) => s.url.includes('/pulls/50')), false, 'the provider was not even asked');
     assert.equal(remoteHead('refs/heads/factory/fx-lease'), first.body.commit);
   } finally { _setPinnedFetchForTests(null); }
+});
+
+test('staging works in a repository that ignores the excluded folders', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ship-ignored-'));
+  const run = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+  try {
+    run('init', '-q');
+    fs.writeFileSync(path.join(dir, '.gitignore'), 'system/\n.factory/\n');
+    run('add', '-A');
+    run('commit', '-q', '-m', 'base');
+    for (const d of ['system/loop/test', '.factory', 'llm-doc/loop/test']) {
+      fs.mkdirSync(path.join(dir, d), { recursive: true });
+      fs.writeFileSync(path.join(dir, d, 'x.md'), 'x');
+    }
+    fs.writeFileSync(path.join(dir, 'new.txt'), 'n');
+    assert.throws(() => run(...stagedAddArgs()), /ignored by one of your/, 'git refuses the plain arguments here');
+    assert.equal((await stageWorktree(dir)).code, 0);
+    run('reset', '-q');
+    run(...stagedAddArgs().filter((x) => !/^:\(exclude(,icase)?\)(system\/loop|\.factory)$/.test(x)));
+    assert.equal(run('diff', '--cached', '--name-only').trim(), 'new.txt');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

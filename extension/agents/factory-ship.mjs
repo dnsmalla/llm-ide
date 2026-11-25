@@ -88,6 +88,21 @@ export function stagedAddArgs() {
   return ['add', '-A', '--', '.', ...STAGED_PATCH_EXCLUDES];
 }
 
+/**
+ * Stages the worktree with `stagedAddArgs`, as the host's `staged_add_args_for` does. Git refuses the whole `add`
+ * when an exclude names a folder the repository ignores (`system/`, `.factory/`); an ignored folder is never staged
+ * anyway, so its exclude is left out. Glob excludes never trigger the refusal and always stay.
+ */
+export async function stageWorktree(worktree) {
+  const args = [];
+  for (const arg of stagedAddArgs()) {
+    const m = /^:\(exclude(?:,icase)?\)(.+)$/.exec(arg);
+    if (m && (await runGit(worktree, ['check-ignore', '-q', '--', m[1]], { config: PATCH_SAFE_GIT_CONFIG })).code === 0) continue;
+    args.push(arg);
+  }
+  return runGit(worktree, args, { config: PATCH_SAFE_GIT_CONFIG });
+}
+
 /** The `git diff` args whose stdout bytes are hashed into the run's patch id; `{base}` is the run's base commit. */
 export function stagedDiffArgs(base, binary = true) {
   return ['diff', '--cached', '--no-ext-diff', '--no-textconv', ...(binary ? ['--binary'] : []), base, '--', '.', ...STAGED_PATCH_EXCLUDES];
@@ -202,7 +217,7 @@ async function stagedPatchBytes(worktree, base) {
  * value the host's `loop_worktree_diff` returns as `patchId`. Stages first (one shared index state), like the host.
  */
 export async function stagedPatchId(worktree, base) {
-  const add = await runGit(worktree, stagedAddArgs(), { config: PATCH_SAFE_GIT_CONFIG });
+  const add = await stageWorktree(worktree);
   if (add.code !== 0) throw shipError('commit_failed', 'The changes could not be staged.');
   return sha256Hex(await stagedPatchBytes(worktree, base));
 }
@@ -251,7 +266,7 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   }
   const subject = sanitizeLine(String(message ?? ''), SHIP_LIMITS.title) || `factory: ${branch}`;
   const base = await baseCommitOf(worktree, branch);
-  if ((await runGit(worktree, stagedAddArgs(), { config: PATCH_SAFE_GIT_CONFIG })).code !== 0) {
+  if ((await stageWorktree(worktree)).code !== 0) {
     throw shipError('commit_failed', 'The changes could not be staged.');
   }
   // The one rule this route adds: it must push the diff the user read, not whatever is in the worktree now.
