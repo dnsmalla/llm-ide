@@ -2,8 +2,8 @@
 // Unknown or malformed fields are dropped, never trusted: a bad item is skipped rather than failing the list.
 import { MAX_REPORTED_NAMES, type DocCommand, type DocTemplate, type GenerateResult, type Surface } from "./model.ts";
 import { PROJECT_ID_RE } from "./docs-api.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = 100_000): string => (typeof v === "string" ? v.slice(0, max) : "");
 const count = (v: unknown, fallback: number): number => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : fallback);
 const names = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, MAX_REPORTED_NAMES).map((x) => x.slice(0, 200)) : []);
