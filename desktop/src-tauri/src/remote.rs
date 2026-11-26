@@ -277,9 +277,7 @@ pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path
 /// A private temp directory for one SSH child (a known_hosts file, never secrets). The name has a random
 /// suffix and the directory is created fresh (0700 on Unix), so a pre-made path is refused, not reused.
 pub fn temp_ssh_dir(label: &str) -> Result<PathBuf, FsError> {
-    let mut random = [0u8; 8];
-    getrandom::fill(&mut random).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
-    let suffix: String = random.iter().map(|b| format!("{b:02x}")).collect();
+    let suffix = crate::fsutil::random_hex(8).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
     let dir = std::env::temp_dir().join(format!("llmide-{label}-{}-{suffix}", std::process::id()));
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]

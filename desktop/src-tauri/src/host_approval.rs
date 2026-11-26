@@ -16,8 +16,11 @@
 //! Enforced by the core (extension/core/host-approval.mjs): with `LLMIDE_HOST_APPROVAL_KEY` set, a Bypass request needs a
 //! valid token for ITS chat, `x-llmide-client: desktop-ui` and the bus host proof (`bus_proof`, below).
 
+#[cfg(test)]
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use sha2::{Digest, Sha256};
 
@@ -48,7 +51,7 @@ pub fn key() -> Result<&'static [u8; 32], String> {
 }
 
 pub fn to_hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect()
+    crate::fsutil::hex(b)
 }
 
 /// Hex of the key, for the spawned core's environment.
@@ -121,25 +124,19 @@ pub fn mint_with(key: &[u8], purpose: &str, now: u64, nonce_hex: &str) -> String
 }
 
 pub fn mint(purpose: &str) -> Result<String, String> {
-    let mut n = [0u8; 16];
-    getrandom::fill(&mut n).map_err(|e| format!("cannot generate a nonce: {e}"))?;
-    Ok(mint_with(key()?, purpose, crate::confirm::now_ms(), &to_hex(&n)))
+    let nonce = crate::fsutil::random_hex(16).map_err(|e| format!("cannot generate a nonce: {e}"))?;
+    Ok(mint_with(key()?, purpose, crate::confirm::now_ms(), &nonce))
 }
 
 /// Remembers used nonces until they expire (single use). Reference verifier: the core (Node) implements
-/// the same rule; here it pins the token format in tests.
+/// the same rule; it exists only to pin the token format in tests, so it is not compiled into the app.
+#[cfg(test)]
 #[derive(Default)]
-#[allow(dead_code)]
 pub struct Verifier {
     used: Mutex<HashMap<String, u64>>,
 }
 
-#[allow(dead_code)]
-fn ct_eq(a: &[u8], b: &[u8]) -> bool {
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
-
-#[allow(dead_code)]
+#[cfg(test)]
 impl Verifier {
     /// True once per valid, unexpired token for `purpose`. Mirrors what the core must do.
     pub fn verify_at(&self, key: &[u8], token: &str, purpose: &str, now: u64) -> bool {
@@ -153,7 +150,7 @@ impl Verifier {
             return false;
         }
         let want = to_hex(&hmac_sha256(key, signed_part(purpose, expiry, nonce).as_bytes()));
-        if !ct_eq(want.as_bytes(), mac.as_bytes()) {
+        if !crate::fsutil::ct_eq(&want, mac) {
             return false;
         }
         let mut used = self.used.lock().unwrap_or_else(|p| p.into_inner());

@@ -1383,7 +1383,7 @@ mod tests {
     #[cfg(unix)]
     fn sha_hex(bytes: &[u8]) -> String {
         use sha2::{Digest, Sha256};
-        Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+        crate::fsutil::hex(&Sha256::digest(bytes))
     }
 
     #[cfg(unix)]

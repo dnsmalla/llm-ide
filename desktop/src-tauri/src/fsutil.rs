@@ -11,6 +11,29 @@ use std::path::{Path, PathBuf};
 // The path rule lives in the core crate; this re-export keeps `crate::fsutil::plain_path` for the host.
 pub use llmide_workspace_core::paths::{plain_path, plain_windows_path};
 
+/// Lower-case hex of `bytes`.
+pub fn hex(bytes: &[u8]) -> String {
+    use std::fmt::Write as _;
+    bytes.iter().fold(String::with_capacity(bytes.len() * 2), |mut out, byte| {
+        let _ = write!(out, "{byte:02x}");
+        out
+    })
+}
+
+/// `bytes` random bytes from the OS, as hex (so `2 * bytes` characters). A failing OS source is an error:
+/// callers use this for nonces, tokens and ids, which must never fall back to zeros.
+pub fn random_hex(bytes: usize) -> Result<String, String> {
+    let mut buf = vec![0u8; bytes];
+    getrandom::fill(&mut buf).map_err(|e| format!("cannot read OS randomness: {e}"))?;
+    Ok(hex(&buf))
+}
+
+/// Equality without an early exit on the first differing byte (the length is not secret).
+pub fn ct_eq(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> bool {
+    let (a, b) = (a.as_ref(), b.as_ref());
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 /// Creates `dir` (and parents) as a private directory and returns it.
 pub fn private_dir(dir: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;

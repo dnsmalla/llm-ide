@@ -1544,16 +1544,10 @@ fn url_port(url: &str) -> Option<u16> {
 
 /// 32 random bytes, hex.
 pub(crate) fn random_nonce() -> Result<String, String> {
-    let mut buf = [0u8; 32];
-    getrandom::fill(&mut buf).map_err(|e| format!("cannot generate a launch nonce: {e}"))?;
-    Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
+    crate::fsutil::random_hex(32).map_err(|e| format!("cannot generate a launch nonce: {e}"))
 }
 
-/// Equality without an early exit on the first differing byte.
-pub(crate) fn ct_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
-}
+pub(crate) use crate::fsutil::ct_eq;
 
 /// True when something accepts connections on `port` (so a spawn there would fail
 /// or, worse, be answered by that listener).

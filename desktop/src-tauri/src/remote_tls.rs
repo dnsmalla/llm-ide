@@ -161,7 +161,7 @@ impl ServerCertVerifier for PinVerifier {
         let ok = self.inner.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)?;
         let got = fingerprint_of_certificate(end_entity.as_ref())
             .ok_or_else(|| Error::General("the hub certificate has no readable SPKI".into()))?;
-        if !constant_eq(got.as_bytes(), self.pin.as_bytes()) {
+        if !crate::fsutil::ct_eq(&got, &self.pin) {
             note_mismatch(&got);
             return Err(Error::General(format!("REMOTE_TLS_PIN_MISMATCH: the hub now presents {got}")));
         }
@@ -174,13 +174,6 @@ impl ServerCertVerifier for PinVerifier {
         self.inner.verify_tls13_signature(message, cert, dss)
     }
     fn supported_verify_schemes(&self) -> Vec<SignatureScheme> { self.inner.supported_verify_schemes() }
-}
-
-fn constant_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() { return false; }
-    let mut d = 0u8;
-    for (x, y) in a.iter().zip(b) { d |= x ^ y; }
-    d == 0
 }
 
 pub fn pinned_agent(pin: &str) -> Result<ureq::Agent, FsError> {
@@ -461,9 +454,9 @@ mod tests {
 
     #[test]
     fn a_mismatched_pin_is_never_constant_equal() {
-        assert!(constant_eq(b"abc", b"abc"));
-        assert!(!constant_eq(b"abc", b"abd"));
-        assert!(!constant_eq(b"abc", b"ab"));
+        assert!(crate::fsutil::ct_eq(b"abc", b"abc"));
+        assert!(!crate::fsutil::ct_eq(b"abc", b"abd"));
+        assert!(!crate::fsutil::ct_eq(b"abc", b"ab"));
     }
 
     #[test]

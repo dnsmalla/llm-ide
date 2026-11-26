@@ -745,7 +745,7 @@ const LIVE_PROJECT: &str = "live-project";
 /// The id the UI registers a project under: `p` and the first 32 hex characters of the SHA-256 of its root. This is
 /// `projectIdFor` in the UI (the Doc Gen id), so the core sees the same id the desktop sends.
 fn project_id_for(root: &str) -> String {
-    let hex: String = Sha256::digest(root.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    let hex: String = crate::fsutil::hex(&Sha256::digest(root.as_bytes()));
     format!("p{}", &hex[..32])
 }
 

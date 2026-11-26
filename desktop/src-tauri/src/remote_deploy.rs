@@ -18,6 +18,7 @@ use sha2::{Digest, Sha256};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
+use crate::fsutil::{hex, random_hex};
 use crate::host_keys::{fingerprint_for_key_b64, known_hosts_line};
 use crate::ssh_transport::run_hub_program;
 use crate::remote::{
@@ -290,12 +291,12 @@ pub fn bundle_path(version: &str) -> Option<String> {
     crate::ssh_session::find_dev_bundle(&[name]).map(|path| path.to_string_lossy().into_owned())
 }
 
-pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now: u64, review_ack: bool) -> DeployPlan {
+pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now: u64, review_ack: bool) -> Result<DeployPlan, FsError> {
     let mut blockers = plan_blockers(p, domain);
     if !review_ack { blockers.push("external_security_review_required".to_string()); }
     if !std::path::Path::new(bundle).is_file() { blockers.push("bundle_missing".to_string()); }
-    DeployPlan {
-        id: random_hex(16),
+    Ok(DeployPlan {
+        id: random_hex(16).map_err(|e| herr("random_failed", format!("cannot generate a plan id: {e}")))?,
         version: version.to_string(),
         domain: domain.to_string(),
         arch: p.arch.clone(),
@@ -305,7 +306,7 @@ pub fn build_plan(p: &Preflight, domain: &str, version: &str, bundle: &str, now:
         confirmation: domain.to_string(),
         bundle_path: bundle.to_string(),
         created_at: now,
-    }
+    })
 }
 
 pub fn sudoers_text(user: &str) -> String {
@@ -324,11 +325,9 @@ pub fn stage_command(stage: &str) -> Option<String> {
 pub struct DeploySecrets { pub jwt: String, pub vault: String }
 
 pub fn generate_secrets() -> Result<DeploySecrets, FsError> {
-    let mut a = [0u8; 32];
-    let mut b = [0u8; 32];
-    getrandom::fill(&mut a).map_err(|e| herr("random_failed", format!("cannot generate the JWT secret: {e}")))?;
-    getrandom::fill(&mut b).map_err(|e| herr("random_failed", format!("cannot generate the vault key: {e}")))?;
-    Ok(DeploySecrets { jwt: hex(&a), vault: hex(&b) })
+    let jwt = random_hex(32).map_err(|e| herr("random_failed", format!("cannot generate the JWT secret: {e}")))?;
+    let vault = random_hex(32).map_err(|e| herr("random_failed", format!("cannot generate the vault key: {e}")))?;
+    Ok(DeploySecrets { jwt, vault })
 }
 
 pub fn env_bytes(s: &DeploySecrets, domain: &str, version: &str) -> Vec<u8> {
@@ -555,8 +554,9 @@ pub fn deploy_run<R: DeployRunner, H: HealthProbe>(
                 }
             }
             "open-registration" => {
-                let token = random_hex(32);
-                match runner.run(target, &cmd, Some(token.as_bytes())) {
+                // A failed RNG fails this stage (and so rolls back) rather than opening registration on a weak token.
+                let token = random_hex(32).map_err(|e| herr("random_failed", format!("cannot generate the setup token: {e}")));
+                match token.and_then(|token| runner.run(target, &cmd, Some(token.as_bytes()))) {
                     Ok(o) if o.code == Some(0) => {
                         owner_window_open = true;
                         setup_url = o.stdout.lines().find_map(|l| l.trim().strip_prefix("LLMIDE_SETUP_URL=")).map(str::to_string);
@@ -608,7 +608,7 @@ pub async fn remote_deploy_plan(target: SshTarget, domain: String, review_ack: b
         let p = run_preflight(&SystemDeploy, &prepared)?;
         let version = env!("CARGO_PKG_VERSION").to_string();
         let bundle = bundle_path(&version).unwrap_or_default();
-        let plan = build_plan(&p, &domain.trim().to_ascii_lowercase(), &version, &bundle, crate::confirm::now_ms(), review_ack);
+        let plan = build_plan(&p, &domain.trim().to_ascii_lowercase(), &version, &bundle, crate::confirm::now_ms(), review_ack)?;
         remember_plan(plan.clone());
         Ok(plan)
     }).await.map_err(|e| herr("internal", format!("the preflight did not finish: {e}")))?
@@ -849,18 +849,6 @@ pub fn uninstall<R: DeployRunner>(runner: &R, target: &PreparedTarget, confirmat
     Ok(())
 }
 
-pub fn random_hex(bytes: usize) -> String {
-    let mut b = vec![0u8; bytes];
-    let _ = getrandom::fill(&mut b);
-    hex(&b)
-}
-
-pub fn hex(bytes: &[u8]) -> String {
-    let mut s = String::with_capacity(bytes.len() * 2);
-    for b in bytes { s.push_str(&format!("{b:02x}")); }
-    s
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1032,9 +1020,9 @@ mod tests {
         let fake = Fake::new();
         fake.check_version("1.2.3");
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: Some("1.2.3".into()), domain_resolves: None, claude: true };
-        let bundle = std::env::temp_dir().join(format!("llmide-same-{}.tar.gz", random_hex(4)));
+        let bundle = std::env::temp_dir().join(format!("llmide-same-{}.tar.gz", random_hex(4).unwrap()));
         std::fs::write(&bundle, b"x").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true).unwrap();
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
         assert!(report.failed_stage.is_none());
@@ -1060,9 +1048,9 @@ mod tests {
     fn a_bundle_failure_after_its_switch_marker_still_rolls_back() {
         let fake = BundlePostSwitchFail { calls: StdMutex::new(Vec::new()) };
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let bundle = std::env::temp_dir().join(format!("llmide-post-{}.tar.gz", random_hex(4)));
+        let bundle = std::env::temp_dir().join(format!("llmide-post-{}.tar.gz", random_hex(4).unwrap()));
         std::fs::write(&bundle, b"x").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true).unwrap();
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
         assert_eq!(report.failed_stage.as_deref(), Some("bundle"));
@@ -1076,9 +1064,9 @@ mod tests {
         let fake = Fake::new();
         fake.fail("llmide-deploy predeploy-backup");
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let bundle = std::env::temp_dir().join(format!("llmide-early-{}.tar.gz", random_hex(4)));
+        let bundle = std::env::temp_dir().join(format!("llmide-early-{}.tar.gz", random_hex(4).unwrap()));
         std::fs::write(&bundle, b"x").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true).unwrap();
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let report = deploy_run(&fake, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap();
         assert_eq!(report.failed_stage.as_deref(), Some("predeploy-backup"));
@@ -1090,7 +1078,7 @@ mod tests {
     #[test]
     fn a_plan_with_blockers_is_refused_by_the_host() {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: false, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent/bundle.tar.gz", 1_000, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent/bundle.tar.gz", 1_000, true).unwrap();
         assert!(!plan.blockers.is_empty());
         remember_plan(plan.clone());
         let err = confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap_err();
@@ -1101,9 +1089,9 @@ mod tests {
     #[test]
     fn a_changed_or_wrong_confirmation_is_refused() {
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let bundle = std::env::temp_dir().join(format!("llmide-bundle-{}.tar.gz", random_hex(4)));
+        let bundle = std::env::temp_dir().join(format!("llmide-bundle-{}.tar.gz", random_hex(4).unwrap()));
         std::fs::write(&bundle, b"x").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1_000, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1_000, true).unwrap();
         assert!(plan.blockers.is_empty());
         remember_plan(plan.clone());
         assert_eq!(confirm_plan(&plan.id, "hub.example.com", 2_000).unwrap().id, plan.id);
@@ -1140,7 +1128,7 @@ mod tests {
             }
         }
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: Some("1.2.2".into()), domain_resolves: None, claude: true };
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent.tar.gz", 1, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", "/nonexistent.tar.gz", 1, true).unwrap();
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let err = deploy_run(&Old, &FakeHealth, &target(), &plan, &secrets, b"x").unwrap_err();
         assert_eq!(err.code, "helper_outdated");
@@ -1223,9 +1211,9 @@ mod tests {
     fn a_hub_that_never_becomes_healthy_is_rolled_back() {
         let fake = Fake::new();
         let p = Preflight { os: "Ubuntu".into(), arch: "x86_64".into(), systemd: true, nginx: true, certbot: true, sudo_nopasswd: true, disk_free_mb: 4096, existing_version: None, domain_resolves: None, claude: true };
-        let bundle = std::env::temp_dir().join(format!("llmide-run-{}.tar.gz", random_hex(4)));
+        let bundle = std::env::temp_dir().join(format!("llmide-run-{}.tar.gz", random_hex(4).unwrap()));
         std::fs::write(&bundle, b"bundle").unwrap();
-        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true);
+        let plan = build_plan(&p, "hub.example.com", "1.2.3", bundle.to_str().unwrap(), 1, true).unwrap();
         let secrets = DeploySecrets { jwt: "a".repeat(64), vault: "b".repeat(64) };
         let report = deploy_run(&fake, &HealthFail, &target(), &plan, &secrets, b"bundle").unwrap();
         assert!(report.rolled_back);

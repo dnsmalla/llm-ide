@@ -477,7 +477,7 @@ pub(crate) fn bundle_sha256(path: &Path) -> Result<String, FsError> {
         }
         hasher.update(&chunk[..read]);
     }
-    Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
+    Ok(crate::fsutil::hex(&hasher.finalize()))
 }
 
 /// Refuses a running core this desktop did not start. The record must name this endpoint and the nonce
@@ -1042,7 +1042,7 @@ pub(crate) mod tests {
         assert_eq!(fake.names(), vec!["probe", "status", "install", "start", "forward"]);
         let calls = fake.calls();
         let install_stdin = calls[2].stdin.clone().unwrap();
-        let digest: String = Sha256::digest(TARBALL).iter().map(|b| format!("{b:02x}")).collect();
+        let digest: String = crate::fsutil::hex(&Sha256::digest(TARBALL));
         let header = format!("2.0.0 {digest}\n");
         assert!(install_stdin.starts_with(header.as_bytes()), "install header carries the tarball checksum");
         assert_eq!(install_stdin.len(), header.len() + TARBALL.len());
@@ -1511,7 +1511,7 @@ pub(crate) mod tests {
 
     /// The sha of the scratch bundle's bytes, the one the app sends in the INSTALL header.
     fn bundle_sha() -> String {
-        Sha256::digest(TARBALL).iter().map(|b| format!("{b:02x}")).collect()
+        crate::fsutil::hex(&Sha256::digest(TARBALL))
     }
 
     /// PROBE output that also reports the release's recorded bundle sha.
