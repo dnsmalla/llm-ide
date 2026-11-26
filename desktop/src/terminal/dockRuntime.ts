@@ -12,7 +12,7 @@ import { Terminal, type IDisposable } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import "@xterm/xterm/css/xterm.css";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeHost as invoke } from "@llmide/screens/shell/host";
 import { spawnShell, type PtyHandle } from "./ptyClient";
 import { terminalFont, xtermTheme } from "./xtermTheme";
 

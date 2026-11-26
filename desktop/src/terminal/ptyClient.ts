@@ -1,7 +1,11 @@
 // Thin wrapper over the pty_* Tauri commands. Output comes back on a Channel as raw
 // batches: Rust sends `Response` bytes, which arrive here as an ArrayBuffer (no JSON
 // number arrays, no base64).
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { Channel } from "@tauri-apps/api/core";
+import { invokeHost as invoke } from "@llmide/screens/shell/host";
+
+// Every call goes through invokeHost (SSH/remote-mode gate, root_missing hooks, error reporting); the Channel
+// arguments pass through to the installed bridge unchanged.
 
 export interface PtyHandle {
   id: number;
