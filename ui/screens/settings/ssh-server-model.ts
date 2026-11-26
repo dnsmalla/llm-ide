@@ -16,6 +16,9 @@ import { isValidHost, isValidKeyPath, isValidUser, parseSshPort } from "./remote
 import { Store } from "./store.ts";
 import { isRecord } from "../../kit/src/decode.ts";
 import { hostErrorText, type HostErrorTable } from "../../kit/src/host-error.ts";
+import { sshLinkPresentation, type SshLinkTone } from "../../kit/src/ssh-link.ts";
+// Re-exported: the Welcome screen and tests import the link wording from here.
+export { sshLinkPresentation, type SshLinkTone };
 
 export type SshServerField = "host" | "port" | "user" | "keyPath";
 export type SshServerFieldErrors = Partial<Record<SshServerField, string>>;
@@ -154,23 +157,6 @@ export function sshBadgeText(link: string | null, host: string, folder?: string)
   if (link === "connected") return `SSH: ${name}${at}`;
   if (link === "reconnecting") return `Reconnecting to ${name}…${at}`;
   return null;
-}
-
-export type SshLinkTone = "ok" | "busy" | "warn" | "error" | "off";
-
-/**
- * The state label and tone for an SSH link, the one wording the toolbar status, the status view and the server
- * home header share. A missing or unlisted link reads as "off"; `stopped` is left to the caller (it reuses the core's text).
- */
-export function sshLinkPresentation(link: string | null): { tone: SshLinkTone; text: string } {
-  switch (link) {
-    case "connected": return { tone: "ok", text: "SSH server connected" };
-    case "connecting": return { tone: "busy", text: "Connecting to the SSH server…" };
-    case "reconnecting": return { tone: "warn", text: "Reconnecting to the SSH server…" };
-    case "needs_password": return { tone: "warn", text: "Enter the server password to connect" };
-    case "failed": return { tone: "error", text: "SSH server unreachable" };
-    default: return { tone: "off", text: "Not connected to the SSH server" };
-  }
 }
 
 /** One server the Welcome screen remembers. Never a password; the key path only, never key contents. */

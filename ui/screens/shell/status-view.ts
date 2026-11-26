@@ -1,7 +1,7 @@
 // Pure mapping from host `core_status` (+ poll errors) to what the shell shows.
 import type { CoreStatus } from "./host";
 import type { StatusState } from "./status-store";
-import { sshLinkPresentation } from "../settings/ssh-server-model.ts";
+import { sshLinkPresentation } from "../../kit/src/ssh-link.ts";
 
 export type StatusLevel = "ok" | "busy" | "warn" | "error";
 
