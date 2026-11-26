@@ -23,11 +23,27 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     setEl(null);
     if (!targetId) return undefined;
     const find = () => document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
-    const found = find();
-    if (found) { setEl(found); return undefined; }
-    const mo = new MutationObserver(() => { const f = find(); if (f) { setEl(f); mo.disconnect(); } });
-    mo.observe(document.body, { childList: true, subtree: true });
-    const timeout = window.setTimeout(() => mo.disconnect(), TARGET_WAIT_MS);
+    // Not "live" once the step's own action unmounts it (Start Recording -> Stop Recording) or it
+    // collapses to zero size — either way the spotlight must stop pinning on the stale reference.
+    const isLive = (node: HTMLElement | null): node is HTMLElement => {
+      if (!node || !node.isConnected) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const check = () => {
+      setEl((prev) => {
+        if (isLive(prev)) return prev;
+        const found = find();
+        return isLive(found) ? found : null;
+      });
+    };
+    check();
+    // Never disconnects itself: a target missing at TARGET_WAIT_MS degrades to a spotlight-less card
+    // for now (el stays null), but a slow target (e.g. notes still generating) can still be picked up
+    // once it finally appears, and a target that later unmounts is re-searched the same way.
+    const mo = new MutationObserver(check);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    const timeout = window.setTimeout(check, TARGET_WAIT_MS);
     return () => { mo.disconnect(); window.clearTimeout(timeout); };
   }, [targetId]);
   return el;
