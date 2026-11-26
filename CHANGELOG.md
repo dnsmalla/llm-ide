@@ -5,6 +5,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### API v162: removed chat routes and desktop Remote screen
+
+- `POST /chat` and `POST /code-assist` now answer the generic unknown-route 404 (they answered 410) (`SERVER_API_VERSION` 162).
+- The desktop **Remote** screen is gone from the navigation. Remote **server** mode in Settings is unchanged, and the web app and iPhone still reach a host over Host API v1 (guide: `docs/how-to/remote-project-host.md`).
+- In SSH server mode the desktop host now refuses the Loop, graph and notes host commands instead of running them against the local machine.
+- The hub check reports `not_a_hub` when `/health` lacks `status`, `checks.db` or `apiVersion`, so a plain web server is no longer mistaken for a hub.
+- The terminal is refused in Remote-hub mode.
+
 ### Desktop: clone and git credential environment
 
 - Repository clones and git credential runs now ignore `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`, `GIT_ASKPASS` and `GIT_DIR` from the inherited environment. Proxy or CA settings supplied that way no longer reach clones; put them in the repository or user gitconfig file instead.
