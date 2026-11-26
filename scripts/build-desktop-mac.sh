@@ -137,8 +137,9 @@ show_warnings() { # log_start_byte
   local lines total
   lines="$(tail -c +"$(($1 + 1))" "$LOG_FILE" | grep -iE '^[[:space:]]*warning' || true)"
   [ -n "$lines" ] || return 0
-  total=$(printf '%s\n' "$lines" | wc -l | tr -d ' ')
-  printf '%s\n' "$lines" | head -n 5 | sed 's/^[[:space:]]*/      /'
+  # Here-strings, not `printf | head`: under pipefail, head closing early SIGPIPEs printf and kills a passing build.
+  total=$(wc -l <<<"$lines" | tr -d ' ')
+  head -n 5 <<<"$lines" | sed 's/^[[:space:]]*/      /'
   [ "$total" -le 5 ] || printf '      (%s more in the log)\n' $((total - 5))
 }
 info() { if [ "$VERBOSE" = 1 ]; then echo "$*"; else echo "$*" >>"$LOG_FILE"; fi; }
