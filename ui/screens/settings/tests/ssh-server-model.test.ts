@@ -8,6 +8,7 @@ import {
   SSH_NO_BUNDLE_TEXT,
   decodeSshServerTest,
   sshServerErrorText,
+  sshLinkPresentation,
   type SshServerIo,
 } from "../ssh-server-model.ts";
 import type { SshServerStatus, SshServerTest, SshServerTarget } from "../host.ts";
@@ -448,4 +449,18 @@ test("a build without the server bundle disables SSH with a plain sentence; an o
   assert.equal(sshBundleBlock({ ...status, bundleAvailable: false }), SSH_NO_BUNDLE_TEXT);
   assert.equal(sshBundleBlock(status), null);
   assert.equal(sshBundleBlock(null), null);
+});
+
+test("sshLinkPresentation: one label and tone per link state", () => {
+  const table: [string | null, string, string][] = [
+    ["connected", "ok", "SSH server connected"],
+    ["connecting", "busy", "Connecting to the SSH server…"],
+    ["reconnecting", "warn", "Reconnecting to the SSH server…"],
+    ["needs_password", "warn", "Enter the server password to connect"],
+    ["failed", "error", "SSH server unreachable"],
+    ["stopped", "off", "Not connected to the SSH server"],
+    ["off", "off", "Not connected to the SSH server"],
+    [null, "off", "Not connected to the SSH server"],
+  ];
+  for (const [link, tone, text] of table) assert.deepEqual(sshLinkPresentation(link), { tone, text }, String(link));
 });

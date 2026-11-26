@@ -5,7 +5,7 @@ import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 import "../welcome/welcome.css";
 import "./remote-folder.css";
 import { useModel, useStore } from "../settings/context.tsx";
-import { Button, ErrorText } from "../settings/ui.tsx";
+import { Button, ErrorText } from "@llmide/ui-kit";
 import { breadcrumbsFor, FolderPickerModel, type PickerDeps, type PickerState, type RemoteProject, type WorkspaceIo } from "./model.ts";
 
 export const OUTSIDE_HOME_TEXT = "Outside your home folder";

@@ -6,6 +6,7 @@ import { mountOsView, type OsFileContent, type OsViewHandle } from "@dnsmalla/gr
 import { invokeHost, shellBus, subscribeTheme, getTheme } from "@llmide/screens/shell";
 import { core } from "../shell/runtime";
 import { createSystemHost, sectionForTarget, type SystemReply } from "./system-host";
+import { lastSegment } from "../../kit/src/paths.ts";
 
 export interface SystemPageProps {
   /** The Graph section is visible; hidden sections unmount the page so its feed stops. */
@@ -14,8 +15,6 @@ export interface SystemPageProps {
   /** The page asked for the code graph: switch the Graph section to its Code graph page. */
   onOpenCodeGraph: () => void;
 }
-
-const baseName = (p: string): string => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
 
 export default function SystemPage({ active, projectRoot, onOpenCodeGraph }: SystemPageProps): ReactNode {
   const hostEl = useRef<HTMLDivElement>(null);
@@ -105,7 +104,7 @@ export default function SystemPage({ active, projectRoot, onOpenCodeGraph }: Sys
         }
       },
     });
-    const h = mountOsView(el, host, { theme: getTheme(), projectName: projectRoot ? baseName(projectRoot) : null });
+    const h = mountOsView(el, host, { theme: getTheme(), projectName: projectRoot ? lastSegment(projectRoot) : null });
     view.current = h;
     const off = subscribeTheme(() => h.configure({ theme: getTheme() }));
     return () => {
@@ -118,7 +117,7 @@ export default function SystemPage({ active, projectRoot, onOpenCodeGraph }: Sys
   }, [active]);
 
   useEffect(() => {
-    view.current?.configure({ projectName: projectRoot ? baseName(projectRoot) : null });
+    view.current?.configure({ projectName: projectRoot ? lastSegment(projectRoot) : null });
   }, [projectRoot]);
 
   return <div className="gr-system" ref={hostEl} data-page="system" data-active={active} />;

@@ -3,6 +3,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
 import { invokeHost } from "../shell/host";
+import { lastSegment } from "../../kit/src/paths.ts";
 import { Controls } from "./Controls.tsx";
 import { NodeDetails } from "./Details.tsx";
 import { GraphCanvas } from "./GraphCanvas.tsx";
@@ -128,21 +129,20 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
   };
 
   // The Mac's scan target. Code scans the picked repo only; InfiniteBrain and All fall back to the first repo.
-  const baseName = (p: string): string => p.split("/").pop() ?? p;
   const scanTarget = target || repos[0] || "";
   const generateTarget = mode === "code" ? target : scanTarget;
   const canGenerate = !generating && !!onGenerate && generateTarget !== "";
   const runLabel = mode === "code"
-    ? (target ? `Generate Code Graph for ${baseName(target)}` : "Generate Code Graph")
+    ? (target ? `Generate Code Graph for ${lastSegment(target)}` : "Generate Code Graph")
     : mode === "memory"
-      ? (scanTarget ? `Generate InfiniteBrain for ${baseName(scanTarget)}` : "Generate InfiniteBrain")
-      : (scanTarget ? `Generate Graph for ${baseName(scanTarget)}` : "Generate Graph");
+      ? (scanTarget ? `Generate InfiniteBrain for ${lastSegment(scanTarget)}` : "Generate InfiniteBrain")
+      : (scanTarget ? `Generate Graph for ${lastSegment(scanTarget)}` : "Generate Graph");
 
   const quickPick = repos.length > 0 ? (
     <div className="gr-quick" aria-label="Quick pick repositories">
       <h3 className="gr-quick-title">Quick Pick</h3>
       {repos.map((r) => (
-        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Load graph for ${baseName(r)}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); runGeneration(r, "code"); }}>
+        <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Load graph for ${lastSegment(r)}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); runGeneration(r, "code"); }}>
           <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
         </button>
       ))}
@@ -159,10 +159,10 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
         {repos.length === 0
           ? "Pick a repo in Settings → GitLab/GitHub to generate a graph."
           : mode === "code"
-            ? (target ? `Scans code in ${baseName(target)} into a symbol graph.` : "Pick a repo in Quick Pick to scan its code.")
+            ? (target ? `Scans code in ${lastSegment(target)} into a symbol graph.` : "Pick a repo in Quick Pick to scan its code.")
             : mode === "memory"
-              ? `Builds a doc graph from the .md/.txt docs in ${baseName(scanTarget)}.`
-              : `Builds one graph from all code + docs in ${baseName(scanTarget)}, with cross-links.`}
+              ? `Builds a doc graph from the .md/.txt docs in ${lastSegment(scanTarget)}.`
+              : `Builds one graph from all code + docs in ${lastSegment(scanTarget)}, with cross-links.`}
       </p>
       <button
         type="button"

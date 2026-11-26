@@ -137,8 +137,8 @@ test("folder names: empty, slash, NUL, line break, dot and dot-dot are refused",
 test("entries sort case-insensitively; joins and breadcrumbs follow the home folder", () => {
   const names = m.sortEntries([{ name: "projects" }, { name: "Archive" }, { name: "alpha" }, { name: "api" }]).map((e) => e.name);
   assert.deepEqual(names, ["alpha", "api", "Archive", "projects"]);
-  assert.equal(m.joinPath(HOME, "x"), `${HOME}/x`);
-  assert.equal(m.joinPath("/", "x"), "/x");
+  assert.equal(m.joinAbs(HOME, "x"), `${HOME}/x`);
+  assert.equal(m.joinAbs("/", "x"), "/x");
   assert.deepEqual(m.breadcrumbsFor(`${HOME}/projects/llm`, HOME), [
     { label: "~", path: HOME },
     { label: "projects", path: `${HOME}/projects` },

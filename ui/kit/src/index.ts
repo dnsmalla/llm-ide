@@ -3,6 +3,10 @@
 export { THEMES, DEFAULT_THEME_ID, isThemeId, applyTheme, type ThemeId } from "./theme";
 export * from "./icons";
 export { useDialogFocus } from "./components/useDialogFocus";
+export { Button } from "./components/Button";
+export { ErrorText } from "./components/ErrorText";
+export { Field } from "./components/Field";
+export { InlineConfirm } from "./components/InlineConfirm";
 export { Chip } from "./components/Chip";
 export { EditorTabBar, tabAccessibleName, tabKeyTarget, type EditorTab } from "./components/EditorTabBar";
 export { FileTreeRow, type GitStatus } from "./components/FileTreeRow";

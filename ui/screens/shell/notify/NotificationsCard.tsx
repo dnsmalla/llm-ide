@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { invokeHost, isHostAvailable } from "../host";
 import { decodePrefsView, type NotifyPrefs } from "../host-prefs";
-import { ErrorText, Switch } from "../../settings/ui.tsx";
+import { ErrorText } from "@llmide/ui-kit";
+import { Switch } from "../../settings/ui.tsx";
 import { NOTIFY_SWITCHES, trayNote } from "./notify";
 
 export function NotificationsBody({ prefs, note, error, onChange }: { prefs: NotifyPrefs | null; note: string | null; error: string | null; onChange(key: keyof NotifyPrefs, on: boolean): void }) {

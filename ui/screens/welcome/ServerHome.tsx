@@ -3,33 +3,21 @@
 // a plain function over props (tested to markup); the container owns the models and reads the live link from the core
 // status, as the toolbar does. The password lives in the container's state only, so it goes when the page unmounts.
 import { useEffect, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { Button, ErrorText, Field, InlineConfirm, StatusBanner } from "@llmide/ui-kit";
 import "./server-home.css";
 import { useModel, useStore } from "../settings/context.tsx";
-import { Button, ErrorText, Field } from "../settings/ui.tsx";
-import { SshServerModel, SSH_FOREIGN_TEXT, sshServerErrorText, type SshServerIo } from "../settings/ssh-server-model.ts";
+import { SshServerModel, SSH_FOREIGN_TEXT, sshLinkPresentation, sshServerErrorText, type SshServerIo } from "../settings/ssh-server-model.ts";
 import { StopConfirm } from "../settings/sections/SshServerParts.tsx";
 import { safeText } from "../shell/safe-text.ts";
 import { useStoreSelector } from "../shell/hooks.ts";
 import { coreStatusStore } from "../shell/runtime.ts";
 import type { RemoteProject, WorkspaceIo, OpenFlowDeps } from "../remote-folder/model.ts";
 import { ServerRecentModel } from "../remote-folder/model.ts";
+import { lastSegment } from "../../kit/src/paths.ts";
 import { closeServerConnection } from "../shell/close-server.ts";
 
 /** The same sentence the dialog gives under the password field: the password is not kept. */
 export const SERVER_PASSWORD_HINT = "Used only for this connection. It is never saved.";
-
-/** The header's state label for each link state, using the wording of the toolbar and the status view. */
-export function serverLinkLabel(link: string | null): { tone: "ok" | "busy" | "warn" | "error" | "off"; text: string } {
-  switch (link) {
-    case "connected": return { tone: "ok", text: "SSH server connected" };
-    case "connecting": return { tone: "busy", text: "Connecting to the SSH server…" };
-    case "reconnecting": return { tone: "warn", text: "Reconnecting to the SSH server…" };
-    case "needs_password": return { tone: "warn", text: "Enter the server password to connect" };
-    case "failed": return { tone: "error", text: "SSH server unreachable" };
-    default: return { tone: "off", text: "Not connected to the SSH server" };
-  }
-}
 
 /** The header's first line: "Connected to <host>" only while the link is up, "SSH server <host>" otherwise. */
 export function headerText(link: string | null, host: string): string {
@@ -83,7 +71,7 @@ export interface ServerHomeViewProps {
 }
 
 export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
-  const label = serverLinkLabel(p.link);
+  const label = sshLinkPresentation(p.link);
   const linkUp = p.link === "connected" || p.link === "connecting" || p.link === "reconnecting";
   const connected = p.link === "connected";
   return (
@@ -109,25 +97,25 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
       <ErrorText text={p.closeError} />
 
       {p.closeConfirm ? (
-        <div className="st-dialog" role="alertdialog" aria-label="Close the connection">
+        <InlineConfirm label="Close the connection">
           <p>{`Close the connection to ${p.host} and return to the Welcome page? The server keeps running.`}</p>
           <div className="st-row">
             <Button tone="primary" disabled={p.busy} onClick={p.onConfirmClose}>Close</Button>
             <Button disabled={p.busy} onClick={p.onCancelClose}>Cancel</Button>
           </div>
-        </div>
+        </InlineConfirm>
       ) : null}
       {p.stopConfirm ? (
         <StopConfirm host={p.host} busy={p.busy} onConfirm={p.onConfirmStop} onCancel={p.onCancelStop} />
       ) : null}
       {p.foreign ? (
-        <div className="st-dialog" role="alertdialog" aria-label="Another computer started the server">
+        <InlineConfirm label="Another computer started the server">
           <StatusBanner severity="warning" message={SSH_FOREIGN_TEXT} />
           <div className="st-row">
             <Button tone="danger" disabled={p.busy} onClick={p.onStopAnyway}>Stop it anyway</Button>
             <Button disabled={p.busy} onClick={p.onDismissForeign}>Cancel</Button>
           </div>
-        </div>
+        </InlineConfirm>
       ) : null}
 
       {p.link === "needs_password" ? (
@@ -210,8 +198,6 @@ export interface ServerHomeProps {
   onCloseServer(): Promise<unknown>;
 }
 
-const basename = (path: string): string => path.split("/").filter(Boolean).pop() ?? path;
-
 /** The server home page: the models and the live link. Its state is the page's own, so a fresh mount starts clean. */
 export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened, onContinue, onCloseServer }: ServerHomeProps): ReactNode {
   const m = useModel(() => new SshServerModel(io));
@@ -292,7 +278,7 @@ export function ServerHome({ io, workspace, deps, folder, onOpenPicker, onOpened
       folder={folder}
       onContinue={onContinue}
       onOpenPicker={onOpenPicker}
-      recent={rs.paths.map((path) => ({ path, name: basename(path), missing: rs.missing.includes(path) }))}
+      recent={rs.paths.map((path) => ({ path, name: lastSegment(path, "posix"), missing: rs.missing.includes(path) }))}
       onOpenRecent={openRecent}
       onRemoveRecent={(path) => void recentModel.forget(path)}
     />

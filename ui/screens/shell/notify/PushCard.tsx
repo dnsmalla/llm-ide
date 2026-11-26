@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ApiError, call } from "../../settings/core-api.ts";
 import { useEnv } from "../../settings/context.tsx";
-import { Button, ErrorText, Field } from "../../settings/ui.tsx";
+import { Button, ErrorText, Field } from "@llmide/ui-kit";
 
 export interface PushDevice { deviceId: string; name: string; kind: "webpush" | "apns"; lastResult: string | null; lastAt: number | null }
 export interface PushStatus { served: boolean; apns: { configured: boolean; keyId: string | null; teamId: string | null }; devices: PushDevice[] }

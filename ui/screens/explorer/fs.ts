@@ -3,6 +3,7 @@
 // every path here is relative to the open project root, `/` separated, `""` = the root.
 // The bridge is `invokeHost` from the shell (Tauri `invoke`, or a fake in tests).
 import { invokeHost } from "../shell/host";
+import { baseName, joinRel, nativeBaseName, parentOf } from "../../kit/src/paths.ts";
 
 export type FsErrorCode =
   | "no_project" | "root_too_broad" | "invalid_path" | "outside_root" | "not_found" | "exists" | "conflict"
@@ -179,25 +180,7 @@ export function createHostFs(channelFactory?: (onMessage: (b: WatchBatch) => voi
   };
 }
 
-/** Joins a folder path and a child name (`""` is the root). */
-export function joinPath(dir: string, name: string): string {
-  return dir === "" ? name : `${dir}/${name}`;
-}
-
-export function parentOf(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i < 0 ? "" : path.slice(0, i);
-}
-
-export function baseName(path: string): string {
-  const i = path.lastIndexOf("/");
-  return i < 0 ? path : path.slice(i + 1);
-}
-
-/** Last segment of a native OS path. Project roots are not `/`-only: on Windows the root is `C:\...`. */
-export function nativeBaseName(path: string): string {
-  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
-}
+export { baseName, joinRel, nativeBaseName, parentOf };
 
 /** The native absolute path of a project-relative path, joined with the root's own separator. */
 export function absolutePathUnder(root: string, rel: string): string {

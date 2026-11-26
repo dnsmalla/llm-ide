@@ -2,6 +2,7 @@
 // plain function over props so it can be rendered and tested; the wrapper only keeps which menu or confirmation is
 // open. The list renders nothing when there are no servers, so an older host without the command shows no section.
 import { useState, type ReactNode } from "react";
+import { InlineConfirm } from "@llmide/ui-kit";
 import { sshServerErrorText, type SshRecentServer } from "../settings/ssh-server-model.ts";
 import { forgetQuestion, recentKey, type RowMessage } from "./ssh-recent.ts";
 
@@ -62,13 +63,13 @@ export function RecentSshServersView(p: RecentSshServersViewProps): ReactNode {
                 </div>
               ) : null}
               {asking ? (
-                <div className="st-dialog wc-ssh-confirm" role="alertdialog" aria-label={`Forget ${key}`}>
+                <InlineConfirm label={`Forget ${key}`} className="wc-ssh-confirm">
                   <p>{forgetQuestion(e)}</p>
                   <div className="wc-ssh-row-actions">
                     <button type="button" className="sh-button sh-button-danger" disabled={p.busy} onClick={() => p.onForget(e)}>Forget</button>
                     <button type="button" className="sh-button" disabled={p.busy} onClick={p.onCancelForget}>Cancel</button>
                   </div>
-                </div>
+                </InlineConfirm>
               ) : null}
               {message ? <p className="wc-ssh-row-msg" data-tone={message.tone} role="status">{message.text}</p> : null}
               {error ? <p className="wc-ssh-row-msg" data-tone="error" role="alert">{error}</p> : null}

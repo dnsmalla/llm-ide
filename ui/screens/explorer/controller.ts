@@ -1,7 +1,8 @@
 // Explorer controller: tree paging, tabs, documents, save/conflict flow, watcher and git decoration.
 // React-free and host-free (the fs bridge and the editor are injected), so the whole flow is tested
 // with an in-memory fake. The UI subscribes to immutable snapshots.
-import { FsError, baseName, joinPath, parentOf, toFsError, type Entry, type FsApi, type GitStatus, type ReadResult, type WatchBatch } from "./fs";
+import { FsError, baseName, joinRel, parentOf, toFsError, type Entry, type FsApi, type GitStatus, type ReadResult, type WatchBatch } from "./fs";
+import { entryNameProblem } from "../../kit/src/entry-name.ts";
 import { LARGE_FILE_BYTES, type EditorHost } from "./editor-types";
 import {
   PAGE_SIZE, applySelect, buildLayout, emptyTree, invalidate, pagesNeeded, pruneCollapsed, rowsInRange, topLevel, unloadedExpanded,
@@ -634,9 +635,7 @@ export class ExplorerController {
   // ---- file operations --------------------------------------------------------------------
 
   private validName(name: string): string | null {
-    const n = name.trim();
-    if (!n || n === "." || n === ".." || /[\\/\0]/.test(n) || LINE_BREAK.test(n)) return null;
-    return n;
+    return entryNameProblem(name, { refuseBackslash: true }) === null ? name.trim() : null;
   }
 
   /** The message for a name `validName` refused. A line break gets its own sentence, as on the Mac: a pasted wrapped line is invisible in a one-line field. */
@@ -651,7 +650,7 @@ export class ExplorerController {
       return null;
     }
     try {
-      const p = await this.fs.create(joinPath(dir, n), kind);
+      const p = await this.fs.create(joinRel(dir, n), kind);
       await this.toggleDir(dir, true);
       await this.refreshDir(dir);
       if (kind === "file") await this.openFile(p, false);
@@ -671,7 +670,7 @@ export class ExplorerController {
     }
     // The same name is nothing to do: no host call, no error (the Mac closes the editor the same way).
     if (n === baseName(path)) return path;
-    return this.moveOne(path, joinPath(parentOf(path), n));
+    return this.moveOne(path, joinRel(parentOf(path), n));
   }
 
   private async moveOne(from: string, to: string): Promise<string | null> {
@@ -719,7 +718,7 @@ export class ExplorerController {
   async moveInto(paths: string[], destDir: string): Promise<void> {
     for (const p of topLevel(paths)) {
       if (p === destDir || destDir.startsWith(`${p}/`)) continue;
-      await this.moveOne(p, joinPath(destDir, baseName(p)));
+      await this.moveOne(p, joinRel(destDir, baseName(p)));
     }
     await this.toggleDir(destDir, true);
   }
@@ -748,7 +747,7 @@ export class ExplorerController {
     // The Mac's `uniqueDestination`: the plain name first (pasting into another folder keeps it), then the copies.
     for (let n = -1; n < 1000; n++) {
       const name = n === -1 ? base : n === 0 ? `${stem} copy${ext}` : `${stem} copy ${n + 1}${ext}`;
-      const to = joinPath(destDir, name);
+      const to = joinRel(destDir, name);
       try {
         await this.fs.copy(src, to);
         return to;
@@ -796,7 +795,7 @@ export class ExplorerController {
     // Top-level only: a cut folder moves with its children, so a child listed too must not be reported as gone.
     for (const src of topLevel(clip.paths)) {
       const base = baseName(src);
-      const to = joinPath(destDir, base);
+      const to = joinRel(destDir, base);
       try {
         if (clip.mode === "copy") {
           moved.push(await this.copyToFreeName(src, destDir));

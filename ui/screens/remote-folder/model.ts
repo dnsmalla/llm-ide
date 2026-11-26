@@ -10,8 +10,11 @@
 
 import { Store } from "../settings/store.ts";
 import { validateProjectName } from "../welcome/model.ts";
-import { beginServerFolderOpen, endServerFolderOpen } from "../shell/host.ts";
+import { beginServerFolderOpen, endServerFolderOpen, type ProjectInfo } from "../shell/host.ts";
 import { isRecord } from "../../kit/src/decode.ts";
+import { entryNameProblem } from "../../kit/src/entry-name.ts";
+import { hostErrorCode, hostErrorText } from "../../kit/src/host-error.ts";
+import { joinAbs } from "../../kit/src/paths.ts";
 
 /** One folder as the host lists it. The host lists folders only. */
 export interface RemoteEntry {
@@ -29,10 +32,7 @@ export interface RemoteListing {
 }
 
 /** The open server folder, as `remote_ssh_workspace_open` answers it (the same shape as a local project). */
-export interface RemoteProject {
-  name: string;
-  root: string;
-}
+export type RemoteProject = ProjectInfo;
 
 /** The host commands the picker and the recent list use. */
 export interface WorkspaceIo {
@@ -122,9 +122,7 @@ export function createWorkspaceIo(invoke: WorkspaceInvoke): WorkspaceIo {
 }
 
 /** The host's error code (`{ code, message }`), or "" when the error has none. */
-export function workspaceErrorCode(e: unknown): string {
-  return isRecord(e) && typeof e.code === "string" ? e.code : "";
-}
+export const workspaceErrorCode = hostErrorCode;
 
 const CODE_TEXT: Record<string, string> = {
   root_missing: ROOT_MISSING_TEXT,
@@ -137,10 +135,7 @@ const CODE_TEXT: Record<string, string> = {
 
 /** The sentence a user reads for a host error. Known codes have fixed text; any other shows the host's message. */
 export function workspaceErrorText(e: unknown): string {
-  const code = workspaceErrorCode(e);
-  if (code && Object.hasOwn(CODE_TEXT, code)) return CODE_TEXT[code]!;
-  const message = isRecord(e) && typeof e.message === "string" ? e.message : e instanceof Error ? e.message : "";
-  return message.trim().slice(0, 300) || "The server request failed.";
+  return hostErrorText(e, CODE_TEXT, "The server request failed.");
 }
 
 /**
@@ -148,23 +143,21 @@ export function workspaceErrorText(e: unknown): string {
  * a name that cannot be typed back. Surrounding spaces are removed, as the host receives the trimmed name.
  */
 export function folderNameError(raw: string): string | null {
-  const name = raw.trim();
-  if (name.length === 0) return "Enter a folder name.";
-  if (name === "." || name === "..") return "Choose another name.";
-  if (name.includes("/")) return "A folder name cannot contain /.";
-  if (name.includes("\0")) return "A folder name cannot contain a null character.";
-  if (/[\r\n]/.test(name)) return "A folder name cannot contain a line break.";
-  return null;
+  switch (entryNameProblem(raw)) {
+    case "empty": return "Enter a folder name.";
+    case "dot": return "Choose another name.";
+    case "separator": return "A folder name cannot contain /.";
+    case "null": return "A folder name cannot contain a null character.";
+    case "line_break": return "A folder name cannot contain a line break.";
+    default: return null;
+  }
 }
+
+export { joinAbs };
 
 /** Entries sorted case-insensitively; the exact name breaks a tie so the order is stable. */
 export function sortEntries<T extends { name: string }>(entries: readonly T[]): T[] {
   return [...entries].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-}
-
-/** A child path. The root is the one place a separator is not added. */
-export function joinPath(parent: string, name: string): string {
-  return parent.endsWith("/") ? `${parent}${name}` : `${parent}/${name}`;
 }
 
 export interface Crumb {
@@ -183,7 +176,7 @@ export function breadcrumbsFor(path: string, home: string | null): Crumb[] {
       const crumbs: Crumb[] = [{ label: "~", path: home }];
       let acc = home;
       for (const seg of path.slice(path === home ? home.length : prefix.length).split("/").filter(Boolean)) {
-        acc = joinPath(acc, seg);
+        acc = joinAbs(acc, seg);
         crumbs.push({ label: seg, path: acc });
       }
       return crumbs;
@@ -402,7 +395,7 @@ export class FolderPickerModel extends Store<PickerState> {
     const s = this.getState();
     const entry = s.entries.find((e) => e.name === name);
     if (!entry || entry.outsideHome || s.path === null) return Promise.resolve();
-    return this.#list(joinPath(s.path, name));
+    return this.#list(joinAbs(s.path, name));
   }
 
   /** Goes to a breadcrumb. */
@@ -552,7 +545,7 @@ export class FolderPickerModel extends Store<PickerState> {
     const s = this.getState();
     const entry = s.entries.find((e) => e.name === s.selected);
     if (s.path === null || !entry || entry.outsideHome) return Promise.resolve(null);
-    return this.#open(joinPath(s.path, entry.name));
+    return this.#open(joinAbs(s.path, entry.name));
   }
 
   async #open(path: string): Promise<RemoteProject | null> {

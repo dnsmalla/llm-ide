@@ -1,6 +1,7 @@
 // Pure mapping from host `core_status` (+ poll errors) to what the shell shows.
 import type { CoreStatus } from "./host";
 import type { StatusState } from "./status-store";
+import { sshLinkPresentation } from "../settings/ssh-server-model.ts";
 
 export type StatusLevel = "ok" | "busy" | "warn" | "error";
 
@@ -75,21 +76,13 @@ const STOPPED_DETAIL = "The core was stopped from Settings. Start it there, or u
 
 /** The ssh server's own wording; `stopped` reuses the core's stopped presentation, which is what the user sees after Stop. */
 function sshLinkView(s: CoreStatus): Pick<StatusView, "level" | "label" | "detail" | "down"> {
-  switch (s.link) {
-    case "connected":
-      return { level: "ok", label: "SSH server connected", detail: null, down: false };
-    case "connecting":
-      return { level: "busy", label: "Connecting to the SSH server…", detail: null, down: true };
-    case "reconnecting":
-      return { level: "warn", label: "Reconnecting to the SSH server…", detail: s.error, down: true };
-    case "needs_password":
-      return { level: "warn", label: "Enter the server password to connect", detail: null, down: true };
-    case "stopped":
-      return { level: "error", label: "Core stopped", detail: STOPPED_DETAIL, down: true };
-    case "failed":
-    default:
-      return { level: "error", label: "SSH server unreachable", detail: s.error ?? "The SSH connection could not be opened.", down: true };
-  }
+  if (s.link === "stopped") return { level: "error", label: "Core stopped", detail: STOPPED_DETAIL, down: true };
+  // Any link the toolbar has no wording for reads as unreachable.
+  const link = s.link === "connected" || s.link === "connecting" || s.link === "reconnecting" || s.link === "needs_password" ? s.link : "failed";
+  const { tone, text } = sshLinkPresentation(link);
+  const level: StatusLevel = tone === "off" ? "error" : tone;
+  const detail = link === "reconnecting" ? s.error : link === "failed" ? (s.error ?? "The SSH connection could not be opened.") : null;
+  return { level, label: text, detail, down: link !== "connected" };
 }
 
 export function deriveStatusView(state: StatusState): StatusView {

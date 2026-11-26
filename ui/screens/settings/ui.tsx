@@ -1,27 +1,12 @@
 // Small presentational pieces shared by the sections. Text goes in as React children
 // (escaped); nothing here renders raw HTML or builds a URL from content.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { StatusBanner } from "@llmide/ui-kit";
+import { Button, ErrorText, Field } from "@llmide/ui-kit";
 import type { SecretField } from "./secret-field.ts";
 import { windowRange } from "./virtual.ts";
 
-export function Button({ children, onClick, disabled, tone, label }: { children: ReactNode; onClick: () => void; disabled?: boolean; tone?: "primary" | "danger"; label?: string }) {
-  return (
-    <button type="button" className="st-btn" data-tone={tone} disabled={disabled} aria-label={label} onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
-export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return (
-    <label className="st-field">
-      <span className="st-label">{label}</span>
-      {children}
-      {hint ? <span className="st-hint">{hint}</span> : null}
-    </label>
-  );
-}
+// Button, Field and ErrorText live in the kit; re-exported so the settings sections keep one import.
+export { Button, ErrorText, Field };
 
 export function Switch({ label, checked, onChange, disabled, hint }: { label: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; hint?: string }) {
   return (
@@ -33,10 +18,6 @@ export function Switch({ label, checked, onChange, disabled, hint }: { label: st
       {hint ? <p className="st-hint">{hint}</p> : null}
     </div>
   );
-}
-
-export function ErrorText({ text }: { text: string | null }) {
-  return text ? <StatusBanner severity="error" message={text} /> : null;
 }
 
 /** Write-only secret input: uncontrolled, type=password, never filled from a stored value.

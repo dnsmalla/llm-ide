@@ -15,6 +15,7 @@ import type { SshServerLink, SshServerStatus, SshServerTarget, SshServerTest } f
 import { isValidHost, isValidKeyPath, isValidUser, parseSshPort } from "./remote-model.ts";
 import { Store } from "./store.ts";
 import { isRecord } from "../../kit/src/decode.ts";
+import { hostErrorText, type HostErrorTable } from "../../kit/src/host-error.ts";
 
 export type SshServerField = "host" | "port" | "user" | "keyPath";
 export type SshServerFieldErrors = Partial<Record<SshServerField, string>>;
@@ -64,41 +65,35 @@ export function sshBundleBlock(status: SshServerStatus | null): string | null {
   return status?.bundleAvailable === false ? SSH_NO_BUNDLE_TEXT : null;
 }
 
+const SSH_REQUEST_FAILED = "The SSH server request failed.";
+/** The host's own sentence names the next step (or the command and folder), so it wins over a fixed text. */
+const hostSentence = (fallback: string) => (message: string): string => (message.length > 0 ? message.slice(0, 300) : fallback);
+
+const SSH_ERROR_TEXT: HostErrorTable = {
+  SSH_AUTH_FAILED: "The server refused this login.",
+  SSH_PASSWORD_REQUIRED: "Enter the password for this server.",
+  SSH_UNREACHABLE: "Could not reach the server.",
+  SSH_HOST_KEY_UNCONFIRMED: "Test the connection and confirm the server's host key first.",
+  SSH_HOST_KEY_CHANGED: "The server's host key changed. Test the connection again and confirm the new fingerprint.",
+  SSH_CORE_FOREIGN: "Another computer started the server on this account. This version supports one desktop per server account.",
+  SSH_TIMEOUT: "The server did not answer in time.",
+  SSH_START_BUSY: "The server is already starting. Try again in a moment.",
+  SSH_FORWARD_FAILED: hostSentence(SSH_REQUEST_FAILED),
+  SSH_GLIBC_TOO_OLD: hostSentence(SSH_REQUEST_FAILED),
+  confirm_mismatch: hostSentence(SSH_REQUEST_FAILED),
+  SSH_BUNDLE_MISSING: hostSentence("This build has no Linux server bundle."),
+  // Key install: the sentences say what the user can do next.
+  SSH_KEY_NOT_NEEDED: "This server already uses a key.",
+  SSH_KEY_VERIFY_FAILED: "The server did not accept the new key. Your password login is unchanged.",
+  SSH_KEYGEN_FAILED: "Could not create a key on this computer.",
+  SSH_KEY_INSTALL_FAILED: "The key could not be added on the server.",
+  SSH_KEY_INVALID: "The new key was not accepted.",
+};
+
 /** Fixed, clear sentences for the host's ssh server codes; any other code shows the host's own message. */
 export function sshServerErrorText(e: unknown): string {
   if (typeof e === "string" && e.trim().length > 0) return e.trim().slice(0, 300);
-  const record = isRecord(e) ? e : null;
-  const code = typeof record?.code === "string" ? record.code : null;
-  const message = typeof record?.message === "string" ? record.message.trim() : "";
-  switch (code) {
-    case "SSH_AUTH_FAILED": return "The server refused this login.";
-    case "SSH_PASSWORD_REQUIRED": return "Enter the password for this server.";
-    case "SSH_UNREACHABLE": return "Could not reach the server.";
-    case "SSH_HOST_KEY_UNCONFIRMED": return "Test the connection and confirm the server's host key first.";
-    case "SSH_HOST_KEY_CHANGED": return "The server's host key changed. Test the connection again and confirm the new fingerprint.";
-    case "SSH_CORE_FOREIGN": return "Another computer started the server on this account. This version supports one desktop per server account.";
-    case "SSH_TIMEOUT": return "The server did not answer in time.";
-    case "SSH_START_BUSY": return "The server is already starting. Try again in a moment.";
-    // The host's own sentences are the user-facing text for these; they name the next step.
-    case "SSH_FORWARD_FAILED":
-    case "SSH_GLIBC_TOO_OLD":
-    case "confirm_mismatch":
-      if (message.length > 0) return message.slice(0, 300);
-      return "The SSH server request failed.";
-    // The host's sentence names the command and the folder the bundle goes to; a fixed text would hide them.
-    case "SSH_BUNDLE_MISSING":
-      if (message.length > 0) return message.slice(0, 300);
-      return "This build has no Linux server bundle.";
-    // Key install: the host reports these codes; the sentences say what the user can do next.
-    case "SSH_KEY_NOT_NEEDED": return "This server already uses a key.";
-    case "SSH_KEY_VERIFY_FAILED": return "The server did not accept the new key. Your password login is unchanged.";
-    case "SSH_KEYGEN_FAILED": return "Could not create a key on this computer.";
-    case "SSH_KEY_INSTALL_FAILED": return "The key could not be added on the server.";
-    case "SSH_KEY_INVALID": return "The new key was not accepted.";
-    default:
-      if (message.length > 0) return message.slice(0, 300);
-      return e instanceof Error && e.message ? e.message : "The SSH server request failed.";
-  }
+  return hostErrorText(e, SSH_ERROR_TEXT, SSH_REQUEST_FAILED);
 }
 
 /** Shown when the switch from SSH to Local asks first. Same sentence as the hub's text, naming the SSH server. */
@@ -159,6 +154,23 @@ export function sshBadgeText(link: string | null, host: string, folder?: string)
   if (link === "connected") return `SSH: ${name}${at}`;
   if (link === "reconnecting") return `Reconnecting to ${name}…${at}`;
   return null;
+}
+
+export type SshLinkTone = "ok" | "busy" | "warn" | "error" | "off";
+
+/**
+ * The state label and tone for an SSH link, the one wording the toolbar status, the status view and the server
+ * home header share. A missing or unlisted link reads as "off"; `stopped` is left to the caller (it reuses the core's text).
+ */
+export function sshLinkPresentation(link: string | null): { tone: SshLinkTone; text: string } {
+  switch (link) {
+    case "connected": return { tone: "ok", text: "SSH server connected" };
+    case "connecting": return { tone: "busy", text: "Connecting to the SSH server…" };
+    case "reconnecting": return { tone: "warn", text: "Reconnecting to the SSH server…" };
+    case "needs_password": return { tone: "warn", text: "Enter the server password to connect" };
+    case "failed": return { tone: "error", text: "SSH server unreachable" };
+    default: return { tone: "off", text: "Not connected to the SSH server" };
+  }
 }
 
 /** One server the Welcome screen remembers. Never a password; the key path only, never key contents. */

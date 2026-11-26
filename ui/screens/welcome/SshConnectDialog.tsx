@@ -3,7 +3,7 @@
 // The password lives in this dialog's state only: closing the dialog unmounts it, and the password goes with it.
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import "../settings/settings.css";
-import { Button, ErrorText } from "../settings/ui.tsx";
+import { Button, ErrorText } from "@llmide/ui-kit";
 import { SshServerForm } from "../settings/sections/SshServerForm.tsx";
 import { sshServerErrorText, type SshServerModel, type SshServerState } from "../settings/ssh-server-model.ts";
 import { escapeTarget, switchQuestion } from "./ssh-recent.ts";
