@@ -2357,6 +2357,8 @@ a:focus-visible {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   padding: var(--space-3);
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
 }
 .tour-step-count {
   margin: 0;

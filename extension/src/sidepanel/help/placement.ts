@@ -26,7 +26,9 @@ export function placeCard(target: TargetRect, card: CardSize, panelWidth: number
   const below = panelHeight - target.bottom - GAP - MARGIN;
   const above = target.top - GAP - MARGIN;
   const side: 'below' | 'above' = card.height <= below || below >= above ? 'below' : 'above';
-  const top = side === 'below' ? target.bottom + GAP : Math.max(MARGIN, target.top - GAP - card.height);
+  const wanted = side === 'below' ? target.bottom + GAP : target.top - GAP - card.height;
+  // Reachable Skip/Finish beats not overlapping the target, so clamp even when that covers it.
+  const top = Math.max(MARGIN, Math.min(wanted, panelHeight - MARGIN - card.height));
   const left = Math.max(MARGIN, Math.min(target.left, panelWidth - MARGIN - card.width));
   return { top, left, side };
 }

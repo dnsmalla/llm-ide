@@ -5,6 +5,7 @@ import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } 
 import { Floating, Portal } from "./Floating";
 import { currentStep, isLastStep, tourReducer, type TourFlow, type TourState, type TourStep } from "./tour-model";
 import type { SectionId } from "./sections";
+import { pickTarget } from "./tour-target.ts";
 
 const TARGET_WAIT_MS = 1500;
 
@@ -17,20 +18,43 @@ export function useTour(): { tour: TourState | null; start: (flow: TourFlow) => 
   return { tour, start, next, back, skip };
 }
 
-/** Finds `[data-tour-id="id"]` in the live DOM, re-checking while it is missing (a step may follow a screen switch
- * that is still rendering), and gives up after TARGET_WAIT_MS so a step with no match still shows its card. */
+/** Finds `[data-tour-id="id"]` in the live DOM and keeps looking until one appears (a run reaching Done arrives late).
+ * Once found it is locked for the step: if it goes away (Start replaced by its own click) the spotlight drops rather
+ * than jumping to another match, such as the next card's Start. None found = card only. */
 function useTourTarget(targetId: string | undefined): HTMLElement | null {
   const [el, setEl] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setEl(null);
     if (!targetId) return undefined;
-    const find = () => document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
-    const found = find();
-    if (found) { setEl(found); return undefined; }
-    const mo = new MutationObserver(() => { const f = find(); if (f) { setEl(f); mo.disconnect(); } });
-    mo.observe(document.body, { childList: true, subtree: true });
-    const timeout = window.setTimeout(() => mo.disconnect(), TARGET_WAIT_MS);
-    return () => { mo.disconnect(); window.clearTimeout(timeout); };
+    const isLive = (node: HTMLElement): boolean => {
+      if (!node.isConnected) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    // Lock-on: once found, never jump to another match (every inbox card has a Start button).
+    let locked: HTMLElement | null = null;
+    const check = () => {
+      const candidates = locked ? [] : Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`));
+      const picked = pickTarget(locked, candidates, isLive);
+      if (picked) locked = picked;
+      setEl(picked);
+    };
+    // The desktop DOM churns constantly, so at most one layout read per frame.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => { frame = 0; check(); });
+    };
+    check();
+    // Never self-disconnects: the timeout only triggers one more check.
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "data-tour-id"] });
+    const timeout = window.setTimeout(check, TARGET_WAIT_MS);
+    return () => {
+      mo.disconnect();
+      window.clearTimeout(timeout);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [targetId]);
   return el;
 }
