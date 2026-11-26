@@ -32,7 +32,8 @@ export const OVERVIEW: OverviewContent = {
     'LLM-IDE sits quietly beside your meeting, captures every word, and lets AI do the heavy lifting — summarizing, analyzing, and answering your questions. You focus on the conversation. We take care of the notes.',
   ],
   pagesHeading: 'Your five-tab workspace',
-  pagesIntro: "LLM-IDE is organized into five pages. Each one handles a different part of the meeting workflow. Here's a quick map:",
+  pagesIntro:
+    "LLM-IDE is organized into five pages. Each one handles a different part of the meeting workflow. Here's a quick map:",
   pages: [
     {
       icon: 'mic',

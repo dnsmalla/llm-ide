@@ -768,8 +768,25 @@ export default function App() {
         )}
       </main>
 
-      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} onStartTour={(flow: TourFlow) => { setShowHelp(false); startTour(flow); }} />}
-      {tour && <TourOverlay tour={tour} activeTab={activeTab} onSelectTab={setActiveTab} onNext={nextTour} onBack={backTour} onSkip={skipTour} />}
+      {showHelp && (
+        <HelpPanel
+          onClose={() => setShowHelp(false)}
+          onStartTour={(flow: TourFlow) => {
+            setShowHelp(false);
+            startTour(flow);
+          }}
+        />
+      )}
+      {tour && (
+        <TourOverlay
+          tour={tour}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
+          onNext={nextTour}
+          onBack={backTour}
+          onSkip={skipTour}
+        />
+      )}
     </div>
   );
 }

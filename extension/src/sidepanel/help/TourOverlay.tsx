@@ -8,7 +8,13 @@ import type { Tab } from '../tabs';
 
 const TARGET_WAIT_MS = 1500;
 
-export function useTour(): { tour: TourState | null; start: (flow: TourFlow) => void; next: () => void; back: () => void; skip: () => void } {
+export function useTour(): {
+  tour: TourState | null;
+  start: (flow: TourFlow) => void;
+  next: () => void;
+  back: () => void;
+  skip: () => void;
+} {
   const [tour, dispatch] = useReducer(tourReducer, null);
   const start = useCallback((flow: TourFlow) => dispatch({ type: 'start', flow }), []);
   const next = useCallback(() => dispatch({ type: 'next' }), []);
@@ -44,12 +50,22 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     const mo = new MutationObserver(check);
     mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
     const timeout = window.setTimeout(check, TARGET_WAIT_MS);
-    return () => { mo.disconnect(); window.clearTimeout(timeout); };
+    return () => {
+      mo.disconnect();
+      window.clearTimeout(timeout);
+    };
   }, [targetId]);
   return el;
 }
 
-export default function TourOverlay({ tour, activeTab, onSelectTab, onNext, onBack, onSkip }: {
+export default function TourOverlay({
+  tour,
+  activeTab,
+  onSelectTab,
+  onNext,
+  onBack,
+  onSkip,
+}: {
   tour: TourState;
   activeTab: Tab;
   onSelectTab: (id: Tab) => void;
@@ -63,10 +79,15 @@ export default function TourOverlay({ tour, activeTab, onSelectTab, onNext, onBa
   // their own (e.g. to check something the step's copy referenced), honor that instead of snapping
   // them back on every render — end the tour rather than fight the user's navigation.
   const switchedForStep = useRef(false);
-  useEffect(() => { switchedForStep.current = false; }, [tour.index]);
+  useEffect(() => {
+    switchedForStep.current = false;
+  }, [tour.index]);
   useEffect(() => {
     if (!step.screenId) return;
-    if (step.screenId === activeTab) { switchedForStep.current = true; return; }
+    if (step.screenId === activeTab) {
+      switchedForStep.current = true;
+      return;
+    }
     if (!switchedForStep.current) {
       switchedForStep.current = true;
       onSelectTab(step.screenId);
@@ -77,7 +98,9 @@ export default function TourOverlay({ tour, activeTab, onSelectTab, onNext, onBa
   const target = useTourTarget(switching ? undefined : step.targetId);
   const last = isLastStep(tour);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onSkip(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onSkip();
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onSkip]);
@@ -89,25 +112,60 @@ export default function TourOverlay({ tour, activeTab, onSelectTab, onNext, onBa
   return (
     <div className="tour-layer" aria-hidden={false}>
       {rect ? (
-        <div aria-hidden="true" className="tour-spotlight" style={{ position: 'fixed', top: rect.top - 4, left: rect.left - 4, width: rect.width + 8, height: rect.height + 8, borderRadius: 8, boxShadow: '0 0 0 9999px rgba(10,10,14,0.55)', pointerEvents: 'none', zIndex: 999 }} />
+        <div
+          aria-hidden="true"
+          className="tour-spotlight"
+          style={{
+            position: 'fixed',
+            top: rect.top - 4,
+            left: rect.left - 4,
+            width: rect.width + 8,
+            height: rect.height + 8,
+            borderRadius: 8,
+            boxShadow: '0 0 0 9999px rgba(10,10,14,0.55)',
+            pointerEvents: 'none',
+            zIndex: 999,
+          }}
+        />
       ) : (
-        <div aria-hidden="true" className="tour-backdrop" style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,14,0.35)', pointerEvents: 'none', zIndex: 999 }} />
+        <div
+          aria-hidden="true"
+          className="tour-backdrop"
+          style={{ position: 'fixed', inset: 0, background: 'rgba(10,10,14,0.35)', pointerEvents: 'none', zIndex: 999 }}
+        />
       )}
       <div
         className="tour-card"
         role="dialog"
         aria-modal="true"
         aria-label={tour.flow.title}
-        ref={(el) => { if (el && (el.offsetWidth !== cardSize.width || el.offsetHeight !== cardSize.height)) setCardSize({ width: el.offsetWidth, height: el.offsetHeight }); }}
-        style={{ position: 'fixed', top: placed?.top ?? window.innerHeight / 2 - 70, left: placed?.left ?? 16, zIndex: 1000, width: 240 }}
+        ref={(el) => {
+          if (el && (el.offsetWidth !== cardSize.width || el.offsetHeight !== cardSize.height))
+            setCardSize({ width: el.offsetWidth, height: el.offsetHeight });
+        }}
+        style={{
+          position: 'fixed',
+          top: placed?.top ?? window.innerHeight / 2 - 70,
+          left: placed?.left ?? 16,
+          zIndex: 1000,
+          width: 240,
+        }}
       >
-        <p className="tour-step-count">{tour.flow.title} · step {tour.index + 1} of {tour.flow.steps.length}</p>
+        <p className="tour-step-count">
+          {tour.flow.title} · step {tour.index + 1} of {tour.flow.steps.length}
+        </p>
         <h4 className="tour-title">{step.title}</h4>
         <p className="tour-body">{step.body}</p>
         <div className="tour-actions">
-          <button type="button" className="btn btn-sm" onClick={onSkip}>Skip tour</button>
-          <button type="button" className="btn btn-sm" disabled={tour.index === 0} onClick={onBack}>← Back</button>
-          <button type="button" className="btn btn-sm btn-generate" onClick={last ? onSkip : onNext}>{last ? 'Finish' : 'Next →'}</button>
+          <button type="button" className="btn btn-sm" onClick={onSkip}>
+            Skip tour
+          </button>
+          <button type="button" className="btn btn-sm" disabled={tour.index === 0} onClick={onBack}>
+            ← Back
+          </button>
+          <button type="button" className="btn btn-sm btn-generate" onClick={last ? onSkip : onNext}>
+            {last ? 'Finish' : 'Next →'}
+          </button>
         </div>
       </div>
     </div>
