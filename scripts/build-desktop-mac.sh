@@ -49,6 +49,23 @@ case "$(uname -m)" in
   *) echo "unsupported CPU: $(uname -m)" >&2; exit 2 ;;
 esac
 
+# One build at a time per checkout: every build restages desktop/resources/core from scratch (even an in-app
+# rebuild with its own CARGO_TARGET_DIR), so a second build would delete the core the first one is bundling.
+# mkdir is atomic; a lock whose pid is gone was left by a killed build and is taken over.
+LOCK="$DESKTOP/resources/.build-desktop.lock"
+mkdir -p "$DESKTOP/resources"
+if ! mkdir "$LOCK" 2>/dev/null; then
+  OTHER="$(cat "$LOCK/pid" 2>/dev/null || true)"
+  if [ -n "$OTHER" ] && kill -0 "$OTHER" 2>/dev/null; then
+    echo "another desktop build is running (pid $OTHER); wait for it to finish" >&2
+    exit 1
+  fi
+  rm -rf "$LOCK"
+  mkdir "$LOCK"
+fi
+echo $$ >"$LOCK/pid"
+trap 'rm -rf "$LOCK"' EXIT
+
 # A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
 TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
 LOG_FILE="$TARGET_DIR/build-desktop.log"
