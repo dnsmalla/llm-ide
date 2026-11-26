@@ -6,7 +6,7 @@ status: stable
 # Agent tools — design and history
 
 !!! warning "The classic loop described below was deleted in API 92"
-    The two-agent text-fence loop (`runtime/loop.mjs`, `fence.mjs`, `route.mjs`) and `POST /code-assist` were removed in agent-kit K1 Phase 6. Chat runs on the Agent SDK engine (`llm_agent/sdk/`) or the multi-provider adapter (`llm_agent/adapter/`); `POST /code-assist` answers 410. Tool dispatch below shows the classic flow; read it as history; the live contracts are in `schema/agent-v2/SCHEMA.md` and `docs/spec/provider-catalog.md`.
+    The two-agent text-fence loop (`runtime/loop.mjs`, `fence.mjs`, `route.mjs`) and `POST /code-assist` were removed in agent-kit K1 Phase 6. Chat runs on the Agent SDK engine (`llm_agent/sdk/`) or the multi-provider adapter (`llm_agent/adapter/`); `POST /code-assist` answered 410 until it was removed in API 162 (now 404). Tool dispatch below shows the classic flow; read it as history; the live contracts are in `schema/agent-v2/SCHEMA.md` and `docs/spec/provider-catalog.md`.
 
 > Why the Code Assistant has the shape it does. For the day-to-day "how do I add a new tool" recipe, see [how-to/add-an-agent-skill.md](../how-to/add-an-agent-skill.md).
 

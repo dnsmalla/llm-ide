@@ -300,7 +300,7 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 ### 4.5 Chat-history retention
 
-There is none. The chat is read from the server on mount and held in memory only; `chatMessages` is no longer written (Q18). The side-panel chat is a live client of the Mac-managed server's v2 engine (`POST /agent/v2/stream`, mode `ask`, `agentContext.surface: "extension"`): the engine keeps the conversation, the meeting transcript is sent once and then only its new lines, and the trailing `MAX_HISTORY = 10` messages are sent only to seed a fresh engine session after `SESSION_UNRESUMABLE`. The user and assistant text is mirrored to the server's chat session rows (`/kb/chat/sessions`) so the Mac app archives the chat at quit. `/chat` answers 410 `ENDPOINT_REMOVED` from API 89.
+There is none. The chat is read from the server on mount and held in memory only; `chatMessages` is no longer written (Q18). The side-panel chat is a live client of the Mac-managed server's v2 engine (`POST /agent/v2/stream`, mode `ask`, `agentContext.surface: "extension"`): the engine keeps the conversation, the meeting transcript is sent once and then only its new lines, and the trailing `MAX_HISTORY = 10` messages are sent only to seed a fresh engine session after `SESSION_UNRESUMABLE`. The user and assistant text is mirrored to the server's chat session rows (`/kb/chat/sessions`) so the Mac app archives the chat at quit. `POST /chat` answered 410 from API 89 and was removed in API 162 (it now 404s like any unknown route).
 
 ---
 

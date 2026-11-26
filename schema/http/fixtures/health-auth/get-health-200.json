@@ -11,8 +11,6 @@
       "/generate-notes",
       "/generate-docx",
       "/generate-doc",
-      "/chat",
-      "/code-assist",
       "/agent/v2/stream",
       "/agent/v2/decision",
       "/agent/v2/session",

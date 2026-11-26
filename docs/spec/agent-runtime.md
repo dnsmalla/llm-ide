@@ -13,7 +13,7 @@ The following files are governed by this document.
 
 ### Core runtime modules
 
-The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence.mjs`, the `/code-assist` orchestrator `route.mjs` and the OpenAI tool translation `openai-tools.mjs`) was **deleted in API 92** (agent-kit K1 Phase 6). Every chat turn runs on the Claude Agent SDK engine (`extension/llm_agent/sdk/`) or, through the session router, on the multi-provider adapter (`extension/llm_agent/adapter/`); `POST /code-assist` answers 410. The former `runtime/` folder no longer exists (agent-kit K4): what stayed was relocated by owner and is shared by both engines:
+The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence.mjs`, the `/code-assist` orchestrator `route.mjs` and the OpenAI tool translation `openai-tools.mjs`) was **deleted in API 92** (agent-kit K1 Phase 6). Every chat turn runs on the Claude Agent SDK engine (`extension/llm_agent/sdk/`) or, through the session router, on the multi-provider adapter (`extension/llm_agent/adapter/`); `POST /code-assist` answered 410 until it was removed in API 162 (now 404). The former `runtime/` folder no longer exists (agent-kit K4): what stayed was relocated by owner and is shared by both engines:
 
 - `extension/llm_agent/tools/` — `registry.mjs`, `gates.mjs`, `global-handlers.mjs`, `decide.mjs` (Jev), `redaction.mjs` (sentinel neutralisation shared by all handlers) and `handlers/*`
 - `extension/llm_agent/modes/` — `mode-classify.mjs`, `mode-personas.mjs`, `model-tier.mjs` (per-tier model resolution)
