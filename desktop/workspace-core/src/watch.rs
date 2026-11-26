@@ -231,6 +231,52 @@ impl Drop for Watch {
     }
 }
 
+/// The one watcher of a process (the desktop keeps a `static`, the helper one per connection). Starting a new one
+/// drops the old, which stops its thread.
+pub struct WatchSlot {
+    current: std::sync::Mutex<Option<Watch>>,
+}
+
+impl WatchSlot {
+    /// `const` so the desktop can keep one instance in a `static`.
+    pub const fn new() -> Self {
+        Self { current: std::sync::Mutex::new(None) }
+    }
+
+    fn guard(&self) -> std::sync::MutexGuard<'_, Option<Watch>> {
+        self.current.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Starts watching `root` (nothing yet; call `set_dirs`), replacing the previous watcher. `force_poll` is for tests.
+    pub fn start(&self, root: &Path, force_poll: bool, sink: Box<dyn Fn(WatchBatch) + Send>) -> R<WatchStarted> {
+        let (watch, mode) = Watch::start(root, force_poll, sink)?;
+        *self.guard() = Some(watch);
+        Ok(WatchStarted { mode })
+    }
+
+    /// Replaces the watched folder set. Fails with `no_watch` when no watcher is running.
+    pub fn set_dirs(&self, dirs: &[String]) -> R<()> {
+        match self.guard().as_mut() {
+            Some(watch) => watch.set_dirs(dirs),
+            None => Err(FsError { code: "no_watch", message: "the file watcher is not running".into() }),
+        }
+    }
+
+    pub fn stop(&self) {
+        *self.guard() = None;
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.guard().is_some()
+    }
+}
+
+impl Default for WatchSlot {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The reply to a watch start: the mode the page shows (`native` or `poll`). Serialized as `{ "mode": ... }`.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct WatchStarted {

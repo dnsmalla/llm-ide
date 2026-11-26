@@ -670,6 +670,39 @@ pub struct Started {
     pub id: u64,
 }
 
+/// Validates the query, cancels the running search and starts this one through `run_on`, which decides the thread
+/// (the desktop uses its blocking pool, the helper a plain thread). Every event goes to `send`, which returns whether
+/// it was delivered. The last event is always a `Done` for this id: on a cancel while waiting for the run lock, on a
+/// late error and on a panic too, because the page waits for it. `searches` is a `&'static` registry or an `Arc`.
+pub fn spawn<H>(
+    searches: H,
+    root: PathBuf,
+    query: Query,
+    send: impl Fn(SearchEvent) -> bool + Send + 'static,
+    run_on: impl FnOnce(Box<dyn FnOnce() + Send + 'static>),
+) -> R<Started>
+where
+    H: std::ops::Deref<Target = Searches> + Send + 'static,
+{
+    validate(&query)?;
+    let (id, cancel) = searches.begin();
+    run_on(Box::new(move || {
+        let _running = searches.run_lock();
+        // A newer search may have cancelled this one while it waited for the lock.
+        if cancel.load(Ordering::Relaxed) {
+            send(aborted_done(id));
+            searches.finish(id);
+            return;
+        }
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_search(&root, &query, id, &cancel, &mut |ev| send(ev))));
+        if !matches!(ran, Ok(Ok(()))) {
+            send(aborted_done(id));
+        }
+        searches.finish(id);
+    }));
+    Ok(Started { id })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

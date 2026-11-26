@@ -16,9 +16,9 @@ use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
 use llmide_workspace_core::project::layout;
 use llmide_workspace_core::project::clone::{self, CloneRequest, Token};
-use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, Searches, Started};
+use llmide_workspace_core::search::{self, Query, Searches};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
-use llmide_workspace_core::watch::{Watch, WatchBatch, WatchStarted};
+use llmide_workspace_core::watch::{WatchBatch, WatchSlot};
 use llmide_workspace_core::{err, io_err, FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -147,7 +147,7 @@ pub struct Session {
     pub(crate) git_lookup: Box<dyn Fn() -> Option<PathBuf>>,
     trasher: Box<dyn Trasher>,
     root: Option<PathBuf>,
-    watch: Option<Watch>,
+    watch: WatchSlot,
 }
 
 /// Encodes an event payload. The core's event types always encode, so the fallback is only a guard against a panic.
@@ -167,7 +167,7 @@ impl Session {
 
     /// The trash is injected so tests never move anything into a real Trash.
     pub fn with_trasher(out: Arc<Out>, searches: Arc<Searches>, clones: Arc<Clones>, trasher: Box<dyn Trasher>) -> Self {
-        Self { out, searches, clones, git_lookup: Box::new(git_binary), trasher, root: None, watch: None }
+        Self { out, searches, clones, git_lookup: Box::new(git_binary), trasher, root: None, watch: WatchSlot::new() }
     }
 
     pub fn trasher(&self) -> &dyn Trasher {
@@ -257,22 +257,18 @@ impl Session {
     pub fn watch_start(&mut self) -> R<Value> {
         let root = self.root()?;
         let out = Arc::clone(&self.out);
-        let (watch, mode) = Watch::start(&root, false, Box::new(move |batch: WatchBatch| {
+        let started = self.watch.start(&root, false, Box::new(move |batch: WatchBatch| {
             out.send(&event("watch", encode(&batch)));
         }))?;
-        self.watch = Some(watch);
-        to_value(&WatchStarted { mode })
+        to_value(&started)
     }
 
     pub fn watch_set(&mut self, dirs: &[String]) -> R<Value> {
-        match self.watch.as_mut() {
-            Some(watch) => watch.set_dirs(dirs).map(|()| Value::Null),
-            None => err("no_watch", "the file watcher is not running"),
-        }
+        self.watch.set_dirs(dirs).map(|()| Value::Null)
     }
 
     pub fn watch_stop(&mut self) -> Value {
-        self.watch = None;
+        self.watch.stop();
         Value::Null
     }
 
@@ -280,27 +276,17 @@ impl Session {
     /// `search` events, and the last one is always `done` for this id, even after a late error or a panic.
     pub fn search_start(&mut self, query: Query) -> R<Value> {
         let root = self.root()?;
-        validate(&query)?;
-        let (id, cancel) = self.searches.begin();
         let out = Arc::clone(&self.out);
-        let searches = Arc::clone(&self.searches);
-        std::thread::spawn(move || {
-            let _running = searches.run_lock();
-            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                out.send(&event("search", encode(&aborted_done(id))));
-                searches.finish(id);
-                return;
-            }
-            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut sink = |ev: llmide_workspace_core::search::SearchEvent| out.send(&event("search", encode(&ev)));
-                run_search(&root, &query, id, &cancel, &mut sink)
-            }));
-            if !matches!(ran, Ok(Ok(()))) {
-                out.send(&event("search", encode(&aborted_done(id))));
-            }
-            searches.finish(id);
-        });
-        to_value(&Started { id })
+        search::spawn(
+            Arc::clone(&self.searches),
+            root,
+            query,
+            move |ev| out.send(&event("search", encode(&ev))),
+            |job| {
+                std::thread::spawn(job);
+            },
+        )
+        .and_then(|started| to_value(&started))
     }
 
     /// Starts a clone into the open project's `code/` folder on its own thread and returns at once. The outcome
@@ -359,7 +345,7 @@ impl Session {
     }
 
     fn stop_folder_work(&mut self) {
-        self.watch = None;
+        self.watch.stop();
         // A new id cancels the search that belongs to the previous folder.
         let _ = self.searches.begin();
     }
