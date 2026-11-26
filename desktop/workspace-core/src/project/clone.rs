@@ -291,7 +291,8 @@ fn clone_with_fallback(
     }
     // A stale/expired token must not make a public repository unclonable. Retry with the same URL and no
     // credential; if the repository is private this fails too and we return the original (clearer) error.
-    let _ = std::fs::remove_dir_all(dest);
+    // NOTE: no delete here. The failed attempt already removed the folder it created; deleting `dest` again
+    // could remove a concurrent clone that took the path in between.
     match clone_into(git, remote, dest, provider, None, cancel, CLONE_CAP, parent) {
         Ok(()) => Ok(()),
         Err(_) if cancel.load(Ordering::SeqCst) => Err(CANCELLED.into()),
@@ -372,6 +373,16 @@ fn clone_into(
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("cannot create code/: {e}"))?;
     }
+    // Claim the destination atomically. `destination()` checked `exists()` earlier, but another clone of the same
+    // repo can win the gap; `create_dir` fails if the path exists, so we never delete a folder we did not create.
+    // git clones into an existing EMPTY directory, so the claim does not change what git sees.
+    std::fs::create_dir(dest).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("code/{} already exists", dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+        } else {
+            format!("cannot create {}: {e}", dest.display())
+        }
+    })?;
     let (args, env) = clone_invocation(remote, dest, provider, token, cfg!(windows));
     // The child's environment is the inherited one minus config pairs, then the clone's own pair (if a token is set).
     // Set on this child only, never on the process.
@@ -383,11 +394,18 @@ fn clone_into(
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let child = cmd.spawn().map_err(|e| format!("cannot run git: {e}"))?;
+    let child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            // We created `dest` above, so removing it is safe.
+            let _ = std::fs::remove_dir_all(dest);
+            return Err(format!("cannot run git: {e}"));
+        }
+    };
     let (status, err) = match wait_capped(child, cap, cancel) {
         Ok(v) => v,
         Err(e) => {
-            // A killed clone leaves a partial folder; `destination` guaranteed it did not exist before.
+            // A killed clone leaves a partial folder; this call created `dest` (create_dir above), so it is ours to remove.
             let _ = std::fs::remove_dir_all(dest);
             return Err(e);
         }
@@ -395,7 +413,7 @@ fn clone_into(
     if status.success() {
         return Ok(());
     }
-    // A failed checkout (e.g. a missing LFS filter) leaves files but no index; `destination` guaranteed dest was new.
+    // A failed checkout (e.g. a missing LFS filter) leaves files but no index; this call created `dest`, so removing it cannot touch anyone else's folder.
     let _ = std::fs::remove_dir_all(dest);
     let msg: String = err.chars().filter(|c| !c.is_control()).take(400).collect();
     Err(if msg.trim().is_empty() { "git clone failed".into() } else { format!("git clone failed: {msg}") })
@@ -711,6 +729,34 @@ mod tests {
         let err = run(&p, None, &AtomicBool::new(false), &git).unwrap_err();
         assert!(err.contains("checkout failed"), "{err}");
         assert!(!p.dest.exists(), "the half-checked-out folder is removed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_destination_created_after_plan_is_refused_and_left_untouched() {
+        let s = Scratch::new("toctou");
+        // Records whether git ran at all: it must not.
+        let marker = s.0.join("git-ran");
+        let git = fake_git(&s.0, &format!("touch '{}'; exit 128", marker.display()));
+        let p = plan(&s.0, &request("github", "o/r", None)).unwrap();
+        // A concurrent clone of the same repo wins the gap between plan() and spawn.
+        std::fs::create_dir_all(&p.dest).unwrap();
+        std::fs::write(p.dest.join("precious.txt"), "keep").unwrap();
+        let err = run(&p, None, &AtomicBool::new(false), &git).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(std::fs::read_to_string(p.dest.join("precious.txt")).unwrap(), "keep", "someone else's folder survives");
+        assert!(!marker.exists(), "git is never spawned against a folder we did not create");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failure_after_this_call_created_the_destination_removes_it() {
+        let s = Scratch::new("own-failure");
+        let git = fake_git(&s.0, "echo 'boom' >&2; exit 1");
+        let p = plan(&s.0, &request("github", "o/r", None)).unwrap();
+        let err = run(&p, None, &AtomicBool::new(false), &git).unwrap_err();
+        assert!(err.contains("boom"), "{err}");
+        assert!(!p.dest.exists(), "the empty folder we created is removed");
     }
 
     #[cfg(unix)]
