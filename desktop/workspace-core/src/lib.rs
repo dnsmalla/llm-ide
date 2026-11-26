@@ -13,6 +13,7 @@
 //!   graph-file read of a project root.
 //! - `git`, `git_config`: the hardened git runner, status, diff and stage; `scm`: the Changes actions (discard, commit,
 //!   branches, stash, merge, amend) and `confirm_spec`, the one table of their native dialog wording.
+//! - `proc`: the capped wait for a child (pipes drained, process tree killed) that git, clone and credentials share.
 //! - `text`: single-line sanitising for text the user reads.
 //! - `wire`: the host/helper line protocol, its constants and typed replies, defined once.
 //! - `trash`: the only removal path. It moves to the OS trash and never deletes permanently.
@@ -23,6 +24,7 @@ pub mod git;
 pub mod git_config;
 pub mod scm;
 pub mod paths;
+pub mod proc;
 pub mod project;
 pub mod search;
 pub mod text;

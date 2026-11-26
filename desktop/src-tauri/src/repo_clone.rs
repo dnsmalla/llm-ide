@@ -13,7 +13,7 @@ use std::time::Duration;
 use llmide_workspace_core::project::clone::{plan, run, CloneRequest, CloneResult, Token, CLONE_CAP};
 use llmide_workspace_core::project::existing_clone::adopt_existing;
 use llmide_workspace_core::R;
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::workspace_backend::{self, Connector, Remote};
 
@@ -95,14 +95,8 @@ pub(crate) fn clone_request(
     folder: Option<String>,
     grant: Option<String>,
 ) -> Value {
-    let token = token.map(Token::from).filter(Token::is_usable);
-    let mut req: Value = json!({"provider": provider, "url": url, "folder": folder});
-    if let Some(token) = token.as_ref() {
-        req["token"] = json!(token.expose());
-    } else if let Some(grant) = grant {
-        req["grant"] = json!(grant);
-    }
-    req
+    let req = CloneRequest { provider, url, token: token.map(Token::from), folder, grant: grant.map(Token::from) };
+    serde_json::to_value(&req).unwrap_or(Value::Null)
 }
 
 /// SSH mode: the helper clones into the open server folder and the result is the local command's `{path, name}`.

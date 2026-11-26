@@ -17,6 +17,7 @@
 //! - Output is capped and every call has a wall-clock timeout; the child is killed on either.
 //! - Paths are the same relative, validated paths as the fs commands; `--` precedes them.
 
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -25,6 +26,7 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use crate::fs::split_rel;
+use crate::proc::{run_capped, Ending, Limits};
 use crate::{FsError, R};
 
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -487,42 +489,21 @@ pub fn run_git_opts(root: &Path, args: &[&str], cap: usize, opts: &Opts) -> R<Ou
             let _ = si.write_all(&data);
         });
     }
-    let mut so = child.stdout.take().expect("piped");
-    let mut se = child.stderr.take().expect("piped");
-    let err_thread = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = (&mut se).take(8192).read_to_end(&mut b);
-        // Keep draining so the child never blocks on a full pipe.
-        let _ = std::io::copy(&mut se, &mut std::io::sink());
-        b
-    });
-    let out_thread = std::thread::spawn(move || {
-        let mut b = Vec::new();
-        let _ = (&mut so).take(cap as u64 + 1).read_to_end(&mut b);
-        let over = b.len() > cap;
-        b.truncate(cap);
-        (b, over)
-    });
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(s)) => break Some(s),
-            Ok(None) if start.elapsed() > opts.timeout.unwrap_or_else(|| default_timeout(args)) => break None,
-            Ok(None) => std::thread::sleep(Duration::from_millis(5)),
-            Err(e) => return gerr("io", format!("git wait failed: {e}")),
-        }
+    let limits = Limits {
+        timeout: opts.timeout.unwrap_or_else(|| default_timeout(args)),
+        cancel: None,
+        stdout_cap: Some(cap),
+        // Eight KiB of stderr is enough for git's message; the rest is drained so the child never blocks.
+        stderr_keep: 8192,
         // Output cap reached: stop the child instead of waiting for it to fill the disk.
-        if out_thread.is_finished() {
-            kill_tree(&mut child);
-            break child.wait().ok();
-        }
+        stop_on_stdout_end: true,
     };
-    if status.is_none() {
-        kill_tree(&mut child);
-        let _ = child.wait();
-    }
-    let (stdout, truncated) = out_thread.join().unwrap_or_default();
-    let stderr = err_thread.join().unwrap_or_default();
+    let ran = run_capped(&mut child, &limits, |_| Ok(()));
+    let (stdout, truncated, stderr) = (ran.stdout, ran.stdout_truncated, ran.stderr);
+    let status = match ran.ending {
+        Ending::Exited(status) => Some(status),
+        _ => None,
+    };
     match status {
         // Nothing is cleaned up here: an `index.lock` left by the killed process may remain. Removing it blindly could
         // break a git running elsewhere, so the user decides.
@@ -741,6 +722,22 @@ impl ScmRoot {
     pub fn to_project(&self, rel: &str) -> String {
         if self.prefix.is_empty() { rel.to_string() } else { format!("{}/{rel}", self.prefix) }
     }
+}
+
+/// The inherited environment minus what could redirect git's config, repository or credential helpers: `GIT_DIR`,
+/// `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_NAMESPACE`, `GIT_ASKPASS` and every
+/// `GIT_CONFIG*` (the config-pair list, `GIT_CONFIG_GLOBAL`, ...) except `GIT_CONFIG_NOSYSTEM`.
+///
+/// NOTE: this is the UNION of two lists that used to differ. The credential helper dropped all of the above; the clone
+/// dropped only the `GIT_CONFIG_COUNT/KEY_n/VALUE_n` pairs. A clone now also ignores a `GIT_CONFIG_GLOBAL` or
+/// `GIT_ASKPASS` set in the caller's shell, which is what keeps an anonymous retry free of any inherited credential.
+pub fn scrub_env(parent: impl IntoIterator<Item = (OsString, OsString)>) -> Vec<(OsString, OsString)> {
+    const DROPPED: [&str; 7] =
+        ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ASKPASS", "GIT_NAMESPACE"];
+    let dropped = |name: &OsStr| {
+        name.to_str().is_some_and(|n| (n.starts_with("GIT_CONFIG") && n != "GIT_CONFIG_NOSYSTEM") || DROPPED.contains(&n))
+    };
+    parent.into_iter().filter(|(name, _)| !dropped(name)).collect()
 }
 
 /// The project folder when it is a repository, else the first clone under `code/` (the Loop's work-root rule).
@@ -1366,5 +1363,30 @@ u UU N... 1 2 3 4 h1 h2 h3 conflict.txt\0\
         fs::create_dir(&inner).unwrap();
         // `proj` has no .git of its own: refused up front, never the outer repo's status.
         assert_eq!(status(&inner).unwrap_err().code, "not_a_repo");
+    }
+}
+
+#[cfg(test)]
+mod scrub_tests {
+    use super::*;
+
+    #[test]
+    fn scrub_env_drops_redirects_and_keeps_the_rest() {
+        let pair = |k: &str, v: &str| (OsString::from(k), OsString::from(v));
+        let parent = vec![
+            pair("PATH", "/usr/bin"),
+            pair("GIT_CONFIG_COUNT", "1"),
+            pair("GIT_CONFIG_KEY_0", "k"),
+            pair("GIT_CONFIG_VALUE_12", "v"),
+            pair("GIT_CONFIG_GLOBAL", "/etc/g"),
+            pair("GIT_CONFIG_PARAMETERS", "p"),
+            pair("GIT_CONFIG_SYSTEM", "s"),
+            pair("GIT_CONFIG_NOSYSTEM", "1"),
+            pair("HOME", "/h"),
+            pair("GIT_DIR", "/x"),
+            pair("GIT_ASKPASS", "/y"),
+        ];
+        let names: Vec<String> = scrub_env(parent).into_iter().map(|(n, _)| n.to_string_lossy().into_owned()).collect();
+        assert_eq!(names, ["PATH", "GIT_CONFIG_NOSYSTEM", "HOME"]);
     }
 }

@@ -90,24 +90,6 @@ pub fn validate_name(raw: &str) -> Result<String, String> {
 
 // ---- time and ids ---------------------------------------------------------------------------
 
-/// `YYYY-MM-DDTHH:MM:SSZ` for a Unix time in seconds (UTC, no dependency).
-pub fn iso8601_utc(secs: u64) -> String {
-    let days = (secs / 86_400) as i64;
-    let rem = secs % 86_400;
-    // civil_from_days (Howard Hinnant), valid for the whole supported range.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
-}
-
 /// Time-prefixed random id, the shape of the Mac's `RandomID.generate()` (base-32 millis + 20 hex digits).
 fn random_id(now_ms: u64) -> String {
     let mut bytes = [0u8; 10];
@@ -137,7 +119,7 @@ pub struct NewProject {
 impl NewProject {
     pub fn fresh(display_name: &str) -> NewProject {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
-        NewProject { id: random_id(now), display_name: display_name.to_string(), language: "en".into(), created_iso: iso8601_utc(now / 1000) }
+        NewProject { id: random_id(now), display_name: display_name.to_string(), language: "en".into(), created_iso: crate::text::format_rfc3339_utc((now / 1000) as i64) }
     }
 }
 

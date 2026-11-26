@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
 use llmide_workspace_core::project::layout;
-use llmide_workspace_core::project::clone::{self, CloneRequest, Token};
+use llmide_workspace_core::project::clone::{self, CloneRequest, Credential, Token};
 use llmide_workspace_core::search::{self, Query, Searches};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
 use llmide_workspace_core::watch::{WatchBatch, WatchSlot};
@@ -203,7 +203,8 @@ impl Session {
         let real = home_path(raw)?;
         let root = confined(checked_root(&real)?)?;
         self.stop_folder_work();
-        let name = root.file_name().map_or_else(|| root.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
+        // The same display name the desktop shows for a local folder (control characters removed, capped).
+        let name = llmide_workspace_core::text::folder_display_name(&root);
         let reply = encode(&Opened { name, root: root.to_string_lossy().into_owned() });
         self.root = Some(root);
         Ok(reply)
@@ -304,8 +305,7 @@ impl Session {
         let Some((id, cancel)) = self.clones.begin() else {
             return err(BUSY_CODE, "a clone is already running on the server");
         };
-        let typed = req.token.clone();
-        let grant = req.grant.clone();
+        let credential = req.credential();
         let files = default_redeem_files();
         let out = Arc::clone(&self.out);
         let clones = Arc::clone(&self.clones);
@@ -314,7 +314,7 @@ impl Session {
             // The redeem runs here, not before the reply, so the started answer is not held up by it. It is inside
             // the same guard as the clone, so a panic in either still sends the event and frees the slot.
             let ran = catch_unwind(AssertUnwindSafe(|| {
-                let (token, redeem_failed) = resolve_token(typed, grant, files.as_ref());
+                let (token, redeem_failed) = resolve_token(credential, files.as_ref());
                 clone::run(&plan, token.as_ref(), &cancel, &git).map_err(|message| refused_message(message, redeem_failed))
             }));
             let data = match ran {
@@ -351,19 +351,20 @@ impl Session {
     }
 }
 
-/// The token a clone runs with, and whether a grant was given but could not be redeemed. A usable typed token always
-/// wins and no grant is redeemed then. A blank or unusable typed token does not count as one, so the grant is used.
-/// Without a usable typed token, the grant is redeemed on the server core over loopback.
-fn resolve_token(typed: Option<Token>, grant: Option<Token>, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
+/// The token a clone runs with, and whether a grant was given but could not be redeemed. Which credential counts is
+/// the core's rule (`CloneRequest::credential`): a usable typed token wins and no grant is redeemed. A grant is
+/// redeemed on the server core over loopback.
+fn resolve_token(credential: Credential, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
     // Test seam: a grant with this text makes the redeem panic, to prove the clone guard still reports and frees.
     #[cfg(test)]
-    if grant.as_ref().is_some_and(|g| g.expose() == PANIC_GRANT_FOR_TEST) {
+    if matches!(&credential, Credential::Grant(g) if g.expose() == PANIC_GRANT_FOR_TEST) {
         panic!("injected panic in resolve_token");
     }
-    if typed.as_ref().is_some_and(Token::is_usable) {
-        return (typed, false);
-    }
-    let Some(grant) = grant else { return (None, false) };
+    let grant = match credential {
+        Credential::Token(token) => return (Some(token), false),
+        Credential::Anonymous => return (None, false),
+        Credential::Grant(grant) => grant,
+    };
     let redeemed = files.ok_or(RedeemError::State).and_then(|files| clone_credential::redeem(files, &grant));
     match redeemed {
         Ok(token) => (Some(token), false),

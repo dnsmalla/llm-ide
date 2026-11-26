@@ -10,13 +10,15 @@
 //! verified by reading back with `git credential fill`. The webview chooses the host; that is accepted because the
 //! webview supplies the token itself.
 
-use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
+use std::ffi::OsString;
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use llmide_workspace_core::project::clone::Token;
+use llmide_workspace_core::git::scrub_env;
+use llmide_workspace_core::proc::{run_capped, Ending, Limits};
+use llmide_workspace_core::project::clone::{provider_username, Token};
 use serde::Serialize;
 
 use crate::workspace_backend::{self, CommandError};
@@ -77,14 +79,12 @@ fn normalize_host(base: &str) -> Result<String, String> {
 }
 
 fn derive_target(provider: &str, base_url: Option<&str>) -> Result<Target, String> {
-    match provider {
-        "github" => Ok(Target { host: "github.com".into(), username: "x-access-token" }),
-        "gitlab" => {
-            let base = base_url.map(str::trim).filter(|b| !b.is_empty()).unwrap_or("https://gitlab.com");
-            Ok(Target { host: normalize_host(base)?, username: "oauth2" })
-        }
-        _ => Err("unknown provider".into()),
+    let username = provider_username(provider).ok_or("unknown provider")?;
+    if provider == "github" {
+        return Ok(Target { host: "github.com".into(), username });
     }
+    let base = base_url.map(str::trim).filter(|b| !b.is_empty()).unwrap_or("https://gitlab.com");
+    Ok(Target { host: normalize_host(base)?, username })
 }
 
 /// The credential-protocol text. `password` is `None` for an erase or a read-back.
@@ -127,53 +127,22 @@ fn spawn_git(run: &GitRun, args: &[&str]) -> Result<std::process::Child, String>
     cmd.spawn().map_err(|e| format!("could not run git: {e}"))
 }
 
-/// Reads a pipe on its own thread and hands the bytes over a channel, so the caller can bound the wait: a helper
-/// that leaves a long-lived child holding the pipe open must not hang Save.
-fn drain<R: Read + Send + 'static>(stream: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(mut stream) = stream {
-            let _ = stream.by_ref().take(64 * 1024).read_to_end(&mut buf);
-        }
-        let _ = tx.send(buf);
-    });
-    rx
-}
-
 /// Runs git with `input` on stdin and waits at most `run.cap`, killing the whole process tree on a timeout or a
 /// failed stdin write. Errors never include the input.
 fn run_git(run: &GitRun, args: &[&str], input: &str) -> Result<GitOutput, String> {
     let mut child = spawn_git(run, args)?;
-    let out = drain(child.stdout.take());
-    let err = drain(child.stderr.take());
-    if let Some(mut stdin) = child.stdin.take() {
-        if let Err(e) = stdin.write_all(input.as_bytes()) {
-            llmide_workspace_core::git::kill_tree(&mut child);
-            let _ = child.wait();
-            return Err(format!("could not talk to git: {e}"));
-        }
-    }
-    let deadline = Instant::now() + run.cap;
-    let status = loop {
-        match child.try_wait().map_err(|e| format!("cannot wait for git: {e}"))? {
-            Some(status) => break status,
-            None if Instant::now() >= deadline => {
-                llmide_workspace_core::git::kill_tree(&mut child);
-                let _ = child.wait();
-                return Err(format!("git did not answer within {} seconds", run.cap.as_secs().max(1)));
-            }
-            None => std::thread::sleep(Duration::from_millis(20)),
-        }
-    };
-    // The output counts against the same cap; on a timeout whatever still holds the pipes is killed with the group.
-    let collect = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| rx.recv_timeout(deadline.saturating_duration_since(Instant::now()));
-    match (collect(&out), collect(&err)) {
-        (Ok(stdout), Ok(stderr)) => Ok(GitOutput { success: status.success(), stdout, stderr: String::from_utf8_lossy(&stderr).into_owned() }),
-        _ => {
-            llmide_workspace_core::git::kill_tree(&mut child);
-            Err(format!("git did not finish within {} seconds", run.cap.as_secs().max(1)))
-        }
+    // The pipes are drained (by `run_capped`) before the input is written, so git can never block on a full pipe.
+    let limits = Limits { timeout: run.cap, cancel: None, stdout_cap: Some(64 * 1024), stderr_keep: 64 * 1024, stop_on_stdout_end: false };
+    let seconds = run.cap.as_secs().max(1);
+    let ran = run_capped(&mut child, &limits, |child| match child.stdin.take() {
+        Some(mut stdin) => stdin.write_all(input.as_bytes()),
+        None => Ok(()),
+    });
+    match ran.ending {
+        Ending::Exited(status) => Ok(GitOutput { success: status.success(), stdout: ran.stdout, stderr: String::from_utf8_lossy(&ran.stderr).into_owned() }),
+        Ending::FeedFailed(e) => Err(format!("could not talk to git: {e}")),
+        Ending::TimedOut | Ending::Cancelled => Err(format!("git did not answer within {seconds} seconds")),
+        Ending::PipesHeld => Err(format!("git did not finish within {seconds} seconds")),
     }
 }
 
@@ -336,19 +305,10 @@ fn erase_with(run: &GitRun, provider: &str, base_url: Option<&str>) -> Result<Gi
     }
 }
 
-/// The inherited environment minus what could redirect git's config or repository: a pair set in the caller's
-/// shell (`GIT_CONFIG_COUNT`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_GLOBAL`, ...) or `GIT_DIR` would change which
-/// helper runs. Same idea as `inherited_env` in the core's clone.
-fn inherited_env(parent: Vec<(OsString, OsString)>) -> Vec<(OsString, OsString)> {
-    const DROPPED: [&str; 7] = ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ASKPASS", "GIT_NAMESPACE"];
-    let dropped = |name: &OsStr| name.to_str().is_some_and(|n| (n.starts_with("GIT_CONFIG") && n != "GIT_CONFIG_NOSYSTEM") || DROPPED.contains(&n));
-    parent.into_iter().filter(|(name, _)| !dropped(name)).collect()
-}
-
 fn production_run() -> Option<GitRun> {
     let git = llmide_workspace_core::git::git_binary()?;
     let ledger = crate::fsutil::desktop_data_dir().ok().map(|dir| dir.join("git-credential-ledger.json"));
-    Some(GitRun { git, env: inherited_env(std::env::vars_os().collect()), cwd: std::env::temp_dir(), cap: GIT_CAP, ledger })
+    Some(GitRun { git, env: scrub_env(std::env::vars_os()), cwd: std::env::temp_dir(), cap: GIT_CAP, ledger })
 }
 
 /// Outside local mode git runs elsewhere (SSH) or not at all (hub); report why instead of touching this machine.
@@ -388,6 +348,7 @@ pub async fn git_credential_erase(provider: String, base_url: Option<String>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn host_of(provider: &str, base: Option<&str>) -> Result<String, String> {
@@ -428,15 +389,6 @@ mod tests {
         let target = derive_target("gitlab", None).unwrap();
         assert_eq!(credential_input(&target, Some("tok")), "protocol=https\nhost=gitlab.com\nusername=oauth2\npassword=tok\n\n");
         assert_eq!(credential_input(&target, None), "protocol=https\nhost=gitlab.com\nusername=oauth2\n\n");
-    }
-
-    #[test]
-    fn inherited_env_drops_config_and_repo_redirects() {
-        let parent = ["PATH", "HOME", "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM", "GIT_CONFIG_NOSYSTEM", "GIT_DIR", "GIT_ASKPASS"]
-            .map(|name| (OsString::from(name), OsString::from("x")))
-            .to_vec();
-        let kept: Vec<_> = inherited_env(parent).into_iter().map(|(name, _)| name).collect();
-        assert_eq!(kept, vec![OsString::from("PATH"), OsString::from("HOME"), OsString::from("GIT_CONFIG_NOSYSTEM")]);
     }
 
     struct Sandbox {

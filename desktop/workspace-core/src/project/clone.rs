@@ -5,14 +5,16 @@
 //! error or a log. `Token` redacts itself in `Debug` and `Display` and has no `Serialize`, so it cannot leave by
 //! accident. The destination is chosen by the caller's root and is always `<root>/code/<name>`.
 
-use std::ffi::{OsStr, OsString};
-use std::io::Read;
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+
+use crate::git::scrub_env;
+use crate::proc::{run_capped, Ending, Limits};
 
 /// Error text of a clone that was stopped by its cancel flag. The desktop and the helper both show it as is.
 pub const CANCELLED: &str = "clone cancelled";
@@ -71,6 +73,55 @@ pub struct CloneRequest {
     /// only when no typed `token` is set. Absent from requests that come from an older desktop.
     #[serde(default)]
     pub grant: Option<Token>,
+}
+
+/// Which credential a clone request runs with. Exactly one applies, whatever else the request carries.
+pub enum Credential {
+    /// A usable typed token. It always wins, and no grant is redeemed.
+    Token(Token),
+    /// No usable typed token, but a grant: the helper redeems it for the saved token.
+    Grant(Token),
+    Anonymous,
+}
+
+impl CloneRequest {
+    /// The one rule for which credential counts: a usable typed token beats a grant, and a blank or unusable typed
+    /// token does not count as a token, so the grant (if any) is used. The desktop applies it before sending, the
+    /// helper after receiving, so a request never carries both and the helper never sees a token it should not use.
+    pub fn credential(&self) -> Credential {
+        match (&self.token, &self.grant) {
+            (Some(token), _) if token.is_usable() => Credential::Token(token.clone()),
+            (_, Some(grant)) => Credential::Grant(grant.clone()),
+            _ => Credential::Anonymous,
+        }
+    }
+}
+
+/// The request as the desktop sends it to the helper: the credential rule applied, `folder` as `null` when absent.
+/// This is the ONLY place a token or grant is serialised, and only into the helper's stdin request.
+impl Serialize for CloneRequest {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let (token, grant) = match self.credential() {
+            Credential::Token(token) => (Some(token), None),
+            Credential::Grant(grant) => (None, Some(grant)),
+            Credential::Anonymous => (None, None),
+        };
+        // Keys in sorted order, the order the wire has always had.
+        let mut out = serializer.serialize_struct("CloneRequest", 5)?;
+        out.serialize_field("folder", &self.folder)?;
+        match &grant {
+            Some(grant) => out.serialize_field("grant", grant.expose())?,
+            None => out.skip_field("grant")?,
+        }
+        out.serialize_field("provider", &self.provider)?;
+        match &token {
+            Some(token) => out.serialize_field("token", token.expose())?,
+            None => out.skip_field("token")?,
+        }
+        out.serialize_field("url", &self.url)?;
+        out.end()
+    }
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -192,18 +243,32 @@ pub fn base64(input: &[u8]) -> String {
     out
 }
 
+const GITHUB_USERNAME: &str = "x-access-token";
+
+/// The HTTP username a provider's token is used with: GitHub takes any user with a token as the password, and
+/// GitLab's git endpoint wants the literal `oauth2`. `None` for a provider this app does not know. The desktop's
+/// credential store and the clone's header both read it here, so they cannot disagree.
+pub fn provider_username(provider: &str) -> Option<&'static str> {
+    match provider {
+        "github" => Some(GITHUB_USERNAME),
+        "gitlab" => Some("oauth2"),
+        _ => None,
+    }
+}
+
 /// `http.<scope>.extraHeader` + value for one provider/token; empty when no token.
 pub fn auth_config(provider: &str, token: Option<&str>) -> (String, String) {
     let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) else { return (String::new(), String::new()) };
     // Git's key is `http.<url>.<variable>`: `http.https://github.com.extraHeader`.
     let scope = if provider == "gitlab" { "https://gitlab.com" } else { "https://github.com" };
+    let username = provider_username(provider).unwrap_or(GITHUB_USERNAME);
     let key = format!("http.{scope}.extraHeader");
     let value = if provider == "gitlab" {
         // GitLab's git endpoint ignores `PRIVATE-TOKEN` (that header is for its REST API): a private repository then
         // fails with "could not read Username". It honours HTTP Basic with the literal user `oauth2` and the token.
-        format!("Authorization: Basic {}", base64(format!("oauth2:{token}").as_bytes()))
+        format!("Authorization: Basic {}", base64(format!("{username}:{token}").as_bytes()))
     } else {
-        format!("Authorization: Basic {}", base64(format!("x-access-token:{token}").as_bytes()))
+        format!("Authorization: Basic {}", base64(format!("{username}:{token}").as_bytes()))
     };
     (key, value)
 }
@@ -234,19 +299,6 @@ pub fn is_auth_failure(message: &str) -> bool {
 /// This process's environment, the one git inherits. Passed down so a test can supply its own.
 fn process_env() -> Vec<(OsString, OsString)> {
     std::env::vars_os().collect()
-}
-
-/// True for the variables that make up git's config-pair list (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`,
-/// `GIT_CONFIG_VALUE_<n>`). These are the only way a header reaches git from the environment.
-fn is_git_config_pair(name: &OsStr) -> bool {
-    let Some(name) = name.to_str() else { return false };
-    name == "GIT_CONFIG_COUNT" || name.starts_with("GIT_CONFIG_KEY_") || name.starts_with("GIT_CONFIG_VALUE_")
-}
-
-/// The inherited environment minus any config pair. A pair set in the caller's shell (an `extraHeader`, say) would
-/// otherwise reach git on the anonymous retry, which must send no credential at all.
-fn inherited_env(parent: &[(OsString, OsString)]) -> Vec<(OsString, OsString)> {
-    parent.iter().filter(|(name, _)| !is_git_config_pair(name)).cloned().collect()
 }
 
 /// Appends the Homebrew dirs missing from `parent`'s PATH on macOS, so git finds `git-lfs` when the app was launched
@@ -327,32 +379,12 @@ pub(crate) fn clone_invocation(remote: &str, dest: &Path, provider: &str, token:
 /// Waits for `child` for at most `cap`, or until `cancel` is set; the whole process tree is killed on either.
 /// Returns the status and stderr, or the cap / cancel error.
 fn wait_capped(mut child: Child, cap: Duration, cancel: &AtomicBool) -> Result<(ExitStatus, String), String> {
-    let mut stderr = child.stderr.take();
-    // Drained on its own thread: a full pipe would otherwise stall git while we poll.
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(s) = stderr.as_mut() {
-            let _ = s.take(64 * 1024).read_to_end(&mut buf);
-            let _ = std::io::copy(s, &mut std::io::sink());
-        }
-        String::from_utf8_lossy(&buf).into_owned()
-    });
-    let deadline = Instant::now() + cap;
-    loop {
-        match child.try_wait().map_err(|e| format!("cannot wait for git: {e}"))? {
-            Some(status) => return Ok((status, reader.join().unwrap_or_default())),
-            None if cancel.load(Ordering::SeqCst) => {
-                crate::git::kill_tree(&mut child);
-                let _ = child.wait();
-                return Err(CANCELLED.into());
-            }
-            None if Instant::now() >= deadline => {
-                crate::git::kill_tree(&mut child);
-                let _ = child.wait();
-                return Err(format!("git clone timed out after {} minutes", cap.as_secs() / 60));
-            }
-            None => std::thread::sleep(Duration::from_millis(100)),
-        }
+    let limits = Limits { timeout: cap, cancel: Some(cancel), stdout_cap: None, stderr_keep: 64 * 1024, stop_on_stdout_end: false };
+    let ran = run_capped(&mut child, &limits, |_| Ok(()));
+    match ran.ending {
+        Ending::Exited(status) => Ok((status, String::from_utf8_lossy(&ran.stderr).into_owned())),
+        Ending::Cancelled => Err(CANCELLED.into()),
+        Ending::TimedOut | Ending::PipesHeld | Ending::FeedFailed(_) => Err(format!("git clone timed out after {} minutes", cap.as_secs() / 60)),
     }
 }
 
@@ -387,7 +419,7 @@ fn clone_into(
     // The child's environment is the inherited one minus config pairs, then the clone's own pair (if a token is set).
     // Set on this child only, never on the process.
     let mut cmd = Command::new(git);
-    cmd.args(&args).env_clear().envs(with_git_lfs_dirs(inherited_env(parent), cfg!(target_os = "macos"))).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(&args).env_clear().envs(with_git_lfs_dirs(scrub_env(parent.iter().cloned()), cfg!(target_os = "macos"))).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         // Own process group, so the cap and the cancel flag can kill git together with its helpers (kill_tree).
@@ -422,6 +454,7 @@ fn clone_into(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     /// Owns a scratch folder and removes it on drop, so a failing test leaves nothing behind.
     struct Scratch(PathBuf);
@@ -697,19 +730,6 @@ mod tests {
     }
 
     #[test]
-    fn inherited_env_drops_only_the_config_pairs() {
-        let parent = vec![
-            (OsString::from("PATH"), OsString::from("/usr/bin")),
-            (OsString::from("GIT_CONFIG_COUNT"), OsString::from("1")),
-            (OsString::from("GIT_CONFIG_KEY_0"), OsString::from("k")),
-            (OsString::from("GIT_CONFIG_VALUE_12"), OsString::from("v")),
-            (OsString::from("GIT_CONFIG_GLOBAL"), OsString::from("/dev/null")),
-        ];
-        let names: Vec<String> = inherited_env(&parent).into_iter().map(|(n, _)| n.to_string_lossy().into_owned()).collect();
-        assert_eq!(names, ["PATH", "GIT_CONFIG_GLOBAL"]);
-    }
-
-    #[test]
     fn git_lfs_dirs_are_appended_on_macos_only() {
         let env = |path: &str| vec![(OsString::from("PATH"), OsString::from(path))];
         let path_of = |e: Vec<(OsString, OsString)>| e[0].1.to_string_lossy().into_owned();
@@ -788,5 +808,44 @@ mod tests {
         assert_eq!(base64(b"oauth2:glpat"), "b2F1dGgyOmdscGF0");
         assert_eq!(auth_config("github", None), (String::new(), String::new()));
         assert_eq!(base64(b"x-access-token:tok"), "eC1hY2Nlc3MtdG9rZW46dG9r");
+    }
+}
+
+#[cfg(test)]
+mod request_wire_tests {
+    use super::*;
+
+    fn request(token: Option<&str>, grant: Option<&str>, folder: Option<&str>) -> CloneRequest {
+        CloneRequest {
+            provider: "github".into(),
+            url: "o/r".into(),
+            token: token.map(|t| Token(t.into())),
+            folder: folder.map(Into::into),
+            grant: grant.map(|g| Token(g.into())),
+        }
+    }
+
+    #[test]
+    fn the_request_bytes_match_the_historic_wire() {
+        let wire = |req: &CloneRequest| serde_json::to_string(req).unwrap();
+        assert_eq!(wire(&request(None, None, None)), r#"{"folder":null,"provider":"github","url":"o/r"}"#);
+        assert_eq!(wire(&request(Some("ghp_x"), None, Some("sub"))), r#"{"folder":"sub","provider":"github","token":"ghp_x","url":"o/r"}"#);
+        assert_eq!(wire(&request(None, Some("ab12"), None)), r#"{"folder":null,"grant":"ab12","provider":"github","url":"o/r"}"#);
+    }
+
+    #[test]
+    fn a_usable_typed_token_beats_the_grant_and_a_blank_one_does_not() {
+        assert!(matches!(request(Some("ghp_x"), Some("ab12"), None).credential(), Credential::Token(_)));
+        assert!(matches!(request(Some("   "), Some("ab12"), None).credential(), Credential::Grant(_)));
+        assert!(matches!(request(Some("   "), None, None).credential(), Credential::Anonymous));
+        let both = serde_json::to_string(&request(Some("ghp_x"), Some("ab12"), None)).unwrap();
+        assert!(!both.contains("grant"), "the helper never sees both: {both}");
+    }
+
+    #[test]
+    fn providers_map_to_their_http_username() {
+        assert_eq!(provider_username("github"), Some("x-access-token"));
+        assert_eq!(provider_username("gitlab"), Some("oauth2"));
+        assert_eq!(provider_username("bitbucket"), None);
     }
 }

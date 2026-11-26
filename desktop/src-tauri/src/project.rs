@@ -24,8 +24,6 @@ use serde::Serialize;
 pub const MAX_RECENT: usize = 10;
 /// A recent-projects file larger than this is ignored.
 const RECENT_FILE_MAX_BYTES: u64 = 64 * 1024;
-/// Display names are capped (tray label, UI).
-const NAME_MAX_CHARS: usize = 60;
 
 static ACTIVE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -60,8 +58,7 @@ pub fn validate_root(chosen: &Path) -> Result<PathBuf, String> {
 }
 
 fn display_name(root: &Path) -> String {
-    let n = root.file_name().and_then(|n| n.to_str()).unwrap_or("project");
-    n.chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect()
+    llmide_workspace_core::text::folder_display_name(root)
 }
 
 fn info(root: &Path) -> ProjectInfo {
@@ -128,6 +125,8 @@ pub fn now_rfc3339() -> String {
     format_rfc3339_utc(secs)
 }
 
+pub use llmide_workspace_core::text::format_rfc3339_utc;
+
 fn days_in_month(year: i64, month: i64) -> i64 {
     match month {
         2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
@@ -135,23 +134,6 @@ fn days_in_month(year: i64, month: i64) -> i64 {
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     }
-}
-
-/// `secs` since the epoch as `YYYY-MM-DDTHH:MM:SSZ` (proleptic Gregorian, UTC).
-pub fn format_rfc3339_utc(secs: i64) -> String {
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    // Howard Hinnant's civil-from-days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 /// Strict RFC 3339 UTC: `YYYY-MM-DDTHH:MM:SS`, optional fraction (1 to 9 digits), then `Z`. No offsets.
@@ -411,7 +393,7 @@ pub fn recent_with_status(dir: &Path) -> RecentList {
                     } else {
                         ("missing", "This is no longer a folder.".to_string())
                     };
-                    let name: String = path.file_name().and_then(|n| n.to_str()).unwrap_or("project").chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect();
+                    let name = display_name(path);
                     RecentEntry { name, root: p.chars().filter(|c| !c.is_control()).collect(), status, reason: Some(reason), open_index: None, stored_index, opened_at }
                 }
             }
@@ -599,7 +581,7 @@ mod tests {
     #[test]
     fn display_name_is_capped_and_clean() {
         let long = format!("/x/{}", "a".repeat(200));
-        assert_eq!(display_name(Path::new(&long)).chars().count(), NAME_MAX_CHARS);
+        assert_eq!(display_name(Path::new(&long)).chars().count(), llmide_workspace_core::text::FOLDER_NAME_MAX_CHARS);
     }
 
     #[test]
