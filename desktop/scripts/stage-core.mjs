@@ -9,7 +9,8 @@
 // DB files) are never copied. Usage:
 //   node scripts/stage-core.mjs [--target darwin-arm64|darwin-x64|win32-x64|linux-x64]
 import { execFileSync } from 'node:child_process';
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { PIN, fetchNodeRuntime, hostTarget, installNode, pinFor } from './node-runtime.mjs';
 import { removeSdkBinaryPackages, sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
@@ -26,6 +27,10 @@ function outDir(argv, fallback) {
   return value;
 }
 const OUT = outDir(process.argv, join(DESKTOP, 'resources', 'core'));
+// Pruned production node_modules from the last stage, one entry per target (see step 3).
+const DEPS_CACHE = process.env.LLMIDE_STAGE_CACHE || join(DESKTOP, 'resources', '.deps-cache');
+// LLMIDE_BUILD_VERBOSE=1 prints the size table and per-step detail; a normal build prints one summary line.
+const VERBOSE = process.env.LLMIDE_BUILD_VERBOSE === '1';
 
 // --target <platform>-<arch> (Node process names: darwin-arm64, darwin-x64, win32-x64, linux-x64);
 // default is the machine running this script.
@@ -78,7 +83,7 @@ if (nodeBin) {
   try {
     nodeBin = await fetchNodeRuntime(TARGET);
     nodeInfo = { version: nodeBin.version, sha256: nodeBin.sha256 };
-    console.log(`node ${nodeBin.version} (${TARGET}) verified sha256 ${nodeBin.sha256}`);
+    if (VERBOSE) console.log(`node ${nodeBin.version} (${TARGET}) verified sha256 ${nodeBin.sha256}`);
   } catch (e) {
     console.error(`staging failed: ${e.message}`);
     process.exit(2);
@@ -113,6 +118,66 @@ function walk(dir, visit) {
   }
 }
 
+
+function depsCacheKey() {
+  const hash = createHash('sha256').update(`sdk=${sdkBinaryAllowed()}\0`);
+  for (const f of [join(REPO, 'extension', 'package.json'), join(REPO, 'extension', 'package-lock.json'),
+    join(DESKTOP, 'scripts', 'stage-core.mjs'), join(DESKTOP, 'scripts', 'sdk-binary.mjs')]) {
+    hash.update(readFileSync(f)).update('\0');
+  }
+  return `${TARGET}-${hash.digest('hex').slice(0, 24)}`;
+}
+
+// Replaces this target's previous entry, so the cache holds at most one node_modules (~60 MB) per target.
+function saveDepsCache(src, key) {
+  const tmp = join(DEPS_CACHE, `.tmp-${process.pid}`);
+  try {
+    mkdirSync(DEPS_CACHE, { recursive: true });
+    for (const name of readdirSync(DEPS_CACHE)) {
+      if (name.startsWith(`${TARGET}-`)) rmSync(join(DEPS_CACHE, name), { recursive: true, force: true });
+    }
+    cpSync(src, join(tmp, 'node_modules'), { recursive: true, verbatimSymlinks: true });
+    renameSync(tmp, join(DEPS_CACHE, key));
+  } catch (e) {
+    // An unwritable cache only costs the next build its ~30 s; never fail the stage for it.
+    console.warn(`warning: deps cache not saved: ${e.message.split('\n')[0]}`);
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+// Drops other-platform prebuilds, sources, docs and sourcemaps; returns how many entries were removed.
+function pruneNodeModules(nm) {
+  rmSync(join(nm, '.bin'), { recursive: true, force: true });
+  rmSync(join(nm, '@rollup'), { recursive: true, force: true }); // vite-only optional dep
+  const bsPre = join(nm, 'better-sqlite3', 'prebuilds');
+  if (existsSync(bsPre)) {
+    // better-sqlite3 13 ships N-API prebuilds for every target inside the package (named
+    // <platform>-<arch>.node, same as TARGET), so no ABI match with the bundled node is needed.
+    for (const f of readdirSync(bsPre)) if (f !== `${TARGET}.node`) rmSync(join(bsPre, f));
+  }
+  if (!existsSync(join(bsPre, `${TARGET}.node`))) {
+    console.error(`staging failed: better-sqlite3 has no prebuild for ${TARGET} (${bsPre})`);
+    process.exit(1);
+  }
+  for (const d of ['deps', 'src', 'build']) rmSync(join(nm, 'better-sqlite3', d), { recursive: true, force: true });
+  // `.claude` too: published packages can carry a maintainer's local agent
+  // settings (thread-stream does), which have no business in the app.
+  const DROP_DIRS = new Set(['test', 'tests', '__tests__', 'docs', 'doc', 'example', 'examples', '.github', '.claude']);
+  const DROP_FILE = /(\.map|\.d\.ts|\.md|\.markdown|\.ts)$|^(README|CHANGELOG|HISTORY|LICENSE|LICENCE|CONTRIBUTING|AUTHORS)/i;
+  let count = 0;
+  walk(nm, (p, isDir) => {
+    const name = basename(p);
+    if (isDir) {
+      if (DROP_DIRS.has(name) && existsSync(p)) { count++; rmSync(p, { recursive: true, force: true }); }
+      return;
+    }
+    if (DROP_FILE.test(name) && !p.includes(`${join('better-sqlite3', 'lib')}`)) {
+      if (existsSync(p)) { unlinkSync(p); count++; }
+    }
+  });
+  return count;
+}
+
 // Taken before anything is copied: build.rs compares it with the current source and refuses a stale stage.
 const SOURCE_HASH = sourceHash();
 rmSync(OUT, { recursive: true, force: true });
@@ -139,7 +204,7 @@ if (existsSync(gk)) {
   const gkOut = join(OUT, 'root', 'graph-kit', 'bin');
   mkdirSync(gkOut, { recursive: true });
   copyFileSync(gk, join(gkOut, 'graph-kit.js'));
-  console.log(`graph-kit CLI staged (${Math.round(statSync(gk).size / 1024)} KiB)`);
+  if (VERBOSE) console.log(`graph-kit CLI staged (${Math.round(statSync(gk).size / 1024)} KiB)`);
 } else if (process.env.LLMIDE_STAGE_RELEASE === '1') {
   // graph-kit/bin/graph-kit.js is committed in the submodule; missing means the checkout was skipped.
   console.error(`graph-kit CLI not found at ${gk}: run \`git submodule update --init graph-kit\``);
@@ -160,48 +225,35 @@ for (const name of readdirSync(join(REPO, 'extension'))) {
 for (const f of ['package.json', 'package-lock.json']) {
   if (!existsSync(join(extOut, f))) copyFileSync(join(REPO, 'extension', f), join(extOut, f));
 }
-// npm is npm.cmd on Windows, which only runs through a shell.
-execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: extOut, stdio: 'inherit', shell: process.platform === 'win32' });
-const nmBefore = dirBytes(join(extOut, 'node_modules'));
-
-// 3. Prune node_modules: other-platform prebuilds, sources, docs, sourcemaps.
+// 3. Production node_modules. `npm ci` + prune takes ~30 s and downloads ~500 MB, yet the result depends only on
+// the lock files, the target and the prune rules; reuse the last pruned copy when none of those changed.
+// LLMIDE_STAGE_NO_CACHE=1 forces a fresh install. The SDK-binary and must-not-ship gates below run either way.
 const nm = join(extOut, 'node_modules');
-rmSync(join(nm, '.bin'), { recursive: true, force: true });
-rmSync(join(nm, '@rollup'), { recursive: true, force: true }); // vite-only optional dep
-const bsPre = join(nm, 'better-sqlite3', 'prebuilds');
-if (existsSync(bsPre)) {
-  // better-sqlite3 13 ships N-API prebuilds for every target inside the package (named
-  // <platform>-<arch>.node, same as TARGET), so no ABI match with the bundled node is needed.
-  for (const f of readdirSync(bsPre)) if (f !== `${TARGET}.node`) rmSync(join(bsPre, f));
-}
-if (!existsSync(join(bsPre, `${TARGET}.node`))) {
-  console.error(`staging failed: better-sqlite3 has no prebuild for ${TARGET} (${bsPre})`);
-  process.exit(1);
-}
-for (const d of ['deps', 'src', 'build']) rmSync(join(nm, 'better-sqlite3', d), { recursive: true, force: true });
-// `.claude` too: published packages can carry a maintainer's local agent
-// settings (thread-stream does), which have no business in the app.
-const DROP_DIRS = new Set(['test', 'tests', '__tests__', 'docs', 'doc', 'example', 'examples', '.github', '.claude']);
-const DROP_FILE = /(\.map|\.d\.ts|\.md|\.markdown|\.ts)$|^(README|CHANGELOG|HISTORY|LICENSE|LICENCE|CONTRIBUTING|AUTHORS)/i;
-const dropped = [];
-walk(nm, (p, isDir) => {
-  const name = basename(p);
-  if (isDir) {
-    if (DROP_DIRS.has(name) && existsSync(p)) { dropped.push(p); rmSync(p, { recursive: true, force: true }); }
-    return;
-  }
-  if (DROP_FILE.test(name) && !p.includes(`${join('better-sqlite3', 'lib')}`)) {
-    if (existsSync(p)) { unlinkSync(p); dropped.push(p); }
-  }
-});
-const nmAfter = dirBytes(nm);
-
-// Phase 0 condition 2: never ship the SDK's platform `claude` binary (see sdk-binary.mjs).
-if (sdkBinaryAllowed()) {
-  console.warn('warning: LLMIDE_STAGE_ALLOW_SDK_BINARY=1, the SDK claude binary stays in the stage (not for release)');
+const depsKey = depsCacheKey();
+const cachedNm = join(DEPS_CACHE, depsKey, 'node_modules');
+let nmBefore = null; // unknown on a cache hit
+let dropped = 0;
+if (process.env.LLMIDE_STAGE_NO_CACHE !== '1' && existsSync(cachedNm)) {
+  cpSync(cachedNm, nm, { recursive: true, verbatimSymlinks: true });
+  console.log('node_modules reused (lock files unchanged)');
 } else {
-  const removedSdk = removeSdkBinaryPackages(nm);
-  if (removedSdk.length) console.log(`removed SDK claude binary package(s): ${removedSdk.map((p) => basename(p)).join(', ')}`);
+  // npm is npm.cmd on Windows, which only runs through a shell. --loglevel=error: the EBADENGINE notices compare
+  // engines with the BUILD machine's node, not the pinned node that ships, so they are noise here.
+  execFileSync('npm', ['ci', '--omit=dev', '--no-audit', '--no-fund', '--loglevel=error'],
+    { cwd: extOut, stdio: 'inherit', shell: process.platform === 'win32' });
+  nmBefore = dirBytes(nm);
+  dropped = pruneNodeModules(nm);
+  // Phase 0 condition 2: never ship the SDK's platform `claude` binary (see sdk-binary.mjs).
+  if (sdkBinaryAllowed()) {
+    console.warn('warning: LLMIDE_STAGE_ALLOW_SDK_BINARY=1, the SDK claude binary stays in the stage (not for release)');
+  } else {
+    const removedSdk = removeSdkBinaryPackages(nm);
+    if (removedSdk.length && VERBOSE) console.log(`removed SDK claude binary package(s): ${removedSdk.map((p) => basename(p)).join(', ')}`);
+  }
+  saveDepsCache(nm, depsKey);
+}
+
+if (!sdkBinaryAllowed()) {
   const leftover = verifyNoSdkBinary(OUT);
   if (leftover.length) {
     console.error(`staging failed: the SDK claude binary must not be bundled:\n  ${leftover.join('\n  ')}`);
@@ -238,6 +290,9 @@ const sizes = {
   core_total: dirBytes(OUT),
 };
 writeFileSync(join(OUT, 'STAGE.json'), JSON.stringify({ target: TARGET, node: nodeInfo, sizes, sourceHash: SOURCE_HASH, generatedBy: 'scripts/stage-core.mjs' }, null, 2));
-for (const [k, v] of Object.entries(sizes)) console.log(`${k.padEnd(28)} ${v}`);
-console.log(`BENCH ${JSON.stringify({ name: 'bundle_bytes', value: sizes.core_total, unit: 'bytes', part: 'core_stage' })}`);
-console.log(`staged ${relative(REPO, OUT)} (dropped ${dropped.length} doc/test/sourcemap entries)`);
+if (VERBOSE) {
+  for (const [k, v] of Object.entries(sizes)) console.log(`${k.padEnd(28)} ${v}`);
+  console.log(`BENCH ${JSON.stringify({ name: 'bundle_bytes', value: sizes.core_total, unit: 'bytes', part: 'core_stage' })}`);
+  if (dropped) console.log(`dropped ${dropped} doc/test/sourcemap entries`);
+}
+console.log(`staged ${relative(REPO, OUT)}: node ${nodeInfo.version}, ${(sizes.core_total / 1048576).toFixed(0)} MB`);
