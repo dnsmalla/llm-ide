@@ -1232,7 +1232,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_same_key_or_a_first_pin_without_a_saved_password_changes_nothing() {
+    fn re_confirming_the_same_key_keeps_the_saved_password() {
         let fx = Fixture::new("svc-key-same");
         upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
         prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
@@ -1244,8 +1244,12 @@ pub(crate) mod tests {
         confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
         assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "re-confirming the same key keeps the password");
         assert!(locked(&fx.forgotten).is_empty());
+    }
 
+    #[test]
+    fn a_first_pin_without_a_saved_password_forgets_nothing() {
         let other = Fixture::new("svc-first-pin");
+        let exec = fake(vec![]);
         prefs::remember_ssh_server(HOST, 22, "bob", "", SshAuthKind::Password).unwrap();
         let deps = other.deps(&exec, &scan_of("key-a"), true, true);
         test(&deps, &password_login("bob"), Some("pw")).unwrap();
