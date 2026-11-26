@@ -1,7 +1,7 @@
 // Thin wrapper over the pty_* Tauri commands. Output comes back on a Channel as raw
 // batches: Rust sends `Response` bytes, which arrive here as an ArrayBuffer (no JSON
 // number arrays, no base64).
-import { Channel } from "@tauri-apps/api/core";
+import { createChannel } from "../tauriChannel";
 import { invokeHost as invoke } from "@llmide/screens/shell/host";
 
 // Every call goes through invokeHost (SSH/remote-mode gate, root_missing hooks, error reporting); the Channel
@@ -23,10 +23,8 @@ export interface PtyHandle {
  * exited and its last output was delivered (so a tab can say "(exited)" at once).
  */
 export async function spawnShell(cols: number, rows: number, onBytes: (bytes: Uint8Array) => void, onExit: () => void = () => undefined): Promise<PtyHandle> {
-  const channel = new Channel<ArrayBuffer>();
-  channel.onmessage = (message) => onBytes(new Uint8Array(message));
-  const exit = new Channel<unknown>();
-  exit.onmessage = () => onExit();
+  const channel = createChannel<ArrayBuffer, Uint8Array>((message) => new Uint8Array(message), onBytes);
+  const exit = createChannel<unknown, true>(() => true, () => onExit());
   const { id, shell } = await invoke<{ id: number; shell: string }>("pty_spawn", { cols, rows, onData: channel, onExit: exit });
   return {
     id,
