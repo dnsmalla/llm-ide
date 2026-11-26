@@ -136,6 +136,8 @@ test("the row message: progress while the server answers, the error for this row
   assert.equal(recent.recentRowMessage(busy, "a", "b"), null, "another row shows nothing");
   assert.equal(recent.recentRowMessage({ busy: null, error: "Test the connection first.", status: null }, "a", "a")?.tone, "error");
   assert.equal(recent.recentRowMessage({ busy: null, error: null, status: null }, "a", "a"), null);
+  const warned = { busy: null, error: null, status: { link: "connected", warning: "The password was not saved." } };
+  assert.equal(recent.recentRowMessage(warned, "a", "a")?.text, "The password was not saved.", "a connected row still shows the warning");
 });
 
 test("the recent list is hidden when the host has no such command or cannot answer", async () => {

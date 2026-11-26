@@ -138,7 +138,9 @@ Keychain details:
 - If Connect works but the Keychain refuses the save, the connection stays up and the dialog says "Connected, but the
   password could not be saved in Keychain."
 - When you trust a different host key for a server, the passwords saved for that server (every login on that host and
-  port) are removed, and you type the password again. A saved password is never sent to a server behind a new key.
+  port) are removed, and you type the password again. A saved password is never sent to a server behind a new key. The same happens when a login with a saved password
+  has no stored host key (the app keeps the 32 newest keys, so an old one can drop out): trusting the key again means
+  typing the password again.
 - A saved password is read only after the server shows the pinned host key.
 - The password is removed when its server is pushed out of the recent list (it keeps the 10 newest) and when the login
   is switched to a key.

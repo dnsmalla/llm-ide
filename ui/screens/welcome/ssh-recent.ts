@@ -79,5 +79,7 @@ export function recentRowMessage(state: Pick<SshServerState, "busy" | "error" | 
   if (state.busy !== null) return { key, tone: "busy", text: "Connecting…" };
   if (state.error !== null) return { key, tone: "error", text: state.error };
   if (state.status?.link === "failed") return { key, tone: "error", text: state.status.error ?? "The SSH connection could not be opened." };
+  // Connected, but a step after it failed (the Keychain): the row says so instead of a bare "Connected".
+  if (state.status?.warning) return { key, tone: "error", text: state.status.warning };
   return null;
 }

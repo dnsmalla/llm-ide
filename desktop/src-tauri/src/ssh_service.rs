@@ -220,6 +220,11 @@ pub fn require_pinned_key_offered(deps: &Deps, target: &SshServerTarget) -> Resu
 /// preference write that fails must not fail the check it follows. A login pushed out of the list takes its stored
 /// password with it.
 fn remember_login(deps: &Deps, target: &SshServerTarget) {
+    // A Test never changes the Keychain: a key login over a login with a saved password would orphan it here, so that
+    // switch is left to Connect (`set_remote_ssh_collect`).
+    if target.auth == SshAuthKind::Key && prefs::ssh_password_saved(&target.host, target.port, &target.user) {
+        return;
+    }
     if let Ok(orphaned) = prefs::remember_ssh_server(&target.host, target.port, &target.user, &target.key_path, target.auth) {
         forget_orphaned(deps, &orphaned);
     }
@@ -257,14 +262,16 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     }
     // A different key was pinned for this server: the passwords saved for it were meant for that key's server. Their
     // flags go before the new pin is stored, so no later connect can send one to the server behind the new key.
-    let replaces_other_key = pin_for(&endpoint).is_some_and(|old| old.key_type != offered.key_type || old.key_b64 != offered.key_b64);
-    if replaces_other_key {
+    // No pin at all counts as a replacement too: the pin may have been evicted while a login still holds a password.
+    let keeps_same_key = pin_for(&endpoint).is_some_and(|old| old.key_type == offered.key_type && old.key_b64 == offered.key_b64);
+    if !keeps_same_key {
         let cleared = prefs::clear_ssh_password_flags_for_endpoint(&endpoint.host, endpoint.port)?;
         for user in &cleared {
             (deps.forget_password)(&endpoint.host, endpoint.port, user);
         }
     }
-    prefs::upsert_ssh_known_host(pin_text(&endpoint, &offered))?;
+    let (_, evicted) = prefs::upsert_ssh_known_host_collect(pin_text(&endpoint, &offered))?;
+    forget_orphaned(deps, &evicted);
     // The host key is trusted: the login is worth keeping even if the sign-in below fails.
     remember_login(deps, target);
     Ok(base_result(&offered, true, false))
@@ -1225,15 +1232,70 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_first_pin_or_the_same_key_keeps_the_saved_password() {
+    fn a_same_key_or_a_first_pin_without_a_saved_password_changes_nothing() {
         let fx = Fixture::new("svc-key-same");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        // The trusted probe may fail on the fake; it still records the key it saw, which is all confirm needs.
+        let _ = test(&deps, &password_login("alice"), Some("pw"));
+        confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
+        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "re-confirming the same key keeps the password");
+        assert!(locked(&fx.forgotten).is_empty());
+
+        let other = Fixture::new("svc-first-pin");
+        prefs::remember_ssh_server(HOST, 22, "bob", "", SshAuthKind::Password).unwrap();
+        let deps = other.deps(&exec, &scan_of("key-a"), true, true);
+        test(&deps, &password_login("bob"), Some("pw")).unwrap();
+        confirm(&deps, &password_login("bob"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
+        assert!(locked(&other.forgotten).is_empty(), "nothing was saved, so nothing is forgotten");
+    }
+
+    #[test]
+    fn a_first_pin_for_a_login_with_a_saved_password_forgets_it() {
+        // The pin was evicted (or never existed) while the login kept its password: it must not reach a key the user
+        // trusts only now.
+        let fx = Fixture::new("svc-first-pin-saved");
         prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
         prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
         let exec = fake(vec![]);
         let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
         test(&deps, &password_login("alice"), Some("pw")).unwrap();
         confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
-        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "the first pin is not a replacement");
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice"));
+        assert_eq!(*locked(&fx.forgotten), vec![format!("alice@{HOST}:22")]);
+    }
+
+    #[test]
+    fn evicting_the_oldest_pin_forgets_the_passwords_saved_for_its_host() {
+        let fx = Fixture::new("svc-pin-evict");
+        upsert_ssh_known_host(pin_text(22, "key-old")).unwrap();
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let mut cleared = Vec::new();
+        for i in 0..prefs::SSH_KNOWN_HOSTS_MAX {
+            let pin = format!("h{i}.example:22 ssh-ed25519 {}", key_b64(&format!("k{i}")));
+            cleared.extend(prefs::upsert_ssh_known_host_collect(pin).unwrap().1);
+        }
+        assert_eq!(cleared.len(), 1);
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        forget_orphaned(&deps, &cleared);
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice"), "the login lost its flag with its pin");
+        assert_eq!(*locked(&fx.forgotten), vec![format!("alice@{HOST}:22")]);
+    }
+
+    #[test]
+    fn a_test_with_a_key_never_forgets_a_saved_password() {
+        let fx = Fixture::new("svc-test-keeps-keychain");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        remember_login(&deps, &target(22, SshAuthKind::Key));
+        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "only Connect switches the login to a key");
         assert!(locked(&fx.forgotten).is_empty());
     }
 

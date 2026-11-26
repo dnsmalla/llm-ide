@@ -205,13 +205,16 @@ pub(crate) fn parse_known_host(entry: &str) -> Option<KnownHost> {
 
 /// Puts `known` in the list in place of any entry for the same endpoint, at the end. The list keeps the newest
 /// `SSH_KNOWN_HOSTS_MAX`, so the oldest pin is the one dropped; that only means the user confirms it again.
-fn put_known_host(list: &mut Vec<String>, known: &KnownHost) {
+/// Returns the endpoints of the pins it dropped, so a caller can forget the passwords saved for them.
+fn put_known_host(list: &mut Vec<String>, known: &KnownHost) -> Vec<String> {
     list.retain(|saved| !matches!(parse_known_host(saved), Some(kept) if kept.endpoint == known.endpoint));
     list.push(format!("{} {} {}", known.endpoint, known.key_type, known.key_b64));
+    let mut dropped = Vec::new();
     if list.len() > SSH_KNOWN_HOSTS_MAX {
         let extra = list.len() - SSH_KNOWN_HOSTS_MAX;
-        list.drain(..extra);
+        dropped.extend(list.drain(..extra).filter_map(|saved| parse_known_host(&saved).map(|gone| gone.endpoint)));
     }
+    dropped
 }
 
 /// The list as loaded: entries that fail `parse_known_host` are dropped, and there is one entry per endpoint.
@@ -1211,13 +1214,27 @@ pub(crate) fn set_remote_server_mode(mode: ServerMode) -> Result<PrefsView, FsEr
 /// Host-side writer for a confirmed SSH host key: replaces any key saved for the same host and port. The webview
 /// cannot call it; the SSH service calls it only after a native yes/no dialog. Text that is not a valid pin is refused,
 /// so nothing unreadable is stored.
+#[cfg(test)]
 pub(crate) fn upsert_ssh_known_host(pin: String) -> Result<PrefsView, FsError> {
+    upsert_ssh_known_host_collect(pin).map(|(view, _)| view)
+}
+
+/// [`upsert_ssh_known_host`], also returning the logins whose saved-password flag was cleared because their host's
+/// pin was the oldest and got dropped (a login with no pin would otherwise send its password to the next key trusted).
+/// The caller forgets those Keychain passwords.
+pub(crate) fn upsert_ssh_known_host_collect(pin: String) -> Result<(PrefsView, Vec<SshRecentServer>), FsError> {
     let known = parse_known_host(&pin)
         .ok_or_else(|| herr("invalid_host_key", "the saved server host key is not in a form that can be stored"))?;
-    edit_remote_server(|block| {
-        put_known_host(&mut block.ssh_known_hosts, &known);
+    let mut cleared = Vec::new();
+    let view = edit_remote_server(|block| {
+        let dropped = put_known_host(&mut block.ssh_known_hosts, &known);
+        for entry in block.ssh_recent_servers.iter_mut().filter(|entry| entry.password_saved && dropped.contains(&endpoint_text(&entry.host, entry.port))) {
+            entry.password_saved = false;
+            cleared.push(entry.clone());
+        }
         Ok(())
-    })
+    })?;
+    Ok((view, cleared))
 }
 
 /// Forgets a saved server: its recent entry and its folders, and its host key unless a saved server still needs it.

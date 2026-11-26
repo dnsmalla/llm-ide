@@ -59,7 +59,8 @@ export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
     setNotice(null);
     const outcome = await connectRecentServer(m, entry);
     if (outcome === "connected") {
-      setActive(null);
+      // A warning stays on the row (see recentRowMessage); only a clean connect clears it.
+      if (!m.getState().status?.warning) setActive(null);
       setNotice(`Connected to ${entry.host}.`);
     } else if (outcome === "switch") {
       // The restart is the only thing left. It asks (in the dialog) only when work is running on this computer.
