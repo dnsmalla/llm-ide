@@ -5,6 +5,7 @@ import type { AutoShipKind } from "../loop/native/ship-model.ts";
 import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
 import { LOOPBACK_STOPPED_CODE } from "../loop/native/loopback.ts";
 import { displayText } from "../explorer/scm/model.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "readyToShip" | "shipped" | "done";
 
@@ -48,7 +49,6 @@ export const NOTE = {
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const RUN_MODES: readonly string[] = ["full", "intakeOnly", "continue", "sendBack", "check", "rework", "humanReview"];
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function httpsUrl(v: unknown): string | null {
   if (typeof v !== "string" || v.length > 2048) return null;

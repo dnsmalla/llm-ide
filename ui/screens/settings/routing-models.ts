@@ -6,6 +6,7 @@ import { call, type CoreClient } from "./core-api.ts";
 import { describeError } from "./errors.ts";
 import { modelIdProblem } from "./routing-model.ts";
 import { Store } from "./store.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface ModelOption {
   id: string;
@@ -25,7 +26,6 @@ export interface ModelListsState {
 /** The select value that reveals the free-text model id box. */
 export const OTHER_MODEL = "__other__";
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 const clipText = (v: unknown, max: number): string =>
   typeof v === "string" ? v.replace(/[\u0000-\u001f\u007f-\u009f‪-‮⁦-⁩]/g, " ").replace(/\s+/g, " ").trim().slice(0, max) : "";

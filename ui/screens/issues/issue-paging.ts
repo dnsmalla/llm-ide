@@ -1,6 +1,7 @@
 // The Issues list walk over `GET /kb/issues`: page by offset until the core says there is no more, up to the Mac's
 // 20 pages per project. Pure apart from the injected request, so node can test it; the screens own the React state.
 import { CORE_LIST_CAP, MAX_LOADED, MAX_PAGES, decodeIssues, rawIssueCount, type Issue } from "./issues-model.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export type PagingStop = "end" | "cap" | "aborted" | "error";
 
@@ -26,7 +27,6 @@ export interface IssuePage {
   nextOffset: number | null;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** One page of the list. An old core that answers no total/hasMore is one final page. */
 export function decodeIssuePage(body: unknown, offset = 0): IssuePage {

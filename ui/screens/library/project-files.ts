@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // The Library's project-file categories: the Mac's Library shows Code and Data file trees beside the note sections
 // (LibraryItem.Category.code/.data). The desktop reads those folders through the host's read-only fs commands; the
 // notes sections keep using the notes index. Paths are project-relative and confined by the host.
@@ -13,7 +14,6 @@ export const PROJECT_ROOTS: readonly { path: string; label: string }[] = [
 ];
 
 const MAX_ENTRIES = 500;
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 export function safeProjectPath(path: string): string | null {
   const t = path.trim();

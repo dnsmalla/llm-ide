@@ -1,3 +1,4 @@
+import { isRecord } from "../../../kit/src/decode.ts";
 // Typed access to the core's source routes (secrets vault, email/slack/box/mcp connectors, connector catalog,
 // repo allow-list) and the mapping of every failure to a code the UI words itself. Pure apart from the injected
 // `SourcesCore`; the real one wraps the shell's core client (adapter.ts), which holds the token.
@@ -38,7 +39,6 @@ export class SourceError extends Error {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function envelopeCode(body: unknown): string | null {
   if (!isRecord(body) || !isRecord(body.error)) return isRecord(body) && typeof body.error === "string" ? body.error.slice(0, 64) : null;

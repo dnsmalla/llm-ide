@@ -1,6 +1,7 @@
 // Work items of the Factory board, stored as facts in `<project>/system/factory/items.json`. A card's column is never
 // stored here (see columns.ts): the file holds each item and the run ids it has had, nothing else.
 import type { FsApi } from "../explorer/fs";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const ITEMS_FILE = "system/factory/items.json";
 export const ITEMS_SCHEMA_VERSION = 1;
@@ -12,7 +13,6 @@ export interface WorkItemRecord { key: string; source: WorkItemSource; id: strin
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const SOURCES: readonly string[] = ["issue", "spec", "text"];
 const MAX_KEY = 400, MAX_ID = 300, MAX_TITLE = 500, MAX_BODY = 20_000, MAX_REPO = 300, MAX_ITEMS = 500, MAX_RUNS = 50;
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 function codeOf(e: unknown): string {
   return typeof e === "object" && e !== null && typeof (e as { code?: unknown }).code === "string" ? (e as { code: string }).code : "";
 }

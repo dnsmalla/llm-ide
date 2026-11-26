@@ -2,6 +2,7 @@
 // the card hides when the core does not serve these routes to this UI (no bus host proof). The MEGA password is sent
 // once, on Save, and is never read back; the own server's SSH private key never leaves the core (the status carries only its public line).
 import { ApiError, call, type CoreClient } from "./core-api.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface MegaSetup { email: string; password: string; folder: string }
 export type StoreKind = "mega" | "box" | "sftp";
@@ -16,7 +17,6 @@ export interface SyncStatus {
   lastPublishAt: number | null; lastError: string | null;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const strOrNull = (v: unknown) => v === null || typeof v === "string";
 const intOrNull = (v: unknown) => v === null || Number.isInteger(v);
 

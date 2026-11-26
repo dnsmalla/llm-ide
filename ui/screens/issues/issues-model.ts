@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // The Issues data as the core returns it (`GET /kb/issues`) plus the board's column derivation. The Mac's board
 // uses the label namespace shared by the most issues as its columns, falling back to Open/Closed; the same rule is
 // applied here so the desktop board cannot invent a different shape from the same rows.
@@ -56,7 +57,6 @@ const MAX_LABELS = 20;
 const MAX_ASSIGNEES = 50;
 const MAX_TEXT = 2000;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const text = (v: unknown, max = 400): string => (typeof v === "string" ? v.slice(0, max) : "");
 
 function httpUrl(v: unknown): string {

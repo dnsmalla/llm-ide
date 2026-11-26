@@ -4,6 +4,7 @@
 // end or start). Undated issues are kept in a separate list, never given a made-up span.
 import { MAX_LOADED, overlayRepoSupported, type Issue } from "../issues/issues-model.ts";
 import { issuesLoadError, loadIssuePages, mergePaging, type PagingProgress, type PagingResult } from "../issues/issue-paging.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 
 /** GitHub titles imported by the local importer may already start with "#<number>"; don't render it twice. */
@@ -41,7 +42,6 @@ const DAY_MS = 86_400_000;
 /** The most rows a walk can load (2,000): the Gantt draws every one, so the row cap is the load cap. */
 const MAX_ROWS = MAX_LOADED;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : null);
 

@@ -4,6 +4,7 @@
 // and says what is wrong in words. Pure.
 
 import type { Product } from "./google-core.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 export const LABEL_RE = /^[A-Za-z0-9_][A-Za-z0-9_. -]{0,99}$/;
 export const FOLDER_ID_RE = /^[A-Za-z0-9_-]{5,100}$/;
@@ -33,7 +34,6 @@ export const DEFAULT_GMAIL: GmailOptions = { labels: ["INBOX"], windowDays: 30, 
 export const DEFAULT_CALENDAR: CalendarOptions = { calendarIds: ["primary"], daysBack: 30, daysAhead: 90 };
 export const DEFAULT_DRIVE: DriveOptions = { folderIds: [], includeSharedDrives: false };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const intIn = (n: unknown, lo: number, hi: number): n is number => typeof n === "number" && Number.isInteger(n) && n >= lo && n <= hi;
 const strs = (v: unknown, max: number): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string").slice(0, max) : []);
 const dedupe = (a: readonly string[]): string[] => [...new Set(a)];

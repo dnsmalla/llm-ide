@@ -6,8 +6,8 @@
 
 import { callOk, SourceError, type SourcesCore } from "./source-core.ts";
 import type { BoxConfig, EmailConfig, GithubIssuesConfig } from "./source-config.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v.slice(0, 500) : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const SHORT = 60_000;

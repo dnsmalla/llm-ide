@@ -15,6 +15,7 @@ import { HOSTED_WEB_ORIGIN, addWebOrigin, webOriginError } from "../web-origins.
 import AlsoRevoke, { ALSO_LOADING_NOTE, isAlsoLoading, type AlsoState } from "./AlsoRevoke.tsx";
 import { OFFLINE_UNAVAILABLE_NOTE, SEPARATE_LISTS_HINT, offlineCandidates, runRevokes, summarizeRevokes } from "../device-link-model.ts";
 import { describeSyncError, loadSyncStatus, revokeSyncDevice } from "../sync-model.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 /** `fingerprint`: the TLS listener's certificate pin (`sha256:` + 43 base64url characters); null for the dev listener.
  *  `addresses`: this computer's IPv4s for the pairing QR, best first; [] for the dev listener (or an older core). */
@@ -22,7 +23,6 @@ export interface HostPin { pin: string; expiresAt: number; port: number; fingerp
 export { normaliseWebOrigin, webOriginError, addWebOrigin } from "../web-origins.ts";
 export interface HostDevice { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})\.){3}(?:25[0-5]|2[0-4][0-9]|1?[0-9]{1,2})$/;
 const HIDDEN = new Set(["HOST_API_DISABLED", "HOST_PROOF_REQUIRED"]);
 

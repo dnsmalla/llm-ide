@@ -7,6 +7,7 @@
 // UI maps to its own wording (the detail is never shown raw).
 
 import type { NoteEntry } from "./notes-model.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface NotesRoot {
   name: string;
@@ -97,7 +98,6 @@ export interface NotesHost {
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 

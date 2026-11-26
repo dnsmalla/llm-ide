@@ -3,6 +3,7 @@
 // own SSH, the env file and the health check; this model only sequences them.
 import { Store } from "./store.ts";
 import type { RemoteServerConfig } from "./host.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface DeployStage { id: string; title: string; mutating: boolean; detail: string }
 export interface DeployPlan {
@@ -41,7 +42,6 @@ export const DEPLOY_INITIAL: DeployState = {
   domain: "", confirmation: "", reviewAck: false, phase: "idle", plan: null, report: null, bootstrap: null, error: null,
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 export function decodeDeployPlan(raw: unknown): DeployPlan | null {
   if (!isRecord(raw) || typeof raw.id !== "string" || typeof raw.domain !== "string" || typeof raw.version !== "string") return null;

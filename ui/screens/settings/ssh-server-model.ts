@@ -14,12 +14,12 @@ import { decodePrefsView, type SshAuth } from "../shell/host-prefs.ts";
 import type { SshServerLink, SshServerStatus, SshServerTarget, SshServerTest } from "./host.ts";
 import { isValidHost, isValidKeyPath, isValidUser, parseSshPort } from "./remote-model.ts";
 import { Store } from "./store.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export type SshServerField = "host" | "port" | "user" | "keyPath";
 export type SshServerFieldErrors = Partial<Record<SshServerField, string>>;
 export type SshServerBusy = "test" | "confirm" | "connect" | "disconnect" | "status" | "stop" | "uninstall" | "install_key";
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNullableString = (v: unknown): v is string | null => v === null || typeof v === "string";
 const SSH_LINKS: readonly SshServerLink[] = ["off", "restart_required", "connecting", "connected", "reconnecting", "needs_password", "failed", "stopped"];
 const GLIBC_VERSION = /^\d+\.\d+$/;

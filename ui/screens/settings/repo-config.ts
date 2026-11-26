@@ -1,4 +1,5 @@
 import { host, isHostAvailable } from "../shell/host.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 // The Mac's Repositories card (Features/SourceControl/Views/RepoSettingsSection.swift) for the desktop:
 // GitLab/GitHub tabs, a write-only token per provider, the per-provider automation allow-list and the saved
@@ -55,7 +56,6 @@ export interface RepoConfig {
   saved: Record<RepoProvider, SavedRepo[]>;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const text = (v: unknown, max: number): string => (typeof v === "string" ? v.slice(0, max) : "");
 
 export function defaultRepoConfig(): RepoConfig {

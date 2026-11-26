@@ -1,3 +1,4 @@
+import { isRecord } from "../../../kit/src/decode.ts";
 // Non-secret source settings (hosts, folders, channel ids, look-back windows): validators and a small
 // persisted store. Pure; the store takes a storage object so tests do not need a DOM.
 //
@@ -137,7 +138,6 @@ export interface KeyValueStorage {
   setItem(key: string, value: string): void;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const s = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
 /** Re-validates an untrusted value into `SourceConfigs`: every section that fails its validator is dropped. */

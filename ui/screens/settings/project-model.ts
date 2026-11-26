@@ -1,6 +1,7 @@
 // Pure parts of the project "Paths" and "Memory" groups (read-only host listings of the active project).
 import type { ProjectFolder, ProjectMemory, ProjectMemoryFile, ProjectPaths } from "./host.ts";
 import { hostErrorCode, hostErrorText } from "../shell/host-error.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 const clean = (v: unknown, max: number): string => {
   if (typeof v !== "string") return "";
@@ -8,7 +9,6 @@ const clean = (v: unknown, max: number): string => {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
 /** A project-relative path we will show and hand to `reveal_in_os`: no absolute paths, no `..`, no NUL. */
 export function safeRelativePath(v: unknown): string | null {

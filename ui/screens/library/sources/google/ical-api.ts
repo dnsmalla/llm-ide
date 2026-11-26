@@ -14,6 +14,7 @@
 
 import type { SourcesCore } from "../source-core.ts";
 import { mapGoogleThrown } from "./google-core.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 export const MAX_FEEDS = 10;
 const MAX_LIST = 100; // hostile lists are cut here; the cap the core enforces is MAX_FEEDS
@@ -128,7 +129,6 @@ export class IcalError extends Error {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 const SERVER_CODES: Readonly<Record<string, IcalErrorCode>> = {
   VALIDATION_FAILED: "validation",

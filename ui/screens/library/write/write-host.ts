@@ -7,6 +7,7 @@
 // blind overwrite except the explicit "keep mine" (`force`) after a conflict the user saw.
 
 import { toNotesError, type NotesErrorCode } from "../host.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export type WriteErrorCode =
   | NotesErrorCode
@@ -114,7 +115,6 @@ export interface WriteHost {
 export const BULK_HOST_MAX = 200;
 
 type Invoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 

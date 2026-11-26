@@ -1,4 +1,5 @@
 import { hostErrorText } from "../shell/host-error.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 // Pure parts of the "Connections" and "Repositories" groups: decode the core's catalog and repo allow-list,
 // keep untrusted text inert, and turn error codes into plain sentences. Selection is a visibility setting
 // (the core says so); credentials and fetching stay in the Library's Connector panes.
@@ -10,7 +11,6 @@ const clean = (v: unknown, max: number): string => {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
 
-const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const ID = /^[a-z][a-z0-9-]{1,20}$/;
 
 export interface ConnectorEntry {

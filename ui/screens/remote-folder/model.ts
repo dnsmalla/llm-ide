@@ -11,6 +11,7 @@
 import { Store } from "../settings/store.ts";
 import { validateProjectName } from "../welcome/model.ts";
 import { beginServerFolderOpen, endServerFolderOpen } from "../shell/host.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 /** One folder as the host lists it. The host lists folders only. */
 export interface RemoteEntry {
@@ -52,7 +53,6 @@ export const ROOT_MISSING_TEXT = "This folder is no longer on the server.";
 export const LOST_CONNECTION_TEXT = "The connection to the server was lost.";
 const DECODE_TEXT = "the desktop host returned a server folder answer this app cannot read";
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 // "." and ".." are not folders the picker can list or enter; a name with a slash is not a single path segment.
 const validName = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v !== "." && v !== ".." && !v.includes("/");
 

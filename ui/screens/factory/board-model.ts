@@ -6,6 +6,7 @@ import type { LiveRun } from "../loop/native/run-manager.ts";
 import type { StepReviewCounts } from "../loop/native/issue-trail.ts";
 import { COLUMNS, COLUMN_LABELS, NOTE, columnFor, decodeRunRecordFacts, type Column, type ItemFacts, type LoopbackFacts, type RunRecordFacts, type ShipStatus } from "./columns.ts";
 import type { WorkItemRecord } from "./items.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
@@ -209,7 +210,6 @@ export function lastKnownFrom(board: Record<Column, CardView[]>): Map<string, Co
 }
 
 const RUN_ID = /^[A-Za-z0-9_-]{1,64}$/;
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 
 export interface WorktreeInfo { runId: string; project: string; repo: string; worktree: string; branch: string; baseCommit: string }

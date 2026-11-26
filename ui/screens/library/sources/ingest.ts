@@ -20,6 +20,7 @@ import { renderNote } from "../write/frontmatter-edit.ts";
 import { toWriteError, type WriteHost } from "../write/write-host.ts";
 import { callOk, SourceError, mapThrown, type SourceErrorCode, type SourcesCore } from "./source-core.ts";
 import type { EmailConfig, SlackChannel } from "./source-config.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export const BODY_MAX_CHARS = 200_000;
 export const FETCH_TIMEOUT_MS = 120_000;
@@ -67,7 +68,6 @@ export function fetchMessage(p: FetchProgress): string {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" && Number.isFinite(v) ? String(v) : "");
 
 function validDate(v: unknown, fallback: number): number {

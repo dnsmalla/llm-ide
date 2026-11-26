@@ -3,6 +3,7 @@
 import type { FsApi } from "../../explorer/fs";
 import type { LoopIterationOutcome } from "./runner.ts";
 import { ensureDir, parseTestResults } from "./testmap.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export interface LoopRunIndexEntry {
   id: string;
@@ -173,7 +174,6 @@ export interface FactoryRunFields {
   diffSummary: { files: string[]; truncated: boolean; patchId: string | null } | null;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Tolerant read of the Factory fields: anything malformed reads as null, never as a wrong value. */
 export function decodeFactoryFields(record: Record<string, unknown> | null): FactoryRunFields {

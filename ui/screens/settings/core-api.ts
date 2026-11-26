@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // The page's only door to the Node core: a request function injected by the shell
 // (S-A's core client owns the base URL, the bearer token and the nonce check). This
 // module never sees a token and never builds a URL from user input.
@@ -26,7 +27,6 @@ export class ApiError extends Error {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Error envelope: `{ error: { code, message?, details? } }`. Anything else becomes a status-only error. */
 export function toApiError(res: CoreResponse): ApiError {

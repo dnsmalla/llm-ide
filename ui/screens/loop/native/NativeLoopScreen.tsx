@@ -61,6 +61,7 @@ import { createStartGate } from "./start-gate.ts";
 import { readSchedule, scheduleTick } from "./schedule-tick.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
 import "./native-loop.css";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 const stageKindLabel: Record<string, string> = {
   regressionSweep: "Regression sweep", shellCommand: "Shell command", skill: "Skill", artifactCheck: "Artifact check",
@@ -1194,7 +1195,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const needsTask = oneItemLoop && !(runCommands[loop.id] ?? "").trim();
   const regressionOnTree = loop !== null && !isFactoryLoop(loop) && loop.config.alwaysUseWorktree && worktreeBlockedStage(loop.config.stages) !== null;
   const pastFactory = runRecord ? decodeFactoryFields(runRecord) : null;
-  const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">

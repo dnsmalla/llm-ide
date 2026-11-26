@@ -17,6 +17,7 @@
 import { fmDateMs, fmInt, fmList, fmString, parseNote } from "./frontmatter.ts";
 import type { NotesHost } from "./host.ts";
 import type { NoteRecord } from "./notes-model.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const SCAN_CHUNK_ENTRIES = 500;
 export const SCAN_CHUNKS_MAX = 100;
@@ -214,7 +215,6 @@ export function batchUpserts(inputs: readonly IndexNoteInput[]): { batches: Inde
   return { batches, dropped };
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
 
 type Reporter = (p: RebuildProgress) => void;

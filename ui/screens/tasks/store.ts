@@ -6,6 +6,7 @@ import { normaliseProjectRoot } from "../autotasks/native/custom.ts";
 import { ALIASES, TASK_BY_ID, TASKS } from "./registry.generated.ts";
 import { taskById, taskFocus } from "./model.ts";
 import type { TaskDef } from "./types.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface TaskConfig {
   enabled: boolean;
@@ -77,7 +78,6 @@ export function defaultTaskState(): TaskState {
   return { masterEnabled: false, configs: Object.fromEntries(AVAILABLE.map((t) => [t.id, defaultConfig(t)])), notices: [] };
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v);
 const text = (v: unknown): string => (typeof v === "string" ? v : "");
 
 /** The prompt the registry or an earlier desktop build would send unedited; such a prompt is not an override. */

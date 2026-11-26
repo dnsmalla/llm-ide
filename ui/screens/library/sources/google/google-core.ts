@@ -14,6 +14,7 @@
 // Pure apart from the injected `SourcesCore` (the shell's core client wrapped in adapter.ts, which holds the token).
 
 import type { SourcesCore } from "../source-core.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 export type Product = "gmail" | "gcal" | "gdrive";
 export const PRODUCTS: readonly Product[] = ["gmail", "gcal", "gdrive"];
@@ -66,7 +67,6 @@ export class GoogleError extends Error {
   }
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function envelopeCode(body: unknown): string | null {
   if (!isRecord(body)) return null;

@@ -15,6 +15,7 @@
 
 import type { RemoteServerConfig, RemoteSshResult, ServerMode } from "./host.ts";
 import { Store } from "./store.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const LOCAL_COPY = "Desktop uses MEGA sync for web/mobile while it is online.";
 
@@ -32,7 +33,6 @@ export const REMOTE_TEXT = {
 export type RemoteField = "host" | "port" | "user" | "keyPath" | "label" | "hubUrl" | "email" | "password";
 export type RemoteFieldErrors = Partial<Record<RemoteField, string>>;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const HOST_LABEL = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
 
 /** IPv6-ish literal: hex digits, colons and dots. The host command parses it with std::net for the final word. */

@@ -9,6 +9,7 @@
 import { locateHeader, setKey } from "./frontmatter-edit.ts";
 import { parseNote, fmList, fmString, fmInt } from "../frontmatter.ts";
 import { toWriteError, WriteError, type SavedNote, type WriteHost } from "./write-host.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 /** Transcript characters sent at most (the server caps the prompt at 500,000). */
 export const TRANSCRIPT_MAX_CHARS = 400_000;
@@ -65,7 +66,6 @@ export interface SummarizeCore {
   summarize(body: Record<string, unknown>, signal: AbortSignal): Promise<{ status: number; body: unknown }>;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const strOr = (v: unknown, d = ""): string => (typeof v === "string" ? v : d);
 
 export function decodeSummary(v: unknown): SummarizeReply | null {

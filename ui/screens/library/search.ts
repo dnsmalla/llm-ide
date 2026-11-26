@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // Full-text search state machine for the Library: debounce, cancel the previous request when the
 // query changes, ignore stale answers, and degrade to "unavailable" (the local filter keeps
 // working) when the core has no note search route. Pure: timers and the request are injected, so
@@ -189,7 +190,6 @@ export interface SearchCore {
   request(method: "GET", path: string, body: undefined, signal: AbortSignal): Promise<{ status: number; body: unknown }>;
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Defensive decode: bad rows are dropped, keys must be safe relative paths, text is plain and clipped. */
 export function decodeSearchHits(body: unknown): SearchHit[] {

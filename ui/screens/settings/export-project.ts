@@ -2,6 +2,7 @@
 // plans -> llm-doc/plans, source/_index.json, README badge and system/sync.json last. All paths are
 // project-relative and go through the root-confined host fs; the webview never supplies an absolute path.
 import type { FsApi } from "../explorer/fs.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export interface ExportMeeting {
   id: string; title: string; date: string | null; durationSec: number | null; language: string;
@@ -21,7 +22,6 @@ export interface ExportBundle { exportedAt: string; meetings: ExportMeeting[]; p
 export interface ExportFile { path: string; text: string }
 export interface ExportResult { meetings: number; plans: number; plansWriteFailed: boolean }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown, max = 100_000): string => (typeof v === "string" ? v.slice(0, max) : "");
 const strOrNull = (v: unknown, max = 10_000): string | null => (typeof v === "string" ? v.slice(0, max) : null);
 const intOrNull = (v: unknown): number | null => (typeof v === "number" && Number.isInteger(v) ? v : null);

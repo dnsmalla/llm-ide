@@ -1,6 +1,7 @@
 // Remote mode's project list and picker, fetched from GET /projects and remembered per hub pin.
 // No local folder is involved: the id is the canonical project id the hub's routes use.
 import type { CoreClient } from "./core";
+import { isRecord } from "../../kit/src/decode.ts";
 
 /** Remote mode must not ask for projects before the keychain session has restored a token. */
 export const remoteProjectsReady = (signedIn: boolean): boolean => signedIn;
@@ -14,7 +15,6 @@ export interface KeyValueStorage { getItem(key: string): string | null; setItem(
 export interface RemoteProjectsState {
   projects: RemoteProject[]; selectedId: string | null; status: "loading" | "ready" | "error"; error: string | null;
 }
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const ROLES: readonly ProjectRole[] = ["owner", "admin", "member", "viewer"];
 const MODES: readonly RunMode[] = ["none", "read_only", "execute"];
 

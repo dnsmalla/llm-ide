@@ -1,3 +1,4 @@
+import { isRecord } from "../../../kit/src/decode.ts";
 // The desktop half of a desktop-claimed bus command (B5, `issues.implement`): poll the core for approved Factory
 // commands, claim one with a lease, start a Factory run for each issue, report stage progress (which is also the
 // heartbeat) and write the one terminal event. Pure: every host, core, file and run-manager call is injected, so node
@@ -49,7 +50,6 @@ export function activeClaims(): readonly { commandId: string; projectRoot: strin
   return [...claims.values()].map((c) => ({ commandId: c.command.id, projectRoot: c.projectRoot, runIds: c.runIds }));
 }
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** A claimable row from GET /bus/claimable, or null when it is malformed. */
 export function decodeClaimable(body: unknown): ClaimedCommand[] {

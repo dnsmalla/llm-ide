@@ -3,6 +3,7 @@
 // wrote, so they are returned as plain strings and rendered as text only. The writes are explicit, one fact or one section at a time.
 import { call, type CoreClient } from "../../settings/core-api.ts";
 import { displayLine } from "../scm/model.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export interface ProjectMemory {
   facts: string[];
@@ -31,7 +32,6 @@ export interface MemoryTarget {
 const MAX_FACTS = 1_000;
 const MAX_FACT_CHARS = 2_000;
 
-const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function factList(raw: unknown): string[] {
   if (!Array.isArray(raw)) throw new TypeError("memory facts are not a list");
