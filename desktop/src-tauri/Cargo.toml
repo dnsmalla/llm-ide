@@ -15,7 +15,9 @@ spike = []
 
 [lib]
 name = "llmide_desktop_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: the Tauri template's staticlib (iOS) and cdylib (Android) are for mobile targets this app does not have
+# (no gen/apple or gen/android); building them cost every release build a ~110 MB static archive and an extra link.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }
