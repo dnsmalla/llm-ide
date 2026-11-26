@@ -65,7 +65,10 @@ export function TourOverlay({ tour, activeSection, onSelectSection, onNext, onBa
           <div aria-hidden="true" className="tour-backdrop" style={{ position: "fixed", inset: 0, background: "rgba(10,10,14,0.35)", pointerEvents: "none", zIndex: 999 }} />
         )}
       </Portal>
-      <Floating anchor={target ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }} onDismiss={onSkip} placement="below-start" className="tour-card" role="dialog" aria-modal="true" aria-label={tour.flow.title}>
+      {/* No onDismiss: a tour step often asks the user to click something that is not the card itself
+          (e.g. "click any issue card"), and Floating would end the tour on that very click. Skip/Next/
+          Back and this file's own Escape listener below remain the ways out. */}
+      <Floating anchor={target ?? { x: window.innerWidth / 2, y: window.innerHeight / 2 }} placement="below-start" className="tour-card" role="dialog" aria-modal="true" aria-label={tour.flow.title}>
         <p className="tour-step-count">{tour.flow.title} · step {tour.index + 1} of {tour.flow.steps.length}</p>
         <h4 className="tour-title">{step.title}</h4>
         <p className="tour-body">{step.body}</p>
