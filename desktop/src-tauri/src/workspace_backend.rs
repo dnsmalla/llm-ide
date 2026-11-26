@@ -710,6 +710,15 @@ pub(crate) fn project_call_with(remote: &Remote, connector: &dyn Connector, cmd:
     remote.call(connector, cmd, args, &native_dialog)
 }
 
+/// Runs a call against the SSH-mode state and the real link on a blocking thread, which SSH calls need so the UI
+/// thread never waits on the server. Every command that goes to the helper without a local twin uses this, so the
+/// remote/connector pair is named in one place.
+pub(crate) async fn on_remote<T: Send + 'static>(call: impl FnOnce(&Remote, &dyn Connector) -> R<T> + Send + 'static) -> R<T> {
+    tauri::async_runtime::spawn_blocking(move || call(remote(), &LinkConnector))
+        .await
+        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+}
+
 /// Runs `f` on a blocking thread, which SSH calls need so the UI thread never waits on the server.
 pub async fn on_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("task failed: {e}"))
@@ -722,7 +731,7 @@ pub async fn on_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'stat
 pub async fn dispatch(cmd: &'static str, needs_local_mode: bool, args: Value) -> R<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         if is_ssh_mode() {
-            return remote().call(&LinkConnector, cmd, args, &native_dialog);
+            return project_call_with(remote(), &LinkConnector, cmd, args);
         }
         if needs_local_mode {
             crate::core_host::require_local_mode()?;
