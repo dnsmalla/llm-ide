@@ -65,5 +65,8 @@ sleep 1
 rm -rf "$APP.bak"
 if [ -d "$APP" ]; then mv "$APP" "$APP.bak"; fi
 ditto "$NEW" "$APP"
+# The swapped-in app is feature-reduced; the normal build's stamp must not call it current, or the next plain
+# build would reuse it. (build-key.txt inside the bundle is the second guard.)
+rm -f "$ROOT/desktop/src-tauri/target/.app-build-key"
 open "$APP"
 echo "=== installed $(date); rollback: $APP.bak ===" >>"$LOG"

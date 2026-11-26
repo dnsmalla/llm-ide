@@ -265,7 +265,7 @@ fires once, so a tab reads "(exited)" at once.
 
 ## macOS app build (`scripts/build-desktop-mac.sh`)
 
-`scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke]` builds `LLM-IDE.app` for this Mac. Steps, each
+`scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke] [--verbose] [--rebuild]` builds `LLM-IDE.app` for this Mac. Steps, each
 idempotent: `npm ci` in `ui/kit`, `desktop` and `graph-kit/web` when their lockfile is newer; `stage-core.mjs --target <host>` with
 `LLMIDE_STAGE_RELEASE=1` (pinned, hash-checked official Node, production deps, no SDK `claude` binary, staged-tree
 verifier); `check:security`; `tauri build --bundles app` (runs `npm run build` itself); ad-hoc `codesign --force
@@ -276,6 +276,21 @@ staged-tree verifier run on the bundle's own copy, Info.plist: `CFBundleIdentifi
 descriptions); `smoke-core.mjs` against the core inside the app (`LLMIDE_CORE_DIR`); optional `.dmg` with
 `hdiutil` (no Finder scripting, so it works headless). Output:
 `desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app`. It never launches the app.
+
+Output and log: each step prints one line (plus up to 5 `warning` lines the step logged); the full output goes to
+`desktop/src-tauri/target/build-desktop.log`. `--verbose` (or `LLMIDE_BUILD_VERBOSE=1`) streams everything instead.
+Lock: `desktop/resources/.build-desktop.lock` allows one build per checkout (every build restages
+`desktop/resources/core`); a lock whose pid is gone is taken over, and Ctrl-C or SIGTERM stops the running step's
+process tree and removes the lock.
+Reuse: the ~2 min `tauri build` step is skipped ("unchanged, reused") when `desktop/scripts/app-build-key.mjs`
+(tracked and untracked sources outside `docs/`, `extension/`, `web/`, ..., graph-kit, build env, toolchain) equals BOTH
+the stamp `target/.app-build-key` and `Contents/Resources/build-key.txt` inside the bundle, so a bundle swapped in
+by the in-app feature rebuild is never mistaken for the normal one. The core is not part of the key: it is
+restaged and re-copied into the bundle on every build, then the bundle is re-signed and re-verified.
+`--rebuild` (or `LLMIDE_FORCE_REBUILD=1`) always rebuilds.
+Deps cache: `stage-core.mjs` keeps the pruned production `node_modules` in `desktop/resources/.deps-cache`, keyed by
+the extension lockfile, the stage scripts, the SDK-binary setting and the node/npm versions; `LLMIDE_STAGE_NO_CACHE=1`
+bypasses it.
 
 Signing: ad hoc, no hardened runtime, no entitlements file. That is what a locally built app needs. A Developer ID
 signature with the hardened runtime and notarization additionally needs `com.apple.security.cs.allow-jit` (the bundled node JITs;

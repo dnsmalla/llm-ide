@@ -120,7 +120,13 @@ function walk(dir, visit) {
 
 
 function depsCacheKey() {
-  const hash = createHash('sha256').update(`sdk=${sdkBinaryAllowed()}\0`);
+  // Node and npm versions are part of the key because native install scripts (better-sqlite3) compile against
+  // the node that ran them; a cached tree built by another node would load wrongly.
+  let npmVersion = 'no-npm';
+  try {
+    npmVersion = execFileSync('npm', ['-v'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { /* an unknown npm only makes the key coarser */ }
+  const hash = createHash('sha256').update(`sdk=${sdkBinaryAllowed()}\0node=${process.version}\0npm=${npmVersion}\0`);
   for (const f of [join(REPO, 'extension', 'package.json'), join(REPO, 'extension', 'package-lock.json'),
     join(DESKTOP, 'scripts', 'stage-core.mjs'), join(DESKTOP, 'scripts', 'sdk-binary.mjs')]) {
     hash.update(readFileSync(f)).update('\0');
@@ -134,7 +140,8 @@ function saveDepsCache(src, key) {
   try {
     mkdirSync(DEPS_CACHE, { recursive: true });
     for (const name of readdirSync(DEPS_CACHE)) {
-      if (name.startsWith(`${TARGET}-`)) rmSync(join(DEPS_CACHE, name), { recursive: true, force: true });
+      // .tmp-* dirs are left by a stage that was killed between cpSync and rename.
+      if (name.startsWith(`${TARGET}-`) || name.startsWith('.tmp-')) rmSync(join(DEPS_CACHE, name), { recursive: true, force: true });
     }
     cpSync(src, join(tmp, 'node_modules'), { recursive: true, verbatimSymlinks: true });
     renameSync(tmp, join(DEPS_CACHE, key));

@@ -5,18 +5,17 @@
 // WHY a content key and not mtimes: git checkouts and rebases touch mtimes without changing content, and cargo/vite
 // already do their own incremental work; this only answers "is the whole input identical to the last good build".
 //
-// extension/ is excluded from the outer-repo listing because the core reaches the app only through desktop/resources/core,
-// and STAGE.json (which carries stage-hash.mjs's sourceHash of what was staged) represents it. Its package files are
-// added explicitly since they pick the dependencies that get staged. docs, ios_app, web, mac and .github are never read.
+// extension/ is excluded because the core reaches the app only through desktop/resources/core, and
+// build-desktop-mac.sh re-copies that staged core into the bundle on every run (including a reused bundle), so the
+// key does not need to represent it. docs, ios_app, web, mac and .github are never read by tauri build.
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 const EXCLUDED_TOP = new Set(['docs', 'ios_app', 'web', '.github', 'extension', 'mac']);
 const OUTER_PATHSPEC = ['.', ...[...EXCLUDED_TOP].map((dir) => `:(exclude)${dir}`)];
-const EXTRA_FILES = ['extension/package.json', 'extension/package-lock.json'];
 const REPO = resolve(import.meta.dirname, '..', '..');
 
 function git(cwd, args) {
@@ -29,8 +28,18 @@ function nulList(text) {
 
 function fileHash(root, rel) {
   const abs = join(root, ...rel.split('/'));
-  // Deleted files hash as 'missing' so a deletion changes the key like an edit does.
-  return existsSync(abs) ? createHash('sha256').update(readFileSync(abs)).digest('hex') : 'missing';
+  let info;
+  try {
+    info = lstatSync(abs);
+  } catch {
+    // Deleted files hash as 'missing' so a deletion changes the key like an edit does.
+    return 'missing';
+  }
+  // git lists an untracked nested repo as `dir/`; reading it would throw EISDIR, and its inner content is not ours.
+  if (info.isDirectory()) return createHash('sha256').update('dir').digest('hex');
+  // Hash the link itself, not what it points at (which may be absent or outside the repo).
+  if (info.isSymbolicLink()) return createHash('sha256').update(`link:${readlinkSync(abs)}`).digest('hex');
+  return createHash('sha256').update(readFileSync(abs)).digest('hex');
 }
 
 /** Hash path + content of every given path, sorted so the result does not depend on git's output order. */
@@ -61,9 +70,9 @@ export function appBuildKey({ repo = REPO, env = process.env } = {}) {
     return !EXCLUDED_TOP.has(path.split('/')[0]);
   });
   add(`tree\n${tree.join('\n')}\n`);
-  const changed = nulList(git(repo, ['diff', 'HEAD', '--name-only', '-z', '--', ...OUTER_PATHSPEC]));
+  const changed = nulList(git(repo, ['diff', 'HEAD', '--name-only', '--ignore-submodules=all', '-z', '--', ...OUTER_PATHSPEC]));
   const untracked = nulList(git(repo, ['ls-files', '-o', '--exclude-standard', '-z', '--', ...OUTER_PATHSPEC]));
-  hashFiles(repo, [...changed, ...untracked, ...EXTRA_FILES], add);
+  hashFiles(repo, [...changed, ...untracked], add);
 
   // vite aliases graph-kit/web/src, so that submodule's commit and local edits matter.
   const gk = join(repo, 'graph-kit');
@@ -75,13 +84,6 @@ export function appBuildKey({ repo = REPO, env = process.env } = {}) {
   } else {
     add('no-graph-kit\n');
   }
-
-  // Staging must have run first: without STAGE.json the key would not describe the bundled core.
-  const stage = join(repo, 'desktop', 'resources', 'core', 'STAGE.json');
-  if (!existsSync(stage)) {
-    throw new Error(`${stage} is missing: stage the core (desktop/scripts/stage-core.mjs) before computing the app build key`);
-  }
-  add(`stage\0${readFileSync(stage, 'utf8')}\n`);
 
   add(`env\0${env.LLMIDE_BUILD_FEATURES ?? ''}\0${env.LLMIDE_INCLUDE_SPIKE ?? ''}\n`);
   // A toolchain change recompiles everything, so it must invalidate the stamp too.
