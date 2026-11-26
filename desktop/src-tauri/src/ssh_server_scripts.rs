@@ -10,6 +10,7 @@ use serde::Deserialize;
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
+use crate::remote::marker;
 use crate::remote_deploy::MIN_DISK_MB;
 
 const PROBE_FAILED: &str = "SSH_PROBE_FAILED";
@@ -741,16 +742,6 @@ struct RawCoreState {
     pid: Option<u32>,
     nonce: Option<String>,
     version: Option<String>,
-}
-
-/// Returns the value of the last `__LLMIDE_<name>__=` marker, so a value printed later wins.
-/// A marker counts only at the start of a line: a marker inside a value or a banner is text, not a
-/// result, so the server cannot spoof one by echoing it.
-fn marker<'a>(stdout: &'a str, name: &str) -> Option<&'a str> {
-    let prefix = format!("__LLMIDE_{name}__=");
-    stdout.lines().rev().find_map(|line| {
-        line.trim_end_matches('\r').strip_prefix(prefix.as_str()).map(str::trim)
-    })
 }
 
 fn required<'a>(stdout: &'a str, name: &str, code: &'static str) -> Result<&'a str, FsError> {

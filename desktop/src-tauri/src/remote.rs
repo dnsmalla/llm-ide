@@ -334,11 +334,11 @@ pub fn execute<R: SshExec>(target: &PreparedTarget, runner: &R) -> Result<SshTes
         herr("no_host_key", "SSH connected but did not report the server's host key fingerprint")
     })?;
     record_observed(target, &host_key_type, &fingerprint);
-    let uname = marker(&output.stdout, "__LLMIDE_UNAME__=")
+    let uname = marker(&output.stdout, "UNAME")
         .filter(|v| !v.is_empty())
         .ok_or_else(|| herr("no_uname", "the remote shell did not report its uname"))?;
-    let node_path = marker(&output.stdout, "__LLMIDE_NODE__=").filter(|v| !v.is_empty());
-    let node_version = marker(&output.stdout, "__LLMIDE_NODE_VERSION__=").filter(|v| !v.is_empty());
+    let node_path = marker(&output.stdout, "NODE").filter(|v| !v.is_empty());
+    let node_version = marker(&output.stdout, "NODE_VERSION").filter(|v| !v.is_empty());
     Ok(SshTestResult {
         host: target.host.clone(),
         port: target.port,
@@ -370,12 +370,15 @@ fn parse_host_key(stderr: &str) -> Option<(String, String)> {
     None
 }
 
-/// Last `marker` line, single-line and bounded: remote output is untrusted text but never rendered as HTML.
-fn marker<'a>(stdout: &'a str, prefix: &str) -> Option<&'a str> {
+/// The value of the LAST `__LLMIDE_<name>__=` line, single-line and bounded to [`MAX_REMOTE_CHARS`]. A marker
+/// counts only at the start of a line: a marker inside a value or a banner is text, not a result, so the
+/// server cannot spoof one by echoing it. Remote output is untrusted text but never rendered as HTML.
+pub(crate) fn marker<'a>(stdout: &'a str, name: &str) -> Option<&'a str> {
+    let prefix = format!("__LLMIDE_{name}__=");
     stdout
         .lines()
         .rev()
-        .find_map(|line| line.trim_end_matches('\r').strip_prefix(prefix))
+        .find_map(|line| line.trim_end_matches('\r').strip_prefix(prefix.as_str()))
         .map(|v| v.trim())
         .map(|v| {
             let end = v.char_indices().nth(MAX_REMOTE_CHARS).map(|(i, _)| i).unwrap_or(v.len());
@@ -600,6 +603,14 @@ mod tests {
         for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "ControlMaster=no", "ControlPath=none"] {
             assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == opt), "{opt}");
         }
+    }
+
+    #[test]
+    fn the_marker_is_the_last_line_start_match_and_is_capped() {
+        let long = "x".repeat(MAX_REMOTE_CHARS + 50);
+        let out = format!("__LLMIDE_A__=old\nnoise __LLMIDE_A__=spoof\n__LLMIDE_A__= {long} \r\n");
+        assert_eq!(marker(&out, "A").map(str::len), Some(MAX_REMOTE_CHARS));
+        assert_eq!(marker("noise __LLMIDE_A__=x\n", "A"), None);
     }
 
     #[test]
