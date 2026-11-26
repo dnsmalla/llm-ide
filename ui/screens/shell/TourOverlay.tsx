@@ -18,8 +18,9 @@ export function useTour(): { tour: TourState | null; start: (flow: TourFlow) => 
   return { tour, start, next, back, skip };
 }
 
-/** Finds `[data-tour-id="id"]` in the live DOM for the whole life of the step: a target that arrives late (a run
- * reaching Done) or is replaced by the step's own click (Start) is picked up again; none found = card only. */
+/** Finds `[data-tour-id="id"]` in the live DOM and keeps looking until one appears (a run reaching Done arrives late).
+ * Once found it is locked for the step: if it goes away (Start replaced by its own click) the spotlight drops rather
+ * than jumping to another match, such as the next card's Start. None found = card only. */
 function useTourTarget(targetId: string | undefined): HTMLElement | null {
   const [el, setEl] = useState<HTMLElement | null>(null);
   useEffect(() => {

@@ -47,7 +47,7 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     check();
     // Never disconnects itself: a target missing at TARGET_WAIT_MS degrades to a spotlight-less card
     // for now (el stays null), but a slow target (e.g. notes still generating) can still be picked up
-    // once it finally appears, and a target that later unmounts is re-searched the same way.
+    // once it finally appears. A found target is locked: if it later unmounts the spotlight drops, no re-search.
     const mo = new MutationObserver(check);
     mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-tour-id'] });
     const timeout = window.setTimeout(check, TARGET_WAIT_MS);
