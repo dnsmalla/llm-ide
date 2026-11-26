@@ -41,7 +41,7 @@ Boundary: `Core/DesignSystem` is Core, so any feature may import it; the gate (`
 | Tokens (second generator) | `desktop/scripts/gen-tokens.mjs (removed)`, output `desktop/src/design/tokens.css (removed)` | 151 | **Reads `ThemeTokens.swift` and `Theme.swift` by regex, not `tokens.json`.** Different output from `schema/design/tokens.css` (the two files differ from line 1). Run on 2026-10-31: `tokens.css is up to date`. `npm run build` runs the check (`desktop/package.json:8`). |
 | Components | `desktop/src/design/components/ (removed)` (`AppStatusBar`, `Chip`, `EditorTabBar`, `FileTreeRow`, `LibrarySidebar`, `ResizableDivider`, `SectionChromeBar`, `SettingsSectionCard`, `StatusBanner`, `icons`) | 10 files, 747 lines | Hand-ports of Mac components. |
 | Styles | `desktop/src/design/components.css (removed)` | 430 | |
-| Parity evidence | `desktop/parity/*.png` | 5 screenshots | Shell dark, light, midnight, editor, Mac app. Visual only, no automated diff. |
+| Parity evidence | `desktop/parity/*.png` | 4 screenshots | Shell dark, light, midnight, editor. Visual only, no automated diff. |
 | Status | `desktop/README.md` | | "LLM-IDE Desktop PoC (throwaway)": a Phase 0 spike, "not a product". |
 
 ### 2d. Web surfaces that already consume tokens
