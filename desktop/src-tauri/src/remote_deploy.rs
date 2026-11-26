@@ -276,7 +276,7 @@ pub(crate) fn explicit_bundle() -> Option<String> {
 }
 
 /// A release version that is safe as a file-name component: exactly x.y.z, digits only. R-034 #20.
-pub fn valid_version(version: &str) -> bool {
+pub fn valid_release_semver(version: &str) -> bool {
     let parts: Vec<&str> = version.split('.').collect();
     parts.len() == 3
         && version.len() <= 40
@@ -285,7 +285,7 @@ pub fn valid_version(version: &str) -> bool {
 
 /// The plain hub bundle for `version`: the env override, else the development folders (plain name only).
 pub fn bundle_path(version: &str) -> Option<String> {
-    if !valid_version(version) { return None; }
+    if !valid_release_semver(version) { return None; }
     if let Some(explicit) = explicit_bundle() { return Some(explicit); }
     let name = format!("llmide-core-{version}-linux-x64.tar.gz");
     crate::ssh_session::find_dev_bundle(&[name]).map(|path| path.to_string_lossy().into_owned())
@@ -718,7 +718,7 @@ pub async fn remote_diagnostics(target: SshTarget) -> Result<RemoteDiagnostics, 
 pub async fn remote_update(target: SshTarget, version: String, confirmation: String, hub_url: String, force: bool) -> Result<(), FsError> {
     tauri::async_runtime::spawn_blocking(move || {
         // R-034 #20: the version becomes a bundle file name and the remote VERSION line; validate it first.
-        if !valid_version(&version) { return Err(herr("invalid_version", "the release version is not x.y.z")); }
+        if !valid_release_semver(&version) { return Err(herr("invalid_version", "the release version is not x.y.z")); }
         let prepared = prepare(&target)?;
         require_confirmed_host_key(&prepared)?;
         if confirmation != target.host { return Err(herr("confirmation_mismatch", "type the hostname exactly to update")); }
@@ -1156,9 +1156,9 @@ mod tests {
 
     #[test]
     fn r034_a_version_must_be_x_y_z_before_it_is_a_file_name() {
-        for ok in ["1.2.3", "0.0.0", "10.20.30"] { assert!(valid_version(ok), "{ok}"); }
+        for ok in ["1.2.3", "0.0.0", "10.20.30"] { assert!(valid_release_semver(ok), "{ok}"); }
         for bad in ["", "1", "1.2", "v1.2.3", "1.2.3/../../etc", "1.2.3\n", "1.2.3.4.5", "1234567.2.3"] {
-            assert!(!valid_version(bad), "{bad:?} must be refused");
+            assert!(!valid_release_semver(bad), "{bad:?} must be refused");
         }
         assert!(bundle_path("1.2.3/../../etc").is_none(), "a traversal-shaped version never becomes a path");
     }

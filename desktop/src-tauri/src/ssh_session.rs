@@ -21,7 +21,7 @@ use crate::remote::RawOutput;
 use crate::ssh_askpass::{grant, AskpassGrant};
 use crate::ssh_server_scripts::{
     check_probe, glibc_is_below_standard, install_stdin, parse_core_state, parse_install_failure, parse_probe,
-    parse_start_failure, parse_stop, start_stdin, valid_version, ClaudeState, CoreState, Probe, INSTALL, PROBE,
+    parse_start_failure, parse_stop, start_stdin, valid_release_name, ClaudeState, CoreState, Probe, INSTALL, PROBE,
     ROLLBACK, START, START_BUSY, STANDARD_GLIBC, STATUS, STOP, UNINSTALL,
 };
 use crate::ssh_transport::{forward_args, exec_args, ForwardChild, SshAuth, SshEndpoint, SshExec};
@@ -297,7 +297,7 @@ fn is_start_failure(error: &FsError) -> bool {
 
 /// Refuses inputs that would otherwise reach ssh or the server in a useless state.
 fn check_inputs(input: &ConnectInput<'_>) -> Result<(), FsError> {
-    if !valid_version(input.version) {
+    if !valid_release_name(input.version) {
         return Err(herr("invalid_version", "the core version is not a valid release name"));
     }
     // Without a grant, ssh would try a terminal prompt that the desktop app does not have.

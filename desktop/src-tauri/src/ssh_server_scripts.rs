@@ -20,7 +20,7 @@ const PORT_MIN: u16 = 3460;
 const PORT_MAX: u16 = 3479;
 const CLAUDE_VERSION_MAX_CHARS: usize = 64;
 
-/// Shell helpers shared by the scripts. Validation mirrors [`valid_version`] and friends so the
+/// Shell helpers shared by the scripts. Validation mirrors [`valid_release_name`] and friends so the
 /// server rejects the same inputs the app rejects.
 macro_rules! sh_validators {
     () => {
@@ -839,7 +839,7 @@ pub fn parse_core_state(stdout: &str) -> Result<CoreState, FsError> {
         }
     }
     if let Some(version) = &raw.version {
-        if !valid_version(version) {
+        if !valid_release_name(version) {
             return Err(herr(STATE_INVALID, "the recorded version has an invalid shape"));
         }
     }
@@ -950,7 +950,7 @@ pub fn parse_install_failure(stdout: &str) -> Option<&'static str> {
 
 /// A release name: 1 to 64 of `[A-Za-z0-9._-]`, not starting with `.` or `-`. The same rule is
 /// enforced by the INSTALL and START scripts, so a name cannot escape the releases directory.
-pub fn valid_version(v: &str) -> bool {
+pub fn valid_release_name(v: &str) -> bool {
     (1..=64).contains(&v.len())
         && !v.starts_with('.')
         && !v.starts_with('-')
@@ -1210,16 +1210,16 @@ mod tests {
     }
 
     #[test]
-    fn valid_version_pattern() {
-        assert!(valid_version("1.2.3"));
-        assert!(valid_version("v_2-rc.1"));
-        assert!(valid_version(&"a".repeat(64)));
-        assert!(!valid_version(""));
-        assert!(!valid_version(".hidden"));
-        assert!(!valid_version("-rf"));
-        assert!(!valid_version("a/b"));
-        assert!(!valid_version("a b"));
-        assert!(!valid_version(&"a".repeat(65)));
+    fn valid_release_name_pattern() {
+        assert!(valid_release_name("1.2.3"));
+        assert!(valid_release_name("v_2-rc.1"));
+        assert!(valid_release_name(&"a".repeat(64)));
+        assert!(!valid_release_name(""));
+        assert!(!valid_release_name(".hidden"));
+        assert!(!valid_release_name("-rf"));
+        assert!(!valid_release_name("a/b"));
+        assert!(!valid_release_name("a b"));
+        assert!(!valid_release_name(&"a".repeat(65)));
     }
 
     #[cfg(unix)]
