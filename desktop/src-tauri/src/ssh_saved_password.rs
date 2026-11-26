@@ -94,6 +94,33 @@ pub(crate) fn apply_remember(b: &dyn SecretBackend, req: &Request<'_>, flagged: 
     }
 }
 
+/// [`apply_remember`], then the recent list's flag through `set_flag` (which answers whether the flag is now as asked).
+/// A store whose flag cannot be set is rolled back, so no password sits in the keychain with nothing pointing at it.
+pub(crate) fn apply_remember_flagged(
+    b: &dyn SecretBackend,
+    req: &Request<'_>,
+    flagged: bool,
+    set_flag: &dyn Fn(bool) -> Result<bool, FsError>,
+) -> Result<(), FsError> {
+    let Some(saved) = apply_remember(b, req, flagged)? else { return Ok(()) };
+    if matches!(set_flag(saved), Ok(true)) {
+        return Ok(());
+    }
+    if saved {
+        // Best effort: the original failure is the one to report.
+        let _ = forget(b, req.host, req.port, req.user);
+    }
+    Err(herr("password_not_saved", "The password could not be saved."))
+}
+
+/// Forgets the stored password of each login. Best effort and silent: it runs for logins that just left the recent
+/// list or switched to a key, where a keychain that refuses must not fail the action that caused it.
+pub(crate) fn forget_logins(b: &dyn SecretBackend, logins: &[(String, u16, String)]) {
+    for (host, port, user) in logins {
+        let _ = forget(b, host, *port, user);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +208,28 @@ mod tests {
         let err = unavailable();
         assert_eq!(err.code, "keychain_unavailable");
         assert!(!err.message.contains("pw"));
+    }
+
+    #[test]
+    fn a_store_whose_flag_cannot_be_set_is_rolled_back() {
+        let b = MemoryBackend::default();
+        let refused = apply_remember_flagged(&b, &req(Some("typed"), false, Some(true)), false, &|_| Ok(false)).unwrap_err();
+        assert_eq!(refused.code, "password_not_saved");
+        assert_eq!(load(&b, "example.com", 22, "alice").unwrap(), None, "the unflagged password was removed");
+        let failed = apply_remember_flagged(&b, &req(Some("typed"), false, Some(true)), false, &|_| Err(herr("io", "x"))).unwrap_err();
+        assert_eq!(failed.code, "password_not_saved");
+        assert_eq!(load(&b, "example.com", 22, "alice").unwrap(), None);
+        apply_remember_flagged(&b, &req(Some("typed"), false, Some(true)), false, &|_| Ok(true)).unwrap();
+        assert_eq!(load(&b, "example.com", 22, "alice").unwrap().as_deref(), Some("typed"));
+    }
+
+    #[test]
+    fn forget_logins_empties_each_listed_login_only() {
+        let b = MemoryBackend::default();
+        save(&b, "example.com", 22, "alice", "a").unwrap();
+        save(&b, "example.com", 22, "bob", "b").unwrap();
+        forget_logins(&b, &[("example.com".to_string(), 22, "alice".to_string())]);
+        assert_eq!(load(&b, "example.com", 22, "alice").unwrap(), None);
+        assert_eq!(load(&b, "example.com", 22, "bob").unwrap().as_deref(), Some("b"));
     }
 }

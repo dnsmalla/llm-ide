@@ -53,23 +53,39 @@ fn password_request<'a>(target: &'a SshServerTarget, typed: Option<&'a str>, fla
     }
 }
 
-/// The password to log in with: typed, or read from the keychain on request. The keychain is not touched unless the
-/// recent list says a password is stored there.
-fn resolve_password(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<Option<String>, FsError> {
+/// Whether this call asks for the stored password (nothing typed, and the flag is set).
+fn wants_saved_password(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> bool {
     let typed = typed.filter(|p| !p.is_empty());
-    let req = password_request(target, typed, flags);
-    if typed.is_some() || !req.use_saved {
+    typed.is_none() && password_request(target, None, flags).use_saved
+}
+
+/// Reads the stored password. The keychain is not touched unless the recent list says a password is stored there; a
+/// login with none stored (never saved, or cleared when its host key was replaced) must be typed.
+fn read_saved_password(target: &SshServerTarget) -> Result<Option<String>, FsError> {
+    if !prefs::ssh_password_saved(&target.host, target.port, &target.user) {
+        return Err(herr("SSH_PASSWORD_REQUIRED", "Enter the password for this server."));
+    }
+    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+    ssh_saved_password::resolve(backend.as_ref(), &password_request(target, None, PasswordFlags { use_saved: true, remember: None }))
+}
+
+/// The password to connect with: typed, or read from the keychain on request. A stored password is read only after
+/// the server offered the pinned host key, so an untrusted server cannot cause a keychain access (or get the password).
+fn resolve_password(deps: &Deps, target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<Option<String>, FsError> {
+    let typed = typed.filter(|p| !p.is_empty());
+    if !wants_saved_password(target, typed, flags) {
         return Ok(typed.map(str::to_string));
     }
     if !prefs::ssh_password_saved(&target.host, target.port, &target.user) {
         return Err(herr("SSH_PASSWORD_REQUIRED", "Enter the password for this server."));
     }
-    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
-    ssh_saved_password::resolve(backend.as_ref(), &req)
+    ssh_service::require_pinned_key_offered(deps, target)?;
+    read_saved_password(target)
 }
 
 /// After a login that worked: stores the typed password (checkbox on) or removes the stored one (checkbox off), and
-/// keeps the recent list's flag in step. Never reads or returns a password.
+/// keeps the recent list's flag in step. Never reads or returns a password. Only Connect calls it: a Test never
+/// changes the keychain, so an unticked box does not delete the password before Connect has used it.
 fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<(), FsError> {
     let req = password_request(target, typed, flags);
     let flagged = prefs::ssh_password_saved(&target.host, target.port, &target.user);
@@ -79,10 +95,36 @@ fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: Password
         return Ok(());
     }
     let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
-    if let Some(saved) = ssh_saved_password::apply_remember(backend.as_ref(), &req, flagged)? {
-        prefs::set_ssh_password_saved(&target.host, target.port, &target.user, saved)?;
+    let set_flag = |saved: bool| prefs::set_ssh_password_saved(&target.host, target.port, &target.user, saved);
+    ssh_saved_password::apply_remember_flagged(backend.as_ref(), &req, flagged, &set_flag)
+}
+
+/// The sentence shown with a good connect when the Keychain choice could not be applied. The connect itself stands.
+const KEYCHAIN_WARNING: &str = "Connected, but the password could not be saved in Keychain.";
+
+/// The non-fatal outcome of [`apply_remember`] after a connect that worked.
+fn remember_warning(outcome: Result<(), FsError>) -> Option<String> {
+    outcome.err().map(|_| KEYCHAIN_WARNING.to_string())
+}
+
+/// A good connect, with a warning when the Keychain choice failed (`warning` is absent when all went well).
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshConnectResult {
+    #[serde(flatten)]
+    status: SshServerStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<String>,
+}
+
+/// The test: the key is checked first and the stored password is read only for a trusted server. It never changes the
+/// keychain or the saved-password flag.
+fn run_test(deps: &Deps, target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<SshServerTest, FsError> {
+    let typed = typed.filter(|p| !p.is_empty());
+    if wants_saved_password(target, typed, flags) {
+        return ssh_service::test_lazy(deps, target, &|| read_saved_password(target));
     }
-    Ok(())
+    ssh_service::test(deps, target, typed)
 }
 
 #[tauri::command]
@@ -95,13 +137,7 @@ pub async fn remote_ssh_server_test(
     let flags = PasswordFlags { use_saved: use_saved_password.unwrap_or(false), remember: remember_password };
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        let resolved = resolve_password(&target, password.as_deref(), flags)?;
-        let result = ssh_service::test(&deps, &target, resolved.as_deref())?;
-        // A trusted answer means the login worked, so the choice about the password is applied now.
-        if result.trusted {
-            apply_remember(&target, password.as_deref(), flags)?;
-        }
-        Ok(result)
+        run_test(&deps, &target, password.as_deref(), flags)
     })
     .await
     .map_err(|_| herr("internal", "the SSH server test did not finish."))?
@@ -127,15 +163,16 @@ pub async fn remote_ssh_server_connect(
     use_saved_password: Option<bool>,
     remember_password: Option<bool>,
     take_over: Option<bool>,
-) -> Result<SshServerStatus, FsError> {
+) -> Result<SshConnectResult, FsError> {
     let host = host.inner().clone();
     let flags = PasswordFlags { use_saved: use_saved_password.unwrap_or(false), remember: remember_password };
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        let resolved = resolve_password(&target, password.as_deref(), flags)?;
+        let resolved = resolve_password(&deps, &target, password.as_deref(), flags)?;
         let status = ssh_service::connect_with_options(&deps, &host, &target, resolved.as_deref(), take_over.unwrap_or(false))?;
-        apply_remember(&target, password.as_deref(), flags)?;
-        Ok(status)
+        // The link is attached: a keychain that refuses now must not turn this good connect into a failure.
+        let warning = remember_warning(apply_remember(&target, password.as_deref(), flags));
+        Ok(SshConnectResult { status, warning })
     })
     .await
     .map_err(|_| herr("internal", "the SSH server connect did not finish."))?
@@ -250,8 +287,17 @@ pub(crate) fn production_deps() -> Result<Deps, FsError> {
         keygen: Arc::new(|path: &Path| keygen(path)),
         version: VERSION.to_string(),
         secrets_payload: Arc::new(secrets_payload),
+        forget_password: Arc::new(forget_saved_password),
         session_file,
     })
+}
+
+/// Removes one login's stored password. Best effort: called for a login that just lost its recent entry, switched to a
+/// key, or got a new host key, where a keychain that refuses must not fail that action.
+fn forget_saved_password(host: &str, port: u16, user: &str) {
+    if let Ok(backend) = secrets::default_backend() {
+        ssh_saved_password::forget_logins(backend.as_ref(), &[(host.to_string(), port, user.to_string())]);
+    }
 }
 
 /// The connector the core host calls at startup in SSH mode with key auth. It opens the saved link; attaching
@@ -466,6 +512,37 @@ mod tests {
                 "/home/alice/.llmide/ssh/id_llmide_example.com_22",
             ]
         );
+    }
+
+    #[test]
+    fn a_keychain_failure_after_a_good_connect_is_only_a_warning() {
+        assert_eq!(remember_warning(Ok(())), None);
+        let warning = remember_warning(Err(herr("keychain_unavailable", "The Keychain is not available."))).unwrap();
+        assert_eq!(warning, "Connected, but the password could not be saved in Keychain.");
+        let status = SshServerStatus {
+            link: "connected".into(), host: "h".into(), port: 22, user: "u".into(), local_url: String::new(), version: String::new(),
+            claude: String::new(), error: None, bundle_available: true,
+        };
+        let json = serde_json::to_value(SshConnectResult { status: status.clone(), warning: Some(warning) }).unwrap();
+        assert_eq!(json["link"], "connected", "the status fields stay at the top level");
+        assert_eq!(json["warning"], "Connected, but the password could not be saved in Keychain.");
+        let clean = serde_json::to_value(SshConnectResult { status, warning: None }).unwrap();
+        assert!(clean.get("warning").is_none());
+    }
+
+    #[test]
+    fn a_test_with_the_box_unticked_leaves_the_saved_password_flag_alone() {
+        use crate::ssh_service::tests::{fake, pin_text, scan_of, Fixture, HOST};
+        let fx = Fixture::new("cmds-test-keeps-flag");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let target = SshServerTarget { host: HOST.into(), port: 22, user: "alice".into(), key_path: String::new(), auth: SshAuthKind::Password };
+        prefs::upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let deps = fx.deps(&fake(vec![crate::ssh_session::tests::probe_with_glibc("2.0.0", "2.31")]), &scan_of("key-a"), true, true);
+        let flags = PasswordFlags { use_saved: false, remember: Some(false) };
+        let result = run_test(&deps, &target, Some("typed"), flags).unwrap();
+        assert!(result.trusted, "a trusted login: the point where Test used to apply the unticked box");
+        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "only Connect applies the Keychain choice");
     }
 
     const COMMANDS: [&str; 11] = [

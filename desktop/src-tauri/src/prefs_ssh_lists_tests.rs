@@ -406,3 +406,15 @@ fn a_worst_case_of_non_ascii_and_escaped_text_is_saved_whole() {
     assert!(size > 512 * 1024 && size <= MAX_BYTES, "a worst-case file fits the cap: {size} bytes");
     assert_eq!(loaded, before, "nothing is dropped at the byte caps");
 }
+
+#[test]
+fn setting_the_password_flag_reports_whether_it_stuck() {
+    let _guard = fresh();
+    assert!(!set_ssh_password_saved("example.com", 22, "ghost", true).unwrap(), "an unlisted login cannot carry it");
+    remember_ssh_server("example.com", 22, "alice", "/home/a/.ssh/id", SshAuthKind::Key).unwrap();
+    assert!(!set_ssh_password_saved("example.com", 22, "alice", true).unwrap(), "a key login cannot carry it");
+    remember_ssh_server("example.com", 22, "bob", "", SshAuthKind::Password).unwrap();
+    assert!(set_ssh_password_saved("example.com", 22, "bob", true).unwrap());
+    assert_eq!(clear_ssh_password_flags_for_endpoint("EXAMPLE.com", 22).unwrap(), vec!["bob".to_string()]);
+    assert!(!ssh_password_saved("example.com", 22, "bob"));
+}

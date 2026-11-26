@@ -235,23 +235,39 @@ fn recent_key(entry: &SshRecentServer) -> String {
     ssh_server_key(&entry.user, &entry.host, entry.port)
 }
 
-/// Puts `entry` first, replacing the same server. Returns the keys of the servers pushed past the cap, so their
-/// folders can go with them.
-fn put_recent_server(list: &mut Vec<SshRecentServer>, mut entry: SshRecentServer) -> Vec<String> {
+/// What a [`put_recent_server`] call displaced: the keys of the servers pushed past the cap (their folders go with
+/// them), and the logins whose Keychain password just became unreachable (a pushed-out entry, or a login switched to
+/// Key auth). The caller forgets those passwords so none is left behind unseen.
+#[derive(Default)]
+struct Displaced {
+    pushed_out: Vec<String>,
+    orphaned: Vec<SshRecentServer>,
+}
+
+/// Puts `entry` first, replacing the same server. Returns what it displaced (see [`Displaced`]).
+fn put_recent_server(list: &mut Vec<SshRecentServer>, mut entry: SshRecentServer) -> Displaced {
     let key = recent_key(&entry);
+    let mut displaced = Displaced::default();
     // A reconnect must not forget that the password is in the keychain: only the explicit setter changes the flag.
+    // A switch to Key auth leaves the stored password unreachable, so it is reported for removal instead.
     if let Some(old) = list.iter().find(|saved| recent_key(saved) == key) {
-        entry.password_saved = old.password_saved;
+        if entry.auth == SshAuthKind::Password {
+            entry.password_saved = old.password_saved;
+        } else if old.password_saved {
+            displaced.orphaned.push(old.clone());
+        }
     }
     list.retain(|saved| recent_key(saved) != key);
     list.insert(0, entry);
-    let mut pushed_out = Vec::new();
     while list.len() > SSH_RECENT_SERVERS_MAX {
         if let Some(old) = list.pop() {
-            pushed_out.push(recent_key(&old));
+            displaced.pushed_out.push(recent_key(&old));
+            if old.password_saved {
+                displaced.orphaned.push(old);
+            }
         }
     }
-    pushed_out
+    displaced
 }
 
 /// A loaded recent entry that passes the writer's shape rules, with the host lower-cased. A password entry keeps no
@@ -1047,7 +1063,21 @@ pub fn set_remote_hub(hub_url: String, tls_pin: String, mode: ServerMode) -> Res
 /// the hub and are kept as they are. The same write puts the server at the front of the recent list, because the
 /// callers reach it only after a successful connect or key install.
 ///
+#[cfg(test)]
 pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, ssh_auth: SshAuthKind, mode: ServerMode) -> Result<PrefsView, FsError> {
+    set_remote_ssh_collect(host, port, user, key_path, ssh_auth, mode).map(|(view, _)| view)
+}
+
+/// [`set_remote_ssh`], also returning the logins whose Keychain password became unreachable by this write (an evicted
+/// entry, or a login switched to Key auth), so the caller can forget those passwords.
+pub(crate) fn set_remote_ssh_collect(
+    host: String,
+    port: u16,
+    user: String,
+    key_path: String,
+    ssh_auth: SshAuthKind,
+    mode: ServerMode,
+) -> Result<(PrefsView, Vec<SshRecentServer>), FsError> {
     let host = host.trim().to_string();
     if !crate::remote::valid_host(&host) {
         return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
@@ -1064,7 +1094,8 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
     if ssh_auth == SshAuthKind::Key && !crate::remote::valid_key_path(&key_path) {
         return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
     }
-    edit_remote_server(|block| {
+    let mut orphaned = Vec::new();
+    let view = edit_remote_server(|block| {
         block.host = host;
         block.port = port;
         block.user = user;
@@ -1081,18 +1112,22 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
             last_used: now_secs(),
             password_saved: false,
         };
-        let pushed_out = put_recent_server(&mut block.ssh_recent_servers, entry);
-        block.ssh_recent_folders.retain(|folder| !pushed_out.contains(&folder.server));
+        let displaced = put_recent_server(&mut block.ssh_recent_servers, entry);
+        block.ssh_recent_folders.retain(|folder| !displaced.pushed_out.contains(&folder.server));
+        orphaned = displaced.orphaned;
         Ok(())
-    })
+    })?;
+    Ok((view, orphaned))
 }
 
 /// Puts a login at the front of the recent list as soon as its host key is confirmed or its probe succeeded, so a
 /// later failure (foreign core, missing bundle, start failure) does not lose it. Unlike [`set_remote_ssh`] it leaves
 /// the saved server and the mode alone: only a full connect changes those.
 ///
+/// Returns the logins whose Keychain password became unreachable (an evicted entry, or a login switched to Key auth).
+///
 /// Errors: the same shape errors as [`set_remote_ssh`].
-pub(crate) fn remember_ssh_server(host: &str, port: u16, user: &str, key_path: &str, ssh_auth: SshAuthKind) -> Result<(), FsError> {
+pub(crate) fn remember_ssh_server(host: &str, port: u16, user: &str, key_path: &str, ssh_auth: SshAuthKind) -> Result<Vec<SshRecentServer>, FsError> {
     let host = host.trim().to_string();
     if !crate::remote::valid_host(&host) {
         return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
@@ -1108,6 +1143,7 @@ pub(crate) fn remember_ssh_server(host: &str, port: u16, user: &str, key_path: &
     if ssh_auth == SshAuthKind::Key && !crate::remote::valid_key_path(&key_path) {
         return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
     }
+    let mut orphaned = Vec::new();
     edit_remote_server(|block| {
         let entry = SshRecentServer {
             host: host.to_ascii_lowercase(),
@@ -1118,11 +1154,12 @@ pub(crate) fn remember_ssh_server(host: &str, port: u16, user: &str, key_path: &
             last_used: now_secs(),
             password_saved: false,
         };
-        let pushed_out = put_recent_server(&mut block.ssh_recent_servers, entry);
-        block.ssh_recent_folders.retain(|folder| !pushed_out.contains(&folder.server));
+        let displaced = put_recent_server(&mut block.ssh_recent_servers, entry);
+        block.ssh_recent_folders.retain(|folder| !displaced.pushed_out.contains(&folder.server));
+        orphaned = displaced.orphaned;
         Ok(())
-    })
-    .map(|_| ())
+    })?;
+    Ok(orphaned)
 }
 
 /// Whether a login's recent entry says its password is in the keychain. False for an unknown login.
@@ -1131,17 +1168,35 @@ pub(crate) fn ssh_password_saved(host: &str, port: u16, user: &str) -> bool {
     stored().remote_server.ssh_recent_servers.iter().any(|entry| recent_key(entry) == key && entry.password_saved)
 }
 
-/// Sets the saved-password flag of a login that is in the recent list; a login that is not listed is left alone
-/// (nothing to flag). Only a password login can carry the flag.
-pub(crate) fn set_ssh_password_saved(host: &str, port: u16, user: &str, saved: bool) -> Result<(), FsError> {
+/// Sets the saved-password flag of a login that is in the recent list. Returns whether the flag is now as asked: a login
+/// that is not listed (nothing to flag) and a key login (which cannot carry the flag) answer `false` for `saved`, so the
+/// caller can undo the Keychain write it made for them.
+pub(crate) fn set_ssh_password_saved(host: &str, port: u16, user: &str, saved: bool) -> Result<bool, FsError> {
     let key = ssh_server_key(user.trim(), host.trim(), port);
+    let mut applied = !saved;
     edit_remote_server(|block| {
         if let Some(entry) = block.ssh_recent_servers.iter_mut().find(|entry| recent_key(entry) == key) {
             entry.password_saved = saved && entry.auth == SshAuthKind::Password;
+            applied = entry.password_saved == saved;
         }
         Ok(())
-    })
-    .map(|_| ())
+    })?;
+    Ok(applied)
+}
+
+/// Clears the saved-password flag of every login on one host and port, and returns their user names. Called when the
+/// endpoint's host key is replaced: a stored password must never reach a server that presents a different key.
+pub(crate) fn clear_ssh_password_flags_for_endpoint(host: &str, port: u16) -> Result<Vec<String>, FsError> {
+    let endpoint = endpoint_text(host.trim(), port);
+    let mut cleared = Vec::new();
+    edit_remote_server(|block| {
+        for entry in block.ssh_recent_servers.iter_mut().filter(|entry| entry.password_saved && endpoint_text(&entry.host, entry.port) == endpoint) {
+            entry.password_saved = false;
+            cleared.push(entry.user.clone());
+        }
+        Ok(())
+    })?;
+    Ok(cleared)
 }
 
 /// Host-side writer for the saved server's mode alone. The SSH service calls it when the user switches to the saved
