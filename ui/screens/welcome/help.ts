@@ -264,18 +264,6 @@ const EXTRAS: Readonly<Record<string, Pick<HelpTopic, "oneLine" | "flow" | "faq"
       { label: "Clone", tone: "check", detail: "Clone it into code/ so Factory and Graph can work on it." },
       { label: "Used everywhere", tone: "end", detail: "Its issues appear in Issues, Gantt and Factory's Backlog." },
     ] },
-  remote: { oneLine: "Remote opens a project that lives on a server: you connect over SSH, then edit files, review changes and run loops there.", related: ["project", "navigation"],
-    flow: [
-      { label: "Add a host", tone: "start", detail: "On Home, Remote hosts keeps several SSH hosts. Add one once: name, SSH host, port, user, key path, workspace address and remote project path. Test SSH checks the login." },
-      { label: "Confirm the host key", tone: "check", detail: "Test SSH shows the host's fingerprint. Compare it with the server operator's, then confirm it in Settings → Server & Backend. Until you confirm, the app refuses to run commands on the host." },
-      { label: "Open the project", detail: "Open SSH opens the project through the host. Open API connects with a PIN you type. The workspace address must be on wss://llm-ide.com for now." },
-      { label: "Edit and review", detail: "Open a file, Save, and review Changes. Commit or push with an explicit message and file selection. The terminal is allowlisted; the full shell needs the host's opt-in and a confirmation." },
-      { label: "Run and merge a loop", tone: "end", detail: "Run loop runs a loop on the host in an isolated worktree. Worktrees lists them: Diff to review, Merge to bring one in, Prune clean for old clean ones." },
-    ],
-    faq: [
-      { q: "What happens when I press Merge?", a: "It asks you to confirm first. The merge is refused if the live checkout on the server has uncommitted changes, and it is aborted if there is a conflict, so the live checkout stays unchanged." },
-      { q: "Why is my workspace address refused?", a: "This app only opens workspaces on wss://llm-ide.com, because its security policy blocks other addresses." },
-    ] },
   "recipe-issue": { oneLine: "Issue → Start on the Loop Board → the AI does the steps → you review and merge the draft MR.", related: ["factory", "set-repos"], flow: HELP_FLOWS.factory },
   "recipe-review": { oneLine: "Run Review Code and read what it found.", related: ["autotasks"],
     flow: [
