@@ -392,7 +392,11 @@ export class SshServerModel extends Store<SshServerState> {
    */
   loadFrom(entry: SshRecentServer): void {
     this.#generation += 1;
+    // A Keychain warning belongs to the connect that raised it, not to the server loaded next.
+    const status = this.getState().status;
+    const { warning: _dropped, ...withoutWarning } = status ?? ({} as SshServerStatus);
     this.set({
+      status: status === null ? null : withoutWarning,
       host: entry.host, port: String(entry.port), user: entry.user, keyPath: entry.keyPath, auth: entry.auth,
       fieldErrors: {}, test: null, error: null, foreign: null,
       passwordSaved: entry.auth === "password" && entry.passwordSaved, rememberPassword: entry.auth === "password" && entry.passwordSaved,

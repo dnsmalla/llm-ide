@@ -267,3 +267,17 @@ test("a connect that worked but could not save to the Keychain shows the warning
   assert.equal(decodeSshServerStatus({ ...connected, warning })?.warning, warning);
   assert.equal(decodeSshServerStatus(connected)?.warning, undefined);
 });
+
+test("loading another login clears the previous connect's Keychain warning", async () => {
+  const warning = "Connected, but the password could not be saved in Keychain.";
+  const m = new SshServerModel(fakeIo([], { async connect() { return { ...connected, warning }; } }));
+  m.setField("host", "server.example.com");
+  m.setField("user", "deploy");
+  m.setAuth("password");
+  m.setRemember(true);
+  await m.connectWithTest("typed");
+  assert.equal(m.getState().status?.warning, warning);
+  m.loadFrom(passwordEntry);
+  assert.equal(m.getState().status?.warning, undefined);
+  assert.equal(m.getState().status?.link, "connected", "the link state itself is kept");
+});
