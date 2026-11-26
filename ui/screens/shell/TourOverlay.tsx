@@ -17,20 +17,43 @@ export function useTour(): { tour: TourState | null; start: (flow: TourFlow) => 
   return { tour, start, next, back, skip };
 }
 
-/** Finds `[data-tour-id="id"]` in the live DOM, re-checking while it is missing (a step may follow a screen switch
- * that is still rendering), and gives up after TARGET_WAIT_MS so a step with no match still shows its card. */
+/** Finds `[data-tour-id="id"]` in the live DOM for the whole life of the step: a target that arrives late (a run
+ * reaching Done) or is replaced by the step's own click (Start) is picked up again; none found = card only. */
 function useTourTarget(targetId: string | undefined): HTMLElement | null {
   const [el, setEl] = useState<HTMLElement | null>(null);
   useEffect(() => {
     setEl(null);
     if (!targetId) return undefined;
     const find = () => document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
-    const found = find();
-    if (found) { setEl(found); return undefined; }
-    const mo = new MutationObserver(() => { const f = find(); if (f) { setEl(f); mo.disconnect(); } });
-    mo.observe(document.body, { childList: true, subtree: true });
-    const timeout = window.setTimeout(() => mo.disconnect(), TARGET_WAIT_MS);
-    return () => { mo.disconnect(); window.clearTimeout(timeout); };
+    // A detached or zero-size node is stale (its own click unmounted it), so treat it as not found yet.
+    const isLive = (node: HTMLElement | null): node is HTMLElement => {
+      if (!node || !node.isConnected) return false;
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const check = () => {
+      setEl((prev) => {
+        if (isLive(prev)) return prev;
+        const found = find();
+        return isLive(found) ? found : null;
+      });
+    };
+    // The desktop DOM churns constantly, so at most one layout read per frame.
+    let frame = 0;
+    const schedule = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => { frame = 0; check(); });
+    };
+    check();
+    // Never self-disconnects: the timeout only triggers one more check.
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    const timeout = window.setTimeout(check, TARGET_WAIT_MS);
+    return () => {
+      mo.disconnect();
+      window.clearTimeout(timeout);
+      if (frame) window.cancelAnimationFrame(frame);
+    };
   }, [targetId]);
   return el;
 }
