@@ -122,7 +122,8 @@ export interface NavState {
 
 export type NavMode = "local" | "remote" | "ssh";
 
-export type NavAction = { type: "select"; id: string } | { type: "step"; delta: 1 | -1 } | { type: "mode"; mode: NavMode };
+/** `mount` keeps a section alive in the background (visited) without switching to it. */
+export type NavAction = { type: "select"; id: string } | { type: "step"; delta: 1 | -1 } | { type: "mode"; mode: NavMode } | { type: "mount"; id: string };
 
 export function initialNav(active: string | null | undefined): NavState {
   const id: SectionId = active && isSelectable(active) ? active : DEFAULT_SECTION;
@@ -137,6 +138,9 @@ export function navReducer(state: NavState, action: NavAction): NavState {
     // A restored local-only section (stored choice, deep link) would render nothing once the hub connects.
     const next = { ...state, mode: action.mode };
     return isSelectableFor(state.active, action.mode) ? next : { ...next, active: DEFAULT_SECTION, visited: state.visited.includes(DEFAULT_SECTION) ? state.visited : [...state.visited, DEFAULT_SECTION] };
+  } else if (action.type === "mount") {
+    if (!isSelectableFor(action.id, mode) || state.visited.includes(action.id as SectionId)) return state;
+    return { ...state, visited: [...state.visited, action.id as SectionId] };
   } else if (action.type === "select") {
     if (isSelectableFor(action.id, mode)) id = action.id;
   } else {

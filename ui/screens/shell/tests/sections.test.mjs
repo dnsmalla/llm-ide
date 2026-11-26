@@ -63,3 +63,13 @@ test("a stored id of the removed Remote screen falls back to Home", async () => 
   assert.equal(isSelectable("remote"), false);
   assert.equal(initialNav("remote").active, DEFAULT_SECTION);
 });
+
+test("mount adds a section to visited without activating it", () => {
+  const start = initialNav("chat");
+  const next = navReducer(start, { type: "mount", id: "loop" });
+  assert.equal(next.active, "chat");
+  assert.deepEqual(next.visited, ["chat", "loop"]);
+  assert.equal(navReducer(next, { type: "mount", id: "loop" }), next, "already visited is a no-op");
+  const remote = { ...initialNav("chat"), mode: "remote" };
+  assert.equal(navReducer(remote, { type: "mount", id: "explorer" }), remote, "not selectable in this mode");
+});

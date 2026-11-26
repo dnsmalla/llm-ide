@@ -17,7 +17,9 @@ export type ShellEvent =
   /** The project's files or cached repository issues changed (clone, import); owners reload. */
   | { type: "project-changed" }
   /** Start or stop live capture (the tray's quick action); the Live screen toggles its own Start/Stop. */
-  | { type: "live-capture" };
+  | { type: "live-capture" }
+  /** Ask the Loop page to run a non-Factory loop (the loop's Board has no runner of its own). */
+  | { type: "run-loop"; loopId: string; inputPath?: string; task?: string };
 
 export type ShellEventType = ShellEvent["type"];
 type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) => void;
@@ -25,7 +27,11 @@ type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) 
 /** A pending request older than this is stale (the user moved on). */
 export const PENDING_TTL_MS = 10_000;
 
-const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section", "live-capture", "ask-chat"]);
+// run-loop is sticky because the Loop page may be mounted in the background only after the request is published.
+const STICKY: ReadonlySet<ShellEventType> = new Set<ShellEventType>(["open-file", "goto-section", "live-capture", "ask-chat", "run-loop"]);
+
+// NOTE: mirrors RUN_COMMAND_MAX in loop/native/run-command.ts; the shell must not import loop modules.
+const RUN_TASK_MAX = 2000;
 
 /** Project-relative path check: no absolute form, no `..`, no NUL, bounded. Returns the normalised path or null. */
 export function safeRelativePath(raw: string): string | null {
@@ -82,6 +88,13 @@ export function createShellBus(now: () => number = Date.now): ShellBus {
         const prompt = typeof ev.prompt === "string" ? ev.prompt.trim().slice(0, 4000) : "";
         if (prompt === "") return;
         ev = { ...ev, prompt };
+      }
+      if (ev.type === "run-loop") {
+        if (typeof ev.loopId !== "string" || ev.loopId === "" || ev.loopId.length > 200) return;
+        const task = typeof ev.task === "string" ? ev.task.trim().slice(0, RUN_TASK_MAX) : "";
+        // Real normalization needs the loop module and happens on the Loop page; here only bound the size.
+        const inputPath = typeof ev.inputPath === "string" && ev.inputPath.length <= 300 ? ev.inputPath : undefined;
+        ev = { type: "run-loop", loopId: ev.loopId, ...(inputPath !== undefined ? { inputPath } : {}), ...(task ? { task } : {}) };
       }
       const subs = handlers.get(ev.type);
       if (STICKY.has(ev.type)) pending.set(ev.type, { ev, at: now() });

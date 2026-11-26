@@ -19,7 +19,7 @@ import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, maxP
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
 import { hasRealProgress, runAllPasses } from "./all-passes.ts";
-import { RUN_COMMAND_MAX } from "./run-command.ts";
+import { RUN_COMMAND_MAX, isOneItemRun } from "./run-command.ts";
 import { reviewModeOf, stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
@@ -32,7 +32,7 @@ import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
 import { writeRunArchive } from "./summary.ts";
-import { clearQueue, loadQueue, saveQueue } from "./queue.ts";
+import { clearQueue, fromQueued, loadQueue, saveQueue, toQueued } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
@@ -143,7 +143,17 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     return () => ac.abort();
   }, [active]);
   const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeState] = useState<string | null>(null);
+  // Loop id/name of a board-requested start that has not become a run yet. While it is open every notice is also sent
+  // to that board, synchronously, so a refusal inside executeLoopGated is not lost. Closed when the run begins (the
+  // board shows its live card from then on) and when the start gate releases.
+  const boardWatchRef = useRef<{ loopId: string; loopName: string } | null>(null);
+  const tellBoard = (loopName: string, message: string, loopId?: string) => window.dispatchEvent(new CustomEvent("llmide-loop-board-notice", { detail: { loopName, message, ...(loopId ? { loopId } : {}) } }));
+  const setNotice = (text: string | null) => {
+    setNoticeState(text);
+    const watch = boardWatchRef.current;
+    if (watch && text) tellBoard(watch.loopName, text, watch.loopId);
+  };
   /** What the input-path field shows while typing; the loop keeps only the last valid value. */
   const [inputDraft, setInputDraft] = useState<{ loopId: string; text: string; error: string | null } | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -212,7 +222,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setLearnedWriteHook(() => core.request("/kb/agent/self-improvement/claim", { method: "POST", body: { workspaceRoot: projectRoot } }));
     return () => setLearnedWriteHook(null);
   }, [projectRoot]);
-  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean; command?: string }>>([]);
+  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean; command?: string; inputOverride?: string }>>([]);
   // "One item I name": the task text per loop id. Component state only, never saved to loop.json.
   const [runCommands, setRunCommands] = useState<Record<string, string>>({});
   const runCommandsRef = useRef(runCommands);
@@ -220,13 +230,15 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const queueRestored = useRef(false);
   const persistQueue = () => {
     if (!projectRoot) return;
-    saveQueue(projectRoot, queueRef.current.map((x) => ({ loopId: x.loop.id, scheduled: x.scheduled, at: new Date().toISOString() })));
+    saveQueue(projectRoot, queueRef.current.map((x) => toQueued(x, new Date().toISOString())));
   };
   const [queued, setQueued] = useState(0);
   const runLoopRef = useRef<(l: LoopDefinition, scheduled?: boolean) => void>(() => undefined);
   const [scheduleCron, setScheduleCron] = useState("");
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
+  // False until loop_work_root answered (or failed), so a board request never runs with a not-yet-known work root.
+  const [workRootKnown, setWorkRootKnown] = useState(false);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   // Back from a past run, the live log is mounted again at its top: show its end and follow it.
   useEffect(() => {
@@ -286,7 +298,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }
       setLoad(next);
       if (next.kind === "ok") {
-        const loop = primaryLoop(next.store);
+        // A board's Run request that started this mount names the loop to show: selecting the primary one first
+        // would make the board flip to another loop's board before the request is processed.
+        const wanted = boardRequestRef.current?.loopId;
+        const loop = next.store.loops.find((l) => l.id === wanted) ?? primaryLoop(next.store);
         setSelectedLoopId(loop?.id ?? null);
         setSelectedStageId(loop?.config.stages[0]?.id ?? null);
         setDirty(added.length > 0 && !saved);
@@ -330,9 +345,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   }, []);
 
   useEffect(() => {
-    if (!projectRoot) { setWorkRoot(null); return; }
+    if (!projectRoot) { setWorkRoot(null); setWorkRootKnown(true); return; }
     let live = true;
-    void invokeHost<string>("loop_work_root").then((p) => { if (live) setWorkRoot(p); }).catch(() => { if (live) setWorkRoot(null); });
+    setWorkRootKnown(false);
+    void invokeHost<string>("loop_work_root").then((p) => { if (live) { setWorkRoot(p); setWorkRootKnown(true); } }).catch(() => { if (live) { setWorkRoot(null); setWorkRootKnown(true); } });
     return () => { live = false; };
   }, [projectRoot]);
 
@@ -340,12 +356,19 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (!projectRoot || !load || load.kind !== "ok" || queueRestored.current) return;
     queueRestored.current = true;
     const byId = new Map(load.store.loops.map((l) => [l.id, l]));
-    const restored = loadQueue(projectRoot).flatMap((q) => { const l = byId.get(q.loopId); return l ? [{ loop: l, scheduled: q.scheduled }] : []; });
-    if (restored.length) {
+    const dropped: string[] = [];
+    const restored = loadQueue(projectRoot).flatMap((q) => {
+      const l = byId.get(q.loopId);
+      if (!l) return [];
+      const r = fromQueued(q, l);
+      if ("error" in r) { dropped.push(r.error); return []; }
+      return [r.entry];
+    });
+    if (restored.length || dropped.length) {
       queueRef.current = restored;
       setQueued(restored.length);
-      setNotice(`${restored.length} queued run(s) restored. Resume them when ready.`);
-      saveQueue(projectRoot, restored.map((x) => ({ loopId: x.loop.id, scheduled: x.scheduled, at: new Date().toISOString() })));
+      setNotice([...(restored.length ? [`${restored.length} queued run(s) restored. Resume them when ready.`] : []), ...dropped].join(" "));
+      persistQueue();
     }
   }, [projectRoot, load]);
 
@@ -445,8 +468,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   // The Board tab follows the loop selected here. Persist the name (the Board may mount later) and notify it live.
   useEffect(() => {
     if (!loop) return;
-    try { localStorage.setItem("llmide.loopBoardScope", loop.name); } catch { /* private mode */ }
-    window.dispatchEvent(new CustomEvent("llmide-loop-selected", { detail: loop.name }));
+    // Loop names are not unique (the same template can be added twice), so the board also gets the id.
+    try { localStorage.setItem("llmide.loopBoardScope", loop.name); localStorage.setItem("llmide.loopBoardScopeId", loop.id); } catch { /* private mode */ }
+    window.dispatchEvent(new CustomEvent("llmide-loop-selected", { detail: { id: loop.id, name: loop.name } }));
   }, [loop?.id, loop?.name]);
 
   const stage = loop?.config.stages.find((s) => s.id === selectedStageId) ?? loop?.config.stages[0] ?? null;
@@ -629,8 +653,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
 
   const executeLoopGated = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null, command?: string) => {
     if (dirty) return;
-    const oneItem = !isFactoryLoop(target) && target.config.workMode === "one";
-    // A "one item I name" run is the person's task; the schedule never has one, and a queue entry restored after a reload lost it.
+    // A task named on the loop's Board makes the run one-item even for workMode "all".
+    const oneItem = isOneItemRun(target.config.workMode, command, isFactoryLoop(target));
+    // A "one item I name" run is the person's task; the schedule never has one, and a queue entry persisted before commands were saved has none.
     if (oneItem && !command?.trim()) { setNotice(scheduled ? `“${target.name}” is set to one item you name; the schedule skipped it.` : `“${target.name}” is set to one item you name: type the task and press ▶ Run.`); return; }
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
@@ -776,6 +801,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     activeRunRef.current = activeRun;
     runningRef.current = true;
     ranRef.current = true;
+    boardWatchRef.current = null;
     startingRef.current = false;
     cancelledRef.current = false;
     runAbortRef.current = new AbortController();
@@ -980,8 +1006,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     }
   };
 
-  const enqueueLoop = (target: LoopDefinition, scheduled: boolean, command?: string) => {
-    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled, ...(command ? { command } : {}) });
+  const enqueueLoop = (target: LoopDefinition, scheduled: boolean, command?: string, inputOverride?: string) => {
+    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled, ...(command ? { command } : {}), ...(inputOverride !== undefined ? { inputOverride } : {}) });
     setQueued(queueRef.current.length);
     persistQueue();
     setNotice(`Queued “${target.name}”.`);
@@ -1002,6 +1028,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       await executeLoopGated(target, scheduled, start, command);
     } finally {
       startGateRef.current.release();
+      boardWatchRef.current = null;
       setStarting(false);
       // After a real run, `waitingRef` was just set by the run's own drain (above) and must survive for the next start.
       const waiting = ranRef.current ? new Set<string>() : waitingRef.current;
@@ -1039,6 +1066,74 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   };
 
   runLoopRef.current = runLoop;
+
+  // A request from the loop's Board (shell bus "run-loop"). The board has no runner: it lands here so the run uses the
+  // same approval dialog, worktree, queue and ship path. The screen may be hidden or still loading, so the request
+  // waits in a ref until the store is loaded.
+  const boardRequestRef = useRef<{ loopId: string; inputPath?: string; task?: string } | null>(null);
+  const processBoardRequest = () => {
+    const req = boardRequestRef.current;
+    if (!req || !load) return;
+    if (load.kind !== "ok") {
+      // missing / corrupt: nothing will ever load for this request, so say so instead of leaving the board waiting.
+      boardRequestRef.current = null;
+      tellBoard(req.loopId, `The Loop page could not load its loops: ${load.kind === "corrupt" ? load.message : "no loop file yet."}`, req.loopId);
+      return;
+    }
+    if (!workRootKnown) return;
+    boardRequestRef.current = null;
+    const target = load.store.loops.find((l) => l.id === req.loopId);
+    if (!target) { tellBoard(req.loopId, "That loop no longer exists on the Loop page.", req.loopId); return; }
+    const refuse = (message: string) => tellBoard(target.name, message, target.id);
+    if (isFactoryLoop(target)) return refuse("Use the Factory board's + Add to start a Factory run.");
+    // executeLoopGated returns silently while there are unsaved edits, so refuse here where the board can hear it.
+    if (dirtyRef.current) return refuse("The Loop page has unsaved edits; save or discard them first.");
+    // A per-run override, never written to the store: saving would race the unsaved-edit guard.
+    let run = target;
+    let override: string | undefined;
+    if (req.inputPath !== undefined && loopUsesInputPath(target)) {
+      const n = normalizeInputPath(req.inputPath);
+      if ("error" in n) return refuse(n.error);
+      run = { ...target, inputPath: n.path };
+      override = n.path;
+    }
+    const command = req.task?.trim() || undefined;
+    // A fresh mount already selected the requested loop in the load effect; this covers a page that was loaded with
+    // another loop selected, so the scope effect re-broadcasts the requested one and the board does not jump.
+    if (selectedLoopId !== target.id) {
+      setSelectedLoopId(target.id);
+      setSelectedStageId(target.config.stages[0]?.id ?? null);
+    }
+    if (runningRef.current || startGateRef.current.held) {
+      // enqueueLoop keeps an existing entry for this loop, so a new task would be dropped: say so.
+      const already = queueRef.current.some((x) => x.loop.id === target.id);
+      enqueueLoop(run, false, command, override);
+      return refuse(already ? "Already queued; this run's task and input path were not added." : "Queued behind the current run.");
+    }
+    // Tell first: a refusal raised synchronously inside executeLoop then replaces this message, not the reverse.
+    // `started` lets the board keep ▶ Run disabled until the run shows up live (a later refusal still arrives).
+    window.dispatchEvent(new CustomEvent("llmide-loop-board-notice", { detail: { loopName: target.name, loopId: target.id, message: "Started on the Loop page. Approve the commands if a dialog asks.", started: true } }));
+    boardWatchRef.current = { loopId: target.id, loopName: target.name };
+    void executeLoop(run, false, null, command);
+  };
+  const processBoardRequestRef = useRef(processBoardRequest);
+  processBoardRequestRef.current = processBoardRequest;
+  useEffect(() => {
+    const take = (ev: { loopId: string; inputPath?: string; task?: string } | null) => {
+      if (!ev) return;
+      boardRequestRef.current = { loopId: ev.loopId, ...(ev.inputPath !== undefined ? { inputPath: ev.inputPath } : {}), ...(ev.task !== undefined ? { task: ev.task } : {}) };
+      processBoardRequestRef.current();
+    };
+    take(shellBus.takePending("run-loop"));
+    const off = shellBus.subscribe("run-loop", (ev) => { shellBus.takePending("run-loop"); take(ev); });
+    return off;
+  }, []);
+  useEffect(() => { processBoardRequestRef.current(); }, [load?.kind, workRootKnown]);
+  // A failed read (openError) never sets `load`: answer a waiting request here too.
+  useEffect(() => {
+    const req = boardRequestRef.current;
+    if (req && openError) { boardRequestRef.current = null; tellBoard(req.loopId, `The Loop page could not load its loops: ${openError}`, req.loopId); }
+  }, [openError]);
 
   // The loops the scheduler starts are read when it fires, not when its timer was created.
   const loadRef = useRef(load);

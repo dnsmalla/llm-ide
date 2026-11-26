@@ -378,9 +378,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => {
     const offOpen = shellBus.subscribe("open-file", () => dispatch({ type: "select", id: "explorer" }));
     const offGoto = shellBus.subscribe("goto-section", (ev) => dispatch({ type: "select", id: ev.section }));
+    // A board's ▶ Run needs the Loop page alive (it owns the run path) even if it was never opened.
+    const offRun = shellBus.subscribe("run-loop", () => dispatch({ type: "mount", id: "loop" }));
     return () => {
       offOpen();
       offGoto();
+      offRun();
     };
   }, []);
 

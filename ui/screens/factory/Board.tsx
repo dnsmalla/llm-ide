@@ -128,11 +128,18 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const [cleanup, setCleanup] = useState<CleanupPlan | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   useEffect(() => {
-    const onSelect = (e: Event) => { const name = (e as CustomEvent<unknown>).detail; if (typeof name === "string" && name) setScope(name); };
+    // The detail is { id, name }; the older plain-string form (name only) is still accepted.
+    const onSelect = (e: Event) => {
+      const d = (e as CustomEvent<unknown>).detail;
+      if (typeof d === "string" && d) { setScope(d); setScopeId(null); return; }
+      const o = d as { id?: unknown; name?: unknown } | null;
+      if (o && typeof o.name === "string" && o.name) { setScope(o.name); setScopeId(typeof o.id === "string" && o.id ? o.id : null); }
+    };
     window.addEventListener("llmide-loop-selected", onSelect);
     return () => window.removeEventListener("llmide-loop-selected", onSelect);
   }, []);
   const [scope, setScope] = useState(() => { try { return localStorage.getItem("llmide.loopBoardScope") || "Factory"; } catch { return "Factory"; } });
+  const [scopeId, setScopeId] = useState<string | null>(() => { try { return localStorage.getItem("llmide.loopBoardScopeId") || null; } catch { return null; } });
   const panelRef = useRef<HTMLElement | null>(null);
   // Refs so the 5-minute timer reads the latest facts without being re-created on every load.
   const itemsRef = useRef<WorkItemRecord[]>([]);
@@ -468,7 +475,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const selInfo = selRunId ? worktrees.get(selRunId) ?? null : null;
 
   if (scope !== "Factory" && projectRoot) {
-    return <LoopRuns projectRoot={projectRoot} scope={scope} active={active} />;
+    return <LoopRuns projectRoot={projectRoot} scope={scope} scopeId={scopeId} active={active} />;
   }
   return (
     <div className="fx-board-root">

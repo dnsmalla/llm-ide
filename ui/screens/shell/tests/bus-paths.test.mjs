@@ -30,3 +30,23 @@ test("ask-chat is bounded, trimmed and sticky for a Chat section that mounts lat
   assert.equal(ev.prompt.startsWith("x"), true);
   assert.equal(bus.takePending("ask-chat"), null, "taking acknowledges it");
 });
+
+test("run-loop is validated, trimmed, bounded and sticky", () => {
+  const bus = createShellBus(() => 1000);
+  bus.publish({ type: "run-loop", loopId: "" });
+  bus.publish({ type: "run-loop", loopId: "x".repeat(201) });
+  assert.equal(bus.takePending("run-loop"), null, "a bad loop id is dropped");
+  bus.publish({ type: "run-loop", loopId: "L1", task: `  ${"t".repeat(2500)} `, inputPath: "src" });
+  const ev = bus.takePending("run-loop");
+  assert.equal(ev.task.length, 2000);
+  assert.equal(ev.inputPath, "src");
+  bus.publish({ type: "run-loop", loopId: "L1", task: "  ", inputPath: "p".repeat(301) });
+  const bare = bus.takePending("run-loop");
+  assert.equal("task" in bare, false);
+  assert.equal("inputPath" in bare, false);
+  let seen = 0;
+  const off = bus.subscribe("run-loop", () => { seen++; });
+  bus.publish({ type: "run-loop", loopId: "L2" });
+  off();
+  assert.equal(seen, 1);
+});

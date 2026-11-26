@@ -1,15 +1,21 @@
 // A board for every non-Factory loop: the loop's stages are the lanes, each run is a card placed at the stage it
-// reached (or Done). Facts come from system/loop-runs; nothing here can start or change a run.
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+// reached (or Done). Facts come from system/loop-runs. The run bar only REQUESTS a run (shell bus "run-loop"): the
+// Loop page owns execution (approval dialog, worktree, queue, ship), so this board never runs or edits anything.
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { shellBus } from "../shell/bus";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops } from "../loop/native/store.ts";
 import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
+import type { LoopDefinition } from "../loop/native/model.ts";
+import { afterSend, buildRunEvent, loadRunBarInput, runBarState, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
+import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
 
 export interface LoopRunsProps {
   projectRoot: string;
   scope: string;
+  /** The selected loop's id when known; names are not unique, so it wins over `scope`. */
+  scopeId?: string | null;
   active: boolean;
 }
 
@@ -26,6 +32,8 @@ const when = (iso: string): string => {
 const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code.startsWith("stopped") ? "stopped" : code === "aborted" ? "cancelled" : code === "awaiting_review" ? "awaiting review" : code === "running" ? "running" : "failed";
 
 interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean }
+
+const storage = (): Storage | null => { try { return window.localStorage; } catch { return null; } };
 
 /** The lane a run belongs to: Done on success, else its last executed or failed stage. */
 function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[]): { lane: string; note: string } {
@@ -44,7 +52,7 @@ function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, 
   return { lane: name, note: run.statusSummary };
 }
 
-export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNode {
+export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
   const [steps, setSteps] = useState<string[]>([]);
   const [cards, setCards] = useState<RunCard[]>([]);
@@ -52,6 +60,17 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
   const [error, setError] = useState<string | null>(null);
   // Bumped only by the Refresh button; the 5 s interval refreshes inside the effect without re-running it.
   const [reload, setReload] = useState(0);
+  const [loop, setLoop] = useState<LoopDefinition | null>(null);
+  const [input, setInput] = useState<RunBarInput>({ inputPath: "", task: "" });
+  const [runNote, setRunNote] = useState<string | null>(null);
+  const [typed, setTyped] = useState(false);
+  // The loaded loop only counts for this board when it is the one named by the scope.
+  const [ambiguous, setAmbiguous] = useState(false);
+  const [pending, setPending] = useState(false);
+  const pendingTimer = useRef<number | null>(null);
+  const clearPending = () => { if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current); pendingTimer.current = null; setPending(false); };
+  const boardLoop = loop !== null && (scopeId ? loop.id === scopeId : loop.name === scope && !ambiguous) ? loop : null;
+  const loopId = boardLoop?.id ?? null;
 
   useEffect(() => {
     if (!active) return;
@@ -68,12 +87,21 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
       setLive(readLiveCard());
       void Promise.all([
         readRecentRuns(fs, 100),
-        loadLoops(fs).then((r) => r.kind === "ok" ? r.store.loops.find((l) => l.name === scope) ?? null : null, () => null),
-      ]).then(async ([rows, loop]) => {
+        loadLoops(fs).then((r) => {
+          if (r.kind !== "ok") return { loop: null, same: 0 };
+          // Id first; the name only when no id is known, and then a shared name cannot be resolved.
+          if (scopeId) return { loop: r.store.loops.find((l) => l.id === scopeId) ?? null, same: 1 };
+          const named = r.store.loops.filter((l) => l.name === scope);
+          return { loop: named[0] ?? null, same: named.length };
+        }, () => ({ loop: null, same: 0 })),
+      ]).then(async ([rows, found]) => {
         if (!alive) return;
+        const loop = found.loop;
+        setAmbiguous(found.same > 1);
         const names = loop ? loop.config.stages.filter((s) => s.enabled).map((s) => s.name) : [];
         setSteps(names);
-        const shown = rows.filter((r) => r.loopName === scope).slice(0, 40);
+        setLoop(loop);
+        const shown = rows.filter((r) => (loop && r.loopId ? r.loopId === loop.id : r.loopName === scope)).slice(0, 40);
         const loaded = await Promise.all(shown.map(async (r) => {
           if (records.has(r.id)) return records.get(r.id)!;
           const rec = await loadRunRecord(fs, r.id, r.startedAt).catch(() => null);
@@ -92,13 +120,62 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
     refresh();
     const timer = window.setInterval(() => { if (!document.hidden) refresh(); }, 5_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [fs, projectRoot, scope, active, reload]);
+  }, [fs, projectRoot, scope, scopeId, active, reload]);
 
   useEffect(() => {
     const onLive = () => setLive(readLiveCard());
     window.addEventListener("llmide-loop-live", onLive);
     return () => window.removeEventListener("llmide-loop-live", onLive);
   }, []);
+
+  // Restore what was typed for this loop last time; `typed` stops a refresh from overwriting a draft.
+  // Drop the previous loop at once: until the refresh answers, the bar must not send the old loop's id for this scope.
+  useEffect(() => { setTyped(false); setRunNote(null); setLoop(null); setAmbiguous(false); clearPending(); }, [scope, scopeId]);
+  useEffect(() => () => { if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current); }, []);
+  // The saved path changed on the Loop page: the field follows it (typing holds only until then).
+  const savedPath = loop?.inputPath;
+  useEffect(() => { if (savedPath !== undefined) setInput((i) => ({ ...i, inputPath: savedPath })); }, [savedPath]);
+  useEffect(() => {
+    if (!loop || typed) return;
+    setInput(loadRunBarInput(loop, scope, storage()));
+  }, [loop, scope, typed]);
+  useEffect(() => {
+    const onNote = (e: Event) => {
+      const d = (e as CustomEvent<{ loopName?: unknown; loopId?: unknown; message?: unknown; started?: unknown }>).detail;
+      if (!d || !(d.loopName === scope || (loopId !== null && d.loopId === loopId)) || typeof d.message !== "string") return;
+      setRunNote(d.message);
+      if (d.started !== true) { clearPending(); return; }
+      // "Started" arrives synchronously inside the click that sent the request, so clearing here would re-enable
+      // ▶ Run at once and a double click would queue a duplicate. Stay disabled until the live card appears or a
+      // refusal arrives; the approval dialog can take a while, so the fallback is long and changes no text.
+      if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current);
+      pendingTimer.current = window.setTimeout(() => { pendingTimer.current = null; setPending(false); }, 120_000);
+    };
+    window.addEventListener("llmide-loop-board-notice", onNote);
+    return () => window.removeEventListener("llmide-loop-board-notice", onNote);
+  }, [scope, loopId]);
+  // The started run is on the board now; ▶ Run may queue another one deliberately.
+  useEffect(() => { if (pending && live?.loopName === scope) clearPending(); }, [pending, live, scope]);
+  const edit = (next: RunBarInput) => { setTyped(true); setInput(next); saveRunBarInput(scope, next, storage()); };
+  const bar = boardLoop ? runBarState(boardLoop, input) : null;
+  const sendRun = () => {
+    const ev = boardLoop ? buildRunEvent(boardLoop, input) : null;
+    if (!ev) return;
+    setRunNote("Sent to the Loop page…");
+    // Disabled until the Loop page answers, so a double click cannot queue a duplicate; no answer in 15 s means the
+    // page is not reachable (not mounted, or busy loading).
+    setPending(true);
+    pendingTimer.current = window.setTimeout(() => {
+      pendingTimer.current = null;
+      setPending(false);
+      setRunNote("The Loop page did not answer. Open the Loop page and try again.");
+    }, 15_000);
+    shellBus.publish(ev);
+    // A remembered task would silently turn every later run into a one-item run.
+    const next = afterSend(input);
+    setInput(next);
+    saveRunBarInput(scope, next, storage());
+  };
 
   const liveCard: RunCard | null = live && live.loopName === scope ? {
     lane: live.stageName || steps[0] || "Running",
@@ -140,6 +217,22 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
         <span className="fx-spacer" />
         <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
       </header>
+      {boardLoop && bar ? (
+        <form className="fx-form" aria-label={`Run ${scope}`} onSubmit={(e) => { e.preventDefault(); sendRun(); }}>
+          {bar.showInputPath ? (
+            <label className="fx-field fx-grow"><span>Input path</span>
+              <input value={input.inputPath} placeholder="(whole repository)" aria-invalid={bar.inputError !== null} onChange={(e) => edit({ ...input, inputPath: e.target.value })} />
+              {bar.inputError ? <small className="fx-error">{bar.inputError}</small> : null}
+            </label>
+          ) : <p className="fx-hint">{bar.reads}</p>}
+          <label className="fx-field fx-grow"><span>Task{bar.taskRequired ? " (required)" : " (optional)"}</span>
+            <textarea rows={2} value={input.task} maxLength={RUN_COMMAND_MAX} placeholder="One item, one line" onChange={(e) => edit({ ...input, task: e.target.value })} />
+          </label>
+          <button type="submit" className="fx-btn fx-primary" disabled={bar.blocked !== null || pending} title={bar.blocked ?? undefined}>▶ Run</button>
+          {bar.blocked && !bar.inputError ? <p className="fx-hint">{bar.blocked}</p> : null}
+          {runNote ? <p className="fx-hint" role="status">{runNote}</p> : null}
+        </form>
+      ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}
       <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
         {lanes.map((lane) => {
