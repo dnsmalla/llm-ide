@@ -137,7 +137,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   useEffect(() => () => { if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current); }, []);
   // The saved path changed on the Loop page: the field follows it (typing holds only until then).
   const savedPath = loop?.inputPath;
-  useEffect(() => { if (savedPath !== undefined) setInput((i) => ({ ...i, inputPath: savedPath })); }, [savedPath]);
+  useEffect(() => { if (savedPath !== undefined) { setPickError(null); setInput((i) => ({ ...i, inputPath: savedPath })); } }, [savedPath]);
   useEffect(() => {
     if (!loop || typed) return;
     setInput(loadRunBarInput(loop, scope, storage()));
@@ -160,13 +160,17 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   // The started run is on the board now; ▶ Run may queue another one deliberately.
   useEffect(() => { if (pending && live?.loopName === scope) clearPending(); }, [pending, live, scope]);
   const edit = (next: RunBarInput) => { setTyped(true); setPickError(null); setInput(next); saveRunBarInput(scope, next, storage()); };
+  // The picker is async: what was typed while it was open must survive the pick.
+  const inputRef = useRef(input);
+  inputRef.current = input;
   const pickFolder = async () => {
+    setPickError(null);
     // Same root as the Loop page (the repository loops run in), so both "+" buttons accept the same folders.
     const root = await invokeHost<string>("loop_work_root").catch(() => projectRoot);
     const r = await pickInputPath(root);
     if (!r) return;
     if ("error" in r) { setPickError(r.error); return; }
-    edit({ ...input, inputPath: r.path });
+    edit({ ...inputRef.current, inputPath: r.path });
   };
   const bar = boardLoop ? runBarState(boardLoop, input) : null;
   const sendRun = () => {
