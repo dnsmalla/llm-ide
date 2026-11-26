@@ -190,28 +190,11 @@ pub trait HealthProbe: Send + Sync {
     fn check(&self, url: &str) -> Result<Health, FsError>;
 }
 
-/// The production probe. It uses the hub agent, so a hub the user pinned (a self-signed certificate) answers the
-/// post-deploy and pre-update health gates the same way it answers login.
 pub struct SystemHealth;
-
-/// The saved pin for the hub a health URL points at: the stored pin only when the stored hub is the same host, so
-/// a pin saved for another hub is never offered to this one. Empty means ordinary WebPKI trust.
-pub(crate) fn pin_for_health_url(url: &str, stored_hub_url: &str, stored_pin: &str) -> String {
-    let origin = url.strip_suffix("/health").unwrap_or(url);
-    let probed = crate::remote_tls::split_hub(origin.trim());
-    let stored = crate::remote_tls::split_hub(stored_hub_url.trim());
-    match (probed, stored) {
-        (Ok((a, _)), Ok((b, _))) if a.eq_ignore_ascii_case(&b) => stored_pin.to_string(),
-        _ => String::new(),
-    }
-}
 
 impl HealthProbe for SystemHealth {
     fn check(&self, url: &str) -> Result<Health, FsError> {
-        let stored = crate::prefs::stored().remote_server;
-        let pin = pin_for_health_url(url, &stored.hub_url, &stored.tls_pin);
-        let agent = crate::remote_tls::hub_agent(&pin)?;
-        let res = agent.get(url).timeout(std::time::Duration::from_secs(10)).call()
+        let res = ureq::get(url).timeout(std::time::Duration::from_secs(10)).call()
             .map_err(|e| herr("health_unreachable", format!("the hub did not answer /health: {e}")))?;
         let text = res.into_string().map_err(|e| herr("health_unreadable", format!("invalid /health body: {e}")))?;
         parse_health(&text).ok_or_else(|| herr("health_unreadable", "invalid /health JSON"))
@@ -1224,15 +1207,6 @@ mod tests {
         assert!(calls.iter().any(|(c, _)| c.contains("llmide-deploy")));
         assert!(calls.iter().any(|(c, _)| c.contains("sudo -n /usr/local/sbin/llmide-deploy base")));
         assert!(calls.iter().all(|(c, _)| !c.contains("LLMIDE_VAULT_KEY")));
-    }
-
-    #[test]
-    fn the_saved_pin_is_used_only_for_the_same_hub_host() {
-        let pin = "sha256:abc";
-        assert_eq!(pin_for_health_url("https://hub.example.com/health", "https://hub.example.com", pin), pin);
-        assert_eq!(pin_for_health_url("https://HUB.example.com/health", "https://hub.example.com:8443", pin), pin);
-        assert_eq!(pin_for_health_url("https://other.example.com/health", "https://hub.example.com", pin), "");
-        assert_eq!(pin_for_health_url("https://hub.example.com/health", "", pin), "");
     }
 
     struct FakeHealth;
