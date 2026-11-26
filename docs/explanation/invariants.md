@@ -132,7 +132,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **Stale-server detection in `useQuestions`** — a `404` on `/generate-questions` surfaces: *"The running server is out of date. Restart `node server.mjs` and try again."* rather than a raw upstream error.
 - **`useChat` persists messages to `chrome.storage.local`** and restores on mount so side panel ↔ popup share the conversation.
 - **Chat history has NO retention cap.** The user owns their conversation; we persist the full array to `chatMessages`. On `QUOTA_BYTES` errors we surface `quotaWarning` through the hook and render a yellow banner in ChatView — we never silently drop old messages.
-- **`MAX_HISTORY = 10` is a PROMPT-SIZE bound, not a storage bound.** It caps how many prior messages travel to `/chat` as context. Do not conflate the two.
+- **`MAX_HISTORY = 10` is a PROMPT-SIZE bound, not a storage bound.** It caps how many prior messages travel to the chat route as context. Do not conflate the two.
 
 ### ❌ DO NOT do these
 
@@ -196,7 +196,7 @@ Each invariant maps to a previous regression. The *decision* behind it (why the 
 - **`SERVER_API_VERSION` + full `ENDPOINTS` array exposed on `GET /` and `GET /health`** — the client uses this for stale-server detection. Bump `SERVER_API_VERSION` whenever wire format or endpoint list changes.
 - **Per-request access log** — `res.on('finish', () => console.log(...))` so user sees method, path, status, duration in the terminal.
 - **`LANGUAGE_NAMES` + `resolveLanguage()`** — maps UI codes (`ja`, `en-US`, `zh-CN`, `ko-KR`, `es-ES`, `fr-FR`, `de-DE`, etc.) to a human name and a directive string. Falls back via `code.split('-')[0]`.
-- **Every LLM prompt carries a language directive** at the top: *"Always respond in ${name}, even if the user writes in a different language."* Covers `/generate-notes`, `/chat`, `/generate-questions`, `/generate-docx`.
+- **Every LLM prompt carries a language directive** at the top: *"Always respond in ${name}, even if the user writes in a different language."* Covers `/generate-notes`, `/generate-questions`, `/generate-docx`.
 - **`/generate-questions` localized H2 headings** — `HEADING_LABELS` for 日本語 (対立 / 要確認 / 要説明), 中文, 한국어, Español, Français, Deutsch. English is the fallback.
 - **Prompt injection fences** — all user content is wrapped between `<<<BEGIN>>>` and `<<<END>>>` delimiters; user content is sanitized to strip those delimiters before injection.
 - **Empty-after-sanitize guard** on every POST — reject with 400 rather than call Claude with empty input.
@@ -993,11 +993,11 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
 
 ### ✅ MUST preserve
 
-- **Local and SSH workspace logic lives once, in `desktop/workspace-core`.** The Tauri host (`desktop/src-tauri`) and `desktop/workspace-helper` only adapt it; the host-to-helper wire types live in workspace-core's `wire` module and its command table. A fix to file, git, search or path rules goes into workspace-core, never into the host or the helper alone.
+- **Local and SSH workspace logic lives once, in `desktop/workspace-core`.** The Tauri host (`desktop/src-tauri`) and `desktop/workspace-helper` only adapt it; the host-to-helper wire types live in workspace-core (its `wire` module and command table). A fix to file, git, search or path rules goes into workspace-core, never into the host or the helper alone.
 - **Shared ssh and remote host helpers have one home each.** Host keys: `host_keys.rs`. ssh argv: `ssh_transport.rs`. Hex and constant-time compare: `fsutil` (`hex`, `ct_eq`). A `remote*.rs` or `ssh_*.rs` file does not carry its own copy.
-- **UI building blocks live in `ui/kit`.** Buttons, fields, error text, inline confirmations, lists, dialog focus, and the pure helpers `decode.ts` (`isRecord`), `paths.ts` (`joinRel` root-relative, `joinAbs` absolute, `baseName`, `lastSegment`), `entry-name.ts` (`entryNameProblem`) and `host-error.ts` (`hostErrorText`). A screen imports them; it does not define its own.
-- **Every Tauri call goes through `invokeHost`** (`ui/screens/shell/host.ts`). `desktop/src/tauriChannel.ts` is the one `Channel` factory.
-- **The guard is `ui/screens/shell/tests/no-duplicate-helpers.test.mjs`.** It fails on a second `isRecord` and on a direct `invoke` import outside its allow-list (the allow-list may only shrink).
+- **UI building blocks live in `ui/kit`.** Buttons, fields, error text, inline confirmations, dialog focus, and the pure helpers `decode.ts` (`isRecord`), `paths.ts` (`joinRel` root-relative, `joinAbs` absolute, `baseName`, `lastSegment`), `entry-name.ts` (`entryNameProblem`) and `host-error.ts` (`hostErrorText`). New screen code imports them and must not define its own; the guard enforces this.
+- **New code calls the host only through `invokeHost`** (`ui/screens/shell/host.ts`); the guard's allow-list of older direct importers may only shrink. `desktop/src/tauriChannel.ts` is the one `Channel` factory.
+- **The guard is `ui/screens/shell/tests/no-duplicate-helpers.test.mjs`.** It fails on a second record guard under any name (matched by body) and on any value import of `@tauri-apps/api` or `@tauri-apps/api/core` (static or dynamic) outside its allow-list.
 
 ### ❌ MUST NOT
 

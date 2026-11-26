@@ -170,9 +170,9 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 
 ### One copy of shared code (do not re-duplicate)
 
-- Local and SSH workspace logic lives once in `desktop/workspace-core` (`wire`, command table); the Tauri host and `desktop/workspace-helper` only adapt it.
+- Local and SSH workspace logic lives once in `desktop/workspace-core` (its `wire` module and command table); the Tauri host and `desktop/workspace-helper` only adapt it.
 - Shared ssh/remote host helpers have one file each (`host_keys.rs`, `ssh_transport.rs`, `fsutil` hex/`ct_eq`); no second copy in `remote*`/`ssh_*` files.
-- UI buttons, fields, lists, dialogs and path/decode helpers live in `ui/kit`; screens must not define their own copies. Every Tauri call goes through `invokeHost`.
+- UI buttons, fields, dialogs and path/decode helpers live in `ui/kit`; new screen code imports them and must not define its own copies (the guard enforces it). New code calls the host only through `invokeHost`; the guard's allow-list may only shrink.
 - Guard: `ui/screens/shell/tests/no-duplicate-helpers.test.mjs`. Details: [`invariants.md`](docs/explanation/invariants.md#one-copy-of-shared-desktop-code-workspace-ssh-helpers-ui-building-blocks).
 
 ### Starting Points for Reading

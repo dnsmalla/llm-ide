@@ -58,7 +58,6 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/generate-notes` | Structured meeting notes (language-aware) |
 | `POST` | `/generate-docx` | DOCX export with the bundled template |
 | `POST` | `/generate-questions` | Localised follow-up questions |
-| `POST` | `/chat` | Free-form chat grounded in the transcript |
 | `POST` | `/extract-entities` | Action / decision / blocker extraction |
 
 ### Knowledge base
@@ -177,7 +176,7 @@ Profiles are tuned per workload. Defaults:
 
 | Profile | Routes | Limit |
 |---|---|---|
-| `llmHeavy` | `/generate-*`, `/chat` | 3 burst / 30 s |
+| `llmHeavy` | `/generate-*` | 3 burst / 30 s |
 | `dispatch` | `/kb/dispatch`, `/kb/review/approve` | 4 burst / 10 s |
 | `outcomePoll` | `/kb/outcomes/refresh` | 1 / 30 s |
 | `kbWrite` | `/kb/ingest`, `/kb/live/*` | 20 / 10 s |
