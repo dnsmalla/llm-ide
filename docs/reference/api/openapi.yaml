@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 161
+  x-api-version: 162
 servers:
   - url: "https://{host}"
     variables:
@@ -5201,119 +5201,6 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "404":
           description: "Not Found"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-  /chat:
-    post:
-      summary: "Chat with the meeting assistant about a transcript"
-      tags:
-        - "notes-generation"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: "object"
-              description: "REMOVED in API 89: the body is not read and the route answers 410 ENDPOINT_REMOVED (the extension side panel uses POST /agent/v2/stream). The old shape is kept so the 401/429 fixtures stay valid: message and transcript, history (last 10 turns), language."
-              properties:
-                message:
-                  type: "string"
-                  description: "User message (max 10 000 chars after sanitization)"
-                transcript:
-                  type: "string"
-                history:
-                  type: "array"
-                  items:
-                    "$ref": "#/components/schemas/Turn"
-                  description: "Prior turns (last 10 used); each item has role and content"
-                language:
-                  type: "string"
-      responses:
-        "200":
-          description: "Assistant reply"
-          x-undeclared: true
-        "400":
-          description: "Validation error"
-          x-undeclared: true
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "401":
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "410":
-          description: "HTTP 410"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "429":
-          description: "Rate limited"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-  /code-assist:
-    post:
-      summary: "Code-assist chat with optional file attachments"
-      description: "With `Accept: text/event-stream` the answer streams as SSE events (`progress`, `chunk`, `done`, `tasks`, `error`). A turn that fails because the named provider cannot run (missing / disabled / keyless, or its CLI is missing, broken or logged out) before ANY progress or chunk event went out sends `{ type: 'error', error, code: 'PROVIDER_UNAVAILABLE' }` (API v70+) — the buffered path's 400 with the same code — so a client can retry once without its tier route. Every other error event has no `code`."
-      tags:
-        - "notes-generation"
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              type: "object"
-              description: "REMOVED in API 92: the body is not read and the route answers 410 ENDPOINT_REMOVED (the chat runs on POST /agent/v2/stream, plain completions on POST /kb/complete). Only the three fields the fixtures use are declared."
-              properties:
-                message:
-                  type: "string"
-                  description: "User message (max 20 000 chars after sanitization)"
-                history:
-                  type: "array"
-                  items:
-                    "$ref": "#/components/schemas/Turn"
-                language:
-                  type: "string"
-      responses:
-        "200":
-          description: "Assistant reply"
-          x-undeclared: true
-        "400":
-          description: "Validation error, or (API v67+) PROVIDER_UNAVAILABLE — the named provider is missing, disabled or has no API key; message is the Settings hint"
-          x-undeclared: true
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "401":
-          description: "Unauthorized"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "410":
-          description: "HTTP 410"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "429":
-          description: "Rate limited"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
-        "502":
-          description: "Upstream LLM error (error code INTERNAL_ERROR)"
-          x-undeclared: true
           content:
             application/json:
               schema:
@@ -16865,66 +16752,6 @@ components:
         created_at:
           type: "string"
           description: "SQLite datetime (UTC)"
-    AgentContext:
-      type: "object"
-      description: "The Mac client's agent context. The server forwards only these keys (buildEnrichedAgentContext, extension/server/ai-routes.mjs); any other key is dropped. activeProject, indexedRepos entries and recentIssues entries are opaque to this route, so they are open objects."
-      properties:
-        sessionId:
-          type:
-            - "string"
-            - "null"
-        chatSessionId:
-          type:
-            - "string"
-            - "null"
-        activeProject:
-          type:
-            - "object"
-            - "null"
-          additionalProperties: true
-          description: "The active project as the Mac sends it; opaque here and forwarded unchanged."
-        indexedRepos:
-          type: "array"
-          items:
-            type: "object"
-            additionalProperties: true
-            description: "An indexed repo as the Mac sends it; opaque here."
-        recentIssues:
-          type: "array"
-          items:
-            type: "object"
-            additionalProperties: true
-            description: "A recent issue as the Mac sends it; opaque here."
-        workspaceRoot:
-          type:
-            - "string"
-            - "null"
-        activeRepoRoot:
-          type:
-            - "string"
-            - "null"
-        currentBranch:
-          type:
-            - "string"
-            - "null"
-          description: "The active repo's branch, capped at 200 characters."
-        gitStatus:
-          type:
-            - "object"
-            - "null"
-          description: "Staged and unstaged file counts and the upstream position (the Mac's GitStatus). Rendered per turn as the Git state block."
-          properties:
-            staged:
-              type: "integer"
-            unstaged:
-              type: "integer"
-            ahead:
-              type: "integer"
-            behind:
-              type: "integer"
-            hasUpstream:
-              type: "boolean"
-          additionalProperties: false
     AgentHistoryAgentHistorySummary:
       type:
         - "object"
@@ -17206,38 +17033,6 @@ components:
       properties:
         ok:
           const: true
-    AgentUsage:
-      type: "object"
-      description: "usage of an agent-path /code-assist reply: LegacyUsage plus the memory block size (route.mjs memoryUsage) and, when every model call of the turn reported tokens, the summed turn tokens (kb/usage.mjs turnTokenUsageFields). The memory fields and the token fields are absent in some turns, so they are x-optional."
-      properties:
-        attachmentCount:
-          type: "integer"
-        attachmentChars:
-          type: "integer"
-        paths:
-          type: "array"
-          items:
-            type: "string"
-        truncatedPaths:
-          type: "array"
-          items:
-            type: "string"
-        memoryChars:
-          type: "integer"
-        memoryApproxTokens:
-          type: "integer"
-        memoryHasChatMemory:
-          type: "boolean"
-        inputTokens:
-          type: "integer"
-        outputTokens:
-          type: "integer"
-        cacheReadTokens:
-          type: "integer"
-        cacheCreationTokens:
-          type: "integer"
-        modelCalls:
-          type: "integer"
     AgentV2Event:
       title: "agent/v2 SSE wire event"
       description: "One `data:` payload on GET/POST /agent/v2/stream. Every variant sets additionalProperties:false ON PURPOSE — a field added server-side must be added here in the same edit, which is what makes scripts/conformance-agent-v2.mjs able to notice that the Mac does not decode it. See SCHEMA.md."
@@ -17819,14 +17614,6 @@ components:
         planTitle:
           type: "string"
         projectName:
-          type: "string"
-    Attachment:
-      type: "object"
-      description: "One file attached to a Code Assistant turn. A content starting with '[binary:<media type>]' followed by a newline marks a binary file; an image media type is replaced by a one-line note on the legacy engine."
-      properties:
-        path:
-          type: "string"
-        content:
           type: "string"
     AuditItem:
       type: "object"
@@ -20139,22 +19926,6 @@ components:
             - "null"
         autoDispatch:
           type: "boolean"
-    LegacyUsage:
-      type: "object"
-      description: "usage of the legacy (no agentContext) /code-assist reply, and the attachment accounting of every /code-assist reply."
-      properties:
-        attachmentCount:
-          type: "integer"
-        attachmentChars:
-          type: "integer"
-        paths:
-          type: "array"
-          items:
-            type: "string"
-        truncatedPaths:
-          type: "array"
-          items:
-            type: "string"
     LibraryEntry:
       description: "A kit template or command (generation-library). surface divides the Doc Gen and Visual menus."
       type: "object"
@@ -21121,13 +20892,6 @@ components:
         meta:
           type: "object"
           additionalProperties: true
-    NotesGenerationOk:
-      type: "object"
-      required:
-        - "ok"
-      properties:
-        ok:
-          const: true
     NotesGenerationSource:
       type: "object"
       description: "One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources."
@@ -21136,19 +20900,6 @@ components:
           type: "string"
         content:
           type: "string"
-    NotesGenerationTask:
-      type: "object"
-      description: "A session task (llm_agent/tools/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string."
-      properties:
-        id:
-          type: "string"
-        title:
-          type: "string"
-        status:
-          type: "string"
-        createdAt:
-          type: "integer"
-          description: "Epoch milliseconds (Date.now())."
     OAuthStart:
       type: "object"
       required:
@@ -23176,14 +22927,6 @@ components:
         - "path"
         - "trusted"
         - "updatedAt"
-    Turn:
-      type: "object"
-      description: "One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt."
-      properties:
-        role:
-          type: "string"
-        content:
-          type: "string"
     UsageCounts:
       type: "object"
       required:

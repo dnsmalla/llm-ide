@@ -1689,77 +1689,10 @@ export type LoopImproveOffer = {
   forLoopId: string;
 };
 
-/** One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt. */
-export type Turn = {
-  role?: string;
-  content?: string;
-};
-
 /** One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources. */
 export type NotesGenerationSource = {
   name?: string;
   content?: string;
-};
-
-/** One file attached to a Code Assistant turn. A content starting with '[binary:<media type>]' followed by a newline marks a binary file; an image media type is replaced by a one-line note on the legacy engine. */
-export type Attachment = {
-  path?: string;
-  content?: string;
-};
-
-/** The Mac client's agent context. The server forwards only these keys (buildEnrichedAgentContext, extension/server/ai-routes.mjs); any other key is dropped. activeProject, indexedRepos entries and recentIssues entries are opaque to this route, so they are open objects. */
-export type AgentContext = {
-  sessionId?: string | null;
-  chatSessionId?: string | null;
-  /** The active project as the Mac sends it; opaque here and forwarded unchanged. */
-  activeProject?: Record<string, unknown> | null;
-  indexedRepos?: Record<string, unknown>[];
-  recentIssues?: Record<string, unknown>[];
-  workspaceRoot?: string | null;
-  activeRepoRoot?: string | null;
-  /** The active repo's branch, capped at 200 characters. */
-  currentBranch?: string | null;
-  /** Staged and unstaged file counts and the upstream position (the Mac's GitStatus). Rendered per turn as the Git state block. */
-  gitStatus?: {
-    staged?: number;
-    unstaged?: number;
-    ahead?: number;
-    behind?: number;
-    hasUpstream?: boolean;
-  } | null;
-};
-
-/** A session task (llm_agent/tools/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string. */
-export type NotesGenerationTask = {
-  id?: string;
-  title?: string;
-  status?: string;
-  /** Epoch milliseconds (Date.now()). */
-  createdAt?: number;
-};
-
-/** usage of the legacy (no agentContext) /code-assist reply, and the attachment accounting of every /code-assist reply. */
-export type LegacyUsage = {
-  attachmentCount?: number;
-  attachmentChars?: number;
-  paths?: string[];
-  truncatedPaths?: string[];
-};
-
-/** usage of an agent-path /code-assist reply: LegacyUsage plus the memory block size (route.mjs memoryUsage) and, when every model call of the turn reported tokens, the summed turn tokens (kb/usage.mjs turnTokenUsageFields). The memory fields and the token fields are absent in some turns, so they are x-optional. */
-export type AgentUsage = {
-  attachmentCount?: number;
-  attachmentChars?: number;
-  paths?: string[];
-  truncatedPaths?: string[];
-  memoryChars?: number;
-  memoryApproxTokens?: number;
-  memoryHasChatMemory?: boolean;
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  modelCalls?: number;
 };
 
 export type EntityAction = {
@@ -1784,10 +1717,6 @@ export type EntityBlocker = {
   /** Any other model value is coerced to med. */
   severity: "low" | "med" | "high";
   quote: string;
-};
-
-export type NotesGenerationOk = {
-  ok: true;
 };
 
 /** How to stop the item: method and path of the existing route, and the JSON body to send. null for an item with no cancel route (a live capture session). */
@@ -7263,40 +7192,6 @@ export type PostGenerateDocxResponse429 = CommonError;
 /** Two bodies: INTERNAL_ERROR (a runClaude failure, captured) and AI_PARSE_FAILED when the model's JSON cannot be parsed, and INTERNAL_ERROR with 'Failed to build DOCX: ...' when the docx build throws (export-routes.mjs). Only the first is captured; the others need a model reply or a broken build. */
 export type PostGenerateDocxResponse500 = CommonError;
 
-/** Request parts for `POST /chat` (schema/http/notes-generation.schema.json). */
-export type PostChatRequest = {
-  body: {
-    /** User message (max 10 000 chars after sanitization) */
-    message?: string;
-    transcript?: string;
-    /** Prior turns (last 10 used); each item has role and content */
-    history?: Turn[];
-    language?: string;
-  };
-};
-
-export type PostChatResponse401 = CommonError;
-
-export type PostChatResponse410 = CommonError;
-
-export type PostChatResponse429 = CommonError;
-
-/** Request parts for `POST /code-assist` (schema/http/notes-generation.schema.json). */
-export type PostCodeAssistRequest = {
-  body: {
-    /** User message (max 20 000 chars after sanitization) */
-    message?: string;
-    history?: Turn[];
-    language?: string;
-  };
-};
-
-export type PostCodeAssistResponse401 = CommonError;
-
-export type PostCodeAssistResponse410 = CommonError;
-
-export type PostCodeAssistResponse429 = CommonError;
-
 /** Request parts for `POST /kb/complete` (schema/http/notes-generation.schema.json). */
 export type PostKbCompleteRequest = {
   body: {
@@ -11047,22 +10942,6 @@ export interface ApiEndpoints {
       401: PostGenerateDocxResponse401;
       429: PostGenerateDocxResponse429;
       500: PostGenerateDocxResponse500;
-    };
-  };
-  "POST /chat": {
-    request: PostChatRequest;
-    responses: {
-      401: PostChatResponse401;
-      410: PostChatResponse410;
-      429: PostChatResponse429;
-    };
-  };
-  "POST /code-assist": {
-    request: PostCodeAssistRequest;
-    responses: {
-      401: PostCodeAssistResponse401;
-      410: PostCodeAssistResponse410;
-      429: PostCodeAssistResponse429;
     };
   };
   "POST /kb/complete": {

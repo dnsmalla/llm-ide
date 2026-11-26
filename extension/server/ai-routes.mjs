@@ -62,28 +62,6 @@ function ingestGeneratedDoc({ userId, ref, title, body, meta }) {
 // re-exported so existing imports from this module keep working.
 export { codeAssistErrorResponse };
 
-/** The 410 body for the removed POST /code-assist (the classic engine). Exported for tests. */
-export function codeAssistRemovedBody() {
-  return {
-    error: {
-      code: 'ENDPOINT_REMOVED',
-      message: 'This version of the LLM-IDE app is out of date: the classic chat endpoint was removed. Update the app to keep chatting.',
-      details: { use: '/agent/v2/stream', removedInApiVersion: 92 },
-    },
-  };
-}
-
-/** The 410 body for the removed POST /chat. Exported for tests. */
-export function chatRemovedBody() {
-  return {
-    error: {
-      code: 'ENDPOINT_REMOVED',
-      message: 'This version of the LLM-IDE extension is out of date: its chat endpoint was removed. Update the extension to keep using the side-panel chat.',
-      details: { use: '/agent/v2/stream', removedInApiVersion: 89 },
-    },
-  };
-}
-
 // The reply shape of /extract-entities as a structured-output schema (the same shape the prompt spells out). On the
 // direct API path the reply is then guaranteed to parse; validate() below still cleans and bounds every field.
 const str = { type: 'string' };
@@ -206,25 +184,6 @@ export async function handleAIRoutes(req, res) {
       body: result,
       meta: { generator: 'generate-notes', meetingId: meetingIdRef, language: lang.name },
     });
-    return true;
-  }
-
-  // The side panel's old buffered chat. Removed in API 89 (agent-kit K1 P4): the
-  // side panel now talks to the same v2 engine as the Mac app (POST
-  // /agent/v2/stream). Answers 410 for one release so an extension that was not
-  // updated shows a clear message instead of a blank failure; deleted with the
-  // classic runtime (API 92). The body is not read.
-  // Removed routes match on the path alone, so `/code-assist?x=1` answers 410 like `/code-assist`.
-  const pathOnly = String(req.url || '').split('?')[0];
-  if (req.method === 'POST' && pathOnly === '/chat') {
-    sendJSON(res, 410, chatRemovedBody());
-    return true;
-  }
-
-  // POST /code-assist was the classic engine's route (the fence loop). It answers 410 for one release;
-  // the chat runs on POST /agent/v2/stream (K1 P6 T6.9). POST /code-assist/decision was removed outright.
-  if (req.method === 'POST' && pathOnly === '/code-assist') {
-    sendJSON(res, 410, codeAssistRemovedBody());
     return true;
   }
 

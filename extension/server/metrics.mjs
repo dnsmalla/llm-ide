@@ -140,7 +140,7 @@ export function setKbGauge(kind, value) {
 // prevent a client flooding unrecognised paths from creating unbounded
 // Prometheus label cardinality (a DoS vector).
 const KNOWN_ROUTE_PREFIXES = new Set([
-  '/kb/', '/admin/', '/auth/', '/generate', '/chat', '/code-assist',
+  '/kb/', '/admin/', '/auth/', '/generate',
   '/plugins/', '/metrics', '/health', '/export/', '/live/',
 ]);
 

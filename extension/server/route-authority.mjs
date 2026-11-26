@@ -260,8 +260,6 @@ export const ROUTE_POLICY = Object.freeze([
     '/kb/usage/turn-composition',
   ]),
   ...rules('self.read', 'POST', [
-    '/chat',
-    '/code-assist',
     '/kb/loop/improve/state',
   ]),
   ...rules('self.write', 'POST', [

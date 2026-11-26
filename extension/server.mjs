@@ -523,7 +523,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          PUT/GET tier-routing carry `features.plan`, and `featureStatus.plan` is always reported (unset → standard).
 //   v161 — POST /kb/loop/ship pushes with the saved provider token and answers 409 `push_auth_failed` when the provider
 //          did not accept it (a protected-branch or hook decline stays `push_rejected`).
-const SERVER_API_VERSION = 161;
+//   v162 — POST /chat (410 since v89) and POST /code-assist (410 since v92) are deleted outright: both now 404 like any unknown route.
+//          The 410 ENDPOINT_REMOVED stubs promised "one release" and lasted seventy. No shipped client calls either path.
+const SERVER_API_VERSION = 162;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -540,8 +542,6 @@ const ALL_ENDPOINTS = [
   '/projects/:id/members',
   '/projects/:id/members/:userId',
   '/projects/:id/plan-tasks',
-  '/chat',
-  '/code-assist',
   '/agent/v2/stream',
   '/agent/v2/decision',
   '/agent/v2/session',
@@ -807,16 +807,13 @@ function rateLimitProfile(url, method) {
   }
   if (method !== 'POST') return null;
   if (url === '/generate-notes')         return 'llmFast';
-  if (url === '/chat')                   return 'llmFast';
-  if (url === '/kb/complete')            return 'llmFast';          // one plain model call, same cost class as /chat
+  if (url === '/kb/complete')            return 'llmFast';          // one plain model call, same cost class as /generate-notes
   if (url === '/generate-questions')     return 'llmFast';
   if (url === '/extract-entities')       return 'llmFast';
   if (url === '/generate-docx')          return 'llmFast';
   if (url === '/generate-doc')           return 'llmFast';          // LLM export twin of /generate-docx
   if (url === '/kb/docs/seed' || url === '/kb/projects/register') return 'kbWrite';
   if (url.startsWith('/projects')) return 'kbWrite';
-  // The removed classic /code-assist answers 410: a cheap llmFast request, never an agent turn.
-  if (url === '/code-assist')            return 'llmFast';
   // Chat agent turns get their own bucket — see `agentTurn` in
   // server/rate-limit.mjs for why `llm`'s burst of 3 was too small.
   // The v2 engine's chat turn stream (multi-minute agent turns).
