@@ -60,8 +60,9 @@ pub fn is_confirmed_command(cmd: &str) -> bool {
 
 /// Decodes the named argument. A missing key counts as `null`, so an optional field is `Option<T>`.
 pub fn arg<T: DeserializeOwned>(args: &Value, key: &str) -> R<T> {
-    let raw = args.get(key).cloned().unwrap_or(Value::Null);
-    serde_json::from_value(raw)
+    // Deserialising from the reference copies each string once into the result; `.cloned()` first would copy a
+    // 64 MB `fs_write_file` text a second time for nothing.
+    T::deserialize(args.get(key).unwrap_or(&Value::Null))
         .map_err(|e| FsError { code: "bad_request", message: format!("the argument `{key}` is missing or invalid: {e}") })
 }
 
