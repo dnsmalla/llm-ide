@@ -48,7 +48,21 @@ const ALLOWED: &[(&str, bool, &[&str])] = &[
     // Plain data git-lfs writes; git never reads `lfs.*`, and the program-running half (`filter.lfs.*`) stays refused.
     ("lfs", false, &["repositoryformatversion"]),
     ("lfs", true, &["access", "locksverify"]),
+    // LLM-IDE's own Factory ship records `factory.patchid-<commit> = <sha256>` (the reviewed diff's id) in the shared
+    // config. Git never reads [factory]; its lines are judged by `factory_patch_id_line`, never by a key list.
+    ("factory", false, &[]),
 ];
+
+fn is_lower_hex(s: &str, len: usize) -> bool {
+    s.len() == len && s.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
+/// `patchid-<40 or 64 lowercase hex> = <64 lowercase hex>` and nothing else (no quotes, comments or other text).
+fn factory_patch_id_line(line: &str) -> bool {
+    let Some((key, value)) = line.split_once('=') else { return false };
+    let Some(commit) = key.trim().strip_prefix("patchid-") else { return false };
+    (is_lower_hex(commit, 40) || is_lower_hex(commit, 64)) && is_lower_hex(value.trim(), 64)
+}
 
 fn key_ok(k: &str) -> bool {
     let mut cs = k.chars();
@@ -96,6 +110,13 @@ fn check_key_line(section: &(String, bool), line: &str, allow_worktree: bool) ->
         return Err(format!("unsupported line {line:.40}"));
     }
     let lk = key.to_ascii_lowercase();
+    if section.0 == "factory" {
+        return if !section.1 && factory_patch_id_line(line) {
+            Ok(None)
+        } else {
+            Err("[factory] may hold only factory.patchid-<commit> = <sha256> records".into())
+        };
+    }
     // A section may carry one rule per form (with and without a subsection); prefer the one matching this header.
     let rule = ALLOWED.iter().find(|(n, s, _)| *n == section.0 && *s == section.1).or_else(|| ALLOWED.iter().find(|(n, _, _)| *n == section.0));
     let Some((_, sub_ok, keys)) = rule else {
@@ -246,6 +267,28 @@ mod tests {
             "[lfs \"customtransfer.x\"]\n\tpath = /bin/sh\n",
             "[lfs.customtransfer.x]\n\tpath = /bin/sh\n",
             "[filter \"lfs\"]\n\tprocess = git-lfs filter-process\n",
+        ] {
+            assert!(check_config(bad.as_bytes()).is_err(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn accepts_only_the_exact_patch_id_records_a_factory_ship_writes() {
+        let sha1 = "dddba5b9cc68ba1600f8f3dea1ee60a79b63183e";
+        let sha256 = "a98681f4b6a688a573f9629fa268dced15355d999fe408ecd7c39be9d0b14188";
+        let real = format!("[core]\n\tbare = false\n[lfs]\n\trepositoryformatversion = 0\n[factory]\n\tpatchid-{sha1} = {sha256}\n");
+        check_config(real.as_bytes()).unwrap();
+        check_config(format!("[factory]\n\tpatchid-{sha256} = {sha256}\n\tpatchid-{sha1} = {sha256}\n").as_bytes()).unwrap();
+        for bad in [
+            format!("[factory \"x\"]\n\tpatchid-{sha1} = {sha256}\n"),
+            format!("[factory]\n\tother = {sha256}\n"),
+            format!("[factory]\n\tpatchid-{sha1}\n"),
+            format!("[factory]\n\tpatchid-{} = {sha256}\n", &sha1[..39]),
+            format!("[factory]\n\tpatchid-{} = {sha256}\n", sha1.to_uppercase()),
+            format!("[factory]\n\tpatchid-{sha1} = {}\n", &sha256[..63]),
+            format!("[factory]\n\tpatchid-{sha1} = {sha256} ; x\n"),
+            format!("[factory]\n\tpatchid-{sha1} = \"{sha256}\"\n"),
+            format!("[factory]\n\tpatchid-{sha1} = !sh -c x\n"),
         ] {
             assert!(check_config(bad.as_bytes()).is_err(), "{bad:?}");
         }
