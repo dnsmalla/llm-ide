@@ -5,6 +5,7 @@
 //! the desktop's own modules. The host keeps what is specific to it: the active project root and the command
 //! wrappers.
 //!
+//! - `commands`: the one table of Explorer commands (`run`) that the desktop and the helper both call.
 //! - `fs`: list, read, write, create, rename, copy and delete inside one root (see that module's docs).
 //! - `paths`: root validation, the "too broad" rule, the real-path check of an open descriptor and the Windows
 //!   verbatim-prefix rule that git and cmd.exe need.
@@ -16,6 +17,7 @@
 //! - `wire`: the host/helper line protocol, its constants and typed replies, defined once.
 //! - `trash`: the only removal path. It moves to the OS trash and never deletes permanently.
 
+pub mod commands;
 pub mod fs;
 pub mod git;
 pub mod git_config;

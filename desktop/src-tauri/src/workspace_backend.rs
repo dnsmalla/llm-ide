@@ -9,12 +9,13 @@
 //! open folder is opened again and watching is re-registered. `reset` closes it; Disconnect, Stop server, Uninstall
 //! and app exit reach it through the link's detach.
 
-use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-use llmide_workspace_core::scm::confirm_spec;
+use llmide_workspace_core::commands::{self, is_confirmed_command};
+use llmide_workspace_core::scm::{confirm_spec, ConfirmSpec};
+use llmide_workspace_core::trash::OsTrash;
 use llmide_workspace_core::search::aborted_done;
 use llmide_workspace_core::wire::{CloneEvent, CloneStarted, Opened, BUSY_CODE, CONFIRM_REQUIRED_CODE};
 use llmide_workspace_core::{FsError, R};
@@ -714,33 +715,33 @@ pub async fn on_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'stat
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("task failed: {e}"))
 }
 
-/// Runs an Explorer command. In SSH mode it goes to the server: `args` builds the UI's argument object from the
-/// request, and only on this branch. Otherwise `local` runs with the active project root, exactly as before. The
-/// request is moved into whichever branch runs. `needs_local_mode` keeps the file commands' hub-mode refusal; the git,
-/// search and watch commands never had it, so they pass `false`.
-pub async fn dispatch<Q, T>(
-    cmd: &'static str,
-    needs_local_mode: bool,
-    req: Q,
-    args: impl FnOnce(&Q) -> Value + Send + 'static,
-    local: impl FnOnce(PathBuf, Q) -> R<T> + Send + 'static,
-) -> R<Value>
-where
-    Q: Send + 'static,
-    T: Serialize,
-{
+/// Runs an Explorer command. In SSH mode it goes to the server; otherwise the core's command table runs it on the
+/// active project, with the SAME JSON `args` the SSH path sends, so the two paths cannot read an argument differently.
+/// `needs_local_mode` keeps the file commands' hub-mode refusal; the git, search and watch commands never had it, so
+/// they pass `false`.
+pub async fn dispatch(cmd: &'static str, needs_local_mode: bool, args: Value) -> R<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         if is_ssh_mode() {
-            return remote().call(&LinkConnector, cmd, args(&req), &native_dialog);
+            return remote().call(&LinkConnector, cmd, args, &native_dialog);
         }
         if needs_local_mode {
             crate::core_host::require_local_mode()?;
         }
         let root = crate::fs_ops::active_root()?;
-        to_json(&local(root, req)?)
+        run_local(&root, cmd, &args)
     })
     .await
     .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+}
+
+/// Runs one command from the core's table on this computer. The native dialog and the OS trash are the host's part;
+/// a destructive command also goes through the rate limit that remote confirmations share.
+fn run_local(root: &std::path::Path, cmd: &str, args: &Value) -> R<Value> {
+    let ask = |spec: &ConfirmSpec, question: &str| crate::confirm::ask(spec.title, question, spec.accept, true);
+    if is_confirmed_command(cmd) {
+        return DESTRUCTIVE_DIALOGS.run(|| commands::run(root, cmd, args, &ask, &OsTrash));
+    }
+    commands::run(root, cmd, args, &ask, &OsTrash)
 }
 
 #[cfg(test)]

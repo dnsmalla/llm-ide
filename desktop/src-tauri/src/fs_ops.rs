@@ -42,37 +42,37 @@ where
 /// the server (`workspace_backend::dispatch`). The argument object is what the UI sends, so the helper reads the same keys.
 #[tauri::command]
 pub async fn fs_list_dir(req: ListReq) -> R<serde_json::Value> {
-    dispatch("fs_list_dir", true, req, |r| serde_json::json!({"req": r}), |root, req| list_dir(&root, &req)).await
+    dispatch("fs_list_dir", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_read_file(req: ReadReq) -> R<serde_json::Value> {
-    dispatch("fs_read_file", true, req, |r| serde_json::json!({"req": r}), |root, req| read_file(&root, &req)).await
+    dispatch("fs_read_file", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_read_image(path: String) -> R<serde_json::Value> {
-    dispatch("fs_read_image", true, path, |v| serde_json::json!({"path": v}), |root, path| read_image(&root, &path)).await
+    dispatch("fs_read_image", true, serde_json::json!({"path": path})).await
 }
 
 #[tauri::command]
 pub async fn fs_read_range(req: RangeReq) -> R<serde_json::Value> {
-    dispatch("fs_read_range", true, req, |r| serde_json::json!({"req": r}), |root, req| read_range(&root, &req)).await
+    dispatch("fs_read_range", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_write_file(req: WriteReq) -> R<serde_json::Value> {
-    dispatch("fs_write_file", true, req, |r| serde_json::json!({"req": r}), |root, req| write_file(&root, &req)).await
+    dispatch("fs_write_file", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_create(req: CreateReq) -> R<serde_json::Value> {
-    dispatch("fs_create", true, req, |r| serde_json::json!({"req": r}), |root, req| create(&root, &req)).await
+    dispatch("fs_create", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_rename(req: RenameReq) -> R<serde_json::Value> {
-    dispatch("fs_rename", true, req, |r| serde_json::json!({"req": r}), |root, req| rename(&root, &req)).await
+    dispatch("fs_rename", true, serde_json::json!({"req": req})).await
 }
 
 /// Opens a PDF inside the active project with the OS viewer. The page never supplies an arbitrary path and
@@ -96,10 +96,10 @@ pub async fn fs_open_pdf(path: String) -> R<()> {
 
 #[tauri::command]
 pub async fn fs_copy(req: CopyReq) -> R<serde_json::Value> {
-    dispatch("fs_copy", true, req, |r| serde_json::json!({"req": r}), |root, req| copy(&root, &req)).await
+    dispatch("fs_copy", true, serde_json::json!({"req": req})).await
 }
 
 #[tauri::command]
 pub async fn fs_delete(path: String) -> R<serde_json::Value> {
-    dispatch("fs_delete", true, path, |v| serde_json::json!({"path": v}), |root, path| delete(&root, &path)).await
+    dispatch("fs_delete", true, serde_json::json!({"path": path})).await
 }

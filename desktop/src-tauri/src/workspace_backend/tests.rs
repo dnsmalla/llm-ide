@@ -366,7 +366,7 @@ fn ssh_mode_dispatch_without_folder_is_no_project() {
     let _mode = crate::core_host::process_mode_guard();
     crate::core_host::set_process_mode(2);
     remote().set_folder_for_test(None);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({"req": {"path": ""}}), |_root, ()| Ok(0u8)));
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({"req": {"path": ""}})));
     crate::core_host::set_process_mode(0);
     assert_eq!(result.unwrap_err().code, "no_project");
 }
@@ -376,7 +376,7 @@ fn local_mode_without_a_project_is_no_project() {
     // The local branch is unchanged: it still asks for the active project root, and never the server.
     let _mode = crate::core_host::process_mode_guard();
     crate::core_host::set_process_mode(0);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({}), |_root, ()| Ok(0u8)));
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({})));
     if let Err(e) = &result {
         assert_eq!(e.code, "no_project");
     }

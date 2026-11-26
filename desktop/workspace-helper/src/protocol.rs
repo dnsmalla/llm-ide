@@ -8,7 +8,6 @@
 use std::io::{self, Write};
 use std::sync::Mutex;
 
-use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 // A last line with no newline arrives as `Line::Unterminated`; `main` handles it like a whole line, so a client that
@@ -27,22 +26,7 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request, Value> {
     }
 }
 
-/// Decodes the named argument. A missing key counts as `null`, so an optional field is `Option<T>`.
-pub fn arg<T: DeserializeOwned>(args: &Value, key: &str) -> Result<T, llmide_workspace_core::FsError> {
-    let raw = args.get(key).cloned().unwrap_or(Value::Null);
-    serde_json::from_value(raw).map_err(|e| llmide_workspace_core::FsError {
-        code: "bad_request",
-        message: format!("the argument `{key}` is missing or invalid: {e}"),
-    })
-}
-
-/// Like `arg`, for a boolean that defaults to `false` when the key is absent.
-pub fn arg_or_false(args: &Value, key: &str) -> Result<bool, llmide_workspace_core::FsError> {
-    match args.get(key) {
-        None | Some(Value::Null) => Ok(false),
-        Some(_) => arg(args, key),
-    }
-}
+pub use llmide_workspace_core::commands::{arg, arg_or_false};
 
 /// The writer for the one stdout (or a test buffer). Each message is serialised first, then written and flushed
 /// under the lock as a single line.
