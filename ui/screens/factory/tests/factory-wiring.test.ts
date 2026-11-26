@@ -40,6 +40,18 @@ test("the entry takes a pending focus request from the shell bus, then live ones
   assert.match(entry, /if \(ev && ev\.section === "conflicts"\)/);
 });
 
+test("the board's Input path has the same + folder picker as the Loop page, through the one shared helper", () => {
+  const board = read("../LoopRuns.tsx");
+  const loopPage = read("../../loop/native/NativeLoopScreen.tsx");
+  for (const src of [board, loopPage]) {
+    assert.match(src, /import \{ pickInputPath \} from "[^"]*pick-input-path\.ts";/);
+    assert.match(src, /await pickInputPath\(/);
+    assert.equal(/"pick_folder"/.test(src), false, "the picker protocol lives only in pick-input-path.ts");
+  }
+  assert.match(board, /<button type="button" className="fx-btn"[^>]*onClick=\{\(\) => void pickFolder\(\)\}>\+<\/button>/);
+  assert.match(board, /invokeHost<string>\("loop_work_root"\)/, "the board resolves picks against the loops' work root, like the Loop page");
+});
+
 test("the loop-run board guards async results with the local alive flag and does not re-run its effect on a tick", () => {
   const src = read("../LoopRuns.tsx");
   assert.equal(/if \(!live\) return;/.test(src), false, "React state must not gate the load");

@@ -26,6 +26,15 @@ export function normalizeInputPath(raw: string): { path: string } | { error: str
   return { path };
 }
 
+/** A folder chosen in the native picker (absolute) as an input path of the repository at `root`. */
+export function inputPathFromPicked(picked: string, root: string): { path: string } | { error: string } {
+  const dir = picked.replace(/\/+$/, "");
+  const base = root.replace(/\/+$/, "");
+  if (dir === base) return { path: "" };
+  if (!dir.startsWith(`${base}/`)) return { error: "Choose a folder inside this repository." };
+  return normalizeInputPath(dir.slice(base.length + 1));
+}
+
 /** True when `path` is the scope folder or inside it. Segment-aware: `src/billing2` is not inside `src/billing`. */
 export function pathInside(scope: string, path: string): boolean {
   return scope === "" || path === scope || path.startsWith(`${scope}/`);
