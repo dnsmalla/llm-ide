@@ -258,7 +258,7 @@ export interface TierStatus {
   agentReason?: string;
   via?: string;
   reason?: string;
-  /** featureStatus of an agent role (loop, autoTasks) only: the tier it runs on (an unset role takes standard). */
+  /** featureStatus of an agent role (loop, plan, autoTasks) only: the tier it runs on (an unset role takes standard). */
   tier?: string;
 }
 export interface RoutingTiers {

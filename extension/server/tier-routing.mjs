@@ -28,7 +28,7 @@ export const ROUTING_TIERS = Object.freeze(['strong', 'standard', 'cheap', 'imag
 // `decisions` (API v73) — the `decide` tool and other calibrated
 // yes/no / pick-one / score calls (llm_agent/tools/decide.mjs). The only
 // feature a decision-only (jev) tier may serve; see providers/tier-routing.mjs.
-export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal', 'decisions']);
+export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 'plan', 'quickChat', 'pipeline', 'internal', 'decisions']);
 
 // Server wire ids only. `custom:<id>` ids are the Mac's provider UUIDs (case
 // preserved — the registry is keyed by the exact id the Mac sent). `jev` is

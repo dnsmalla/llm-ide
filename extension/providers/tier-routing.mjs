@@ -276,7 +276,7 @@ export function resolveFeatureRoute(userId, feature, db) {
 
 // Roles whose work runs on the Agent SDK engine (POST /kb/loop/agent-run). Settings promises "Standard is the
 // default for every role left on it", so an unset one of these takes the Standard tier.
-export const AGENT_FEATURES = Object.freeze(['loop', 'autoTasks']);
+export const AGENT_FEATURES = Object.freeze(['loop', 'autoTasks', 'plan']);
 const AGENT_DEFAULT_TIER = 'standard';
 
 /**

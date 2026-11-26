@@ -5,7 +5,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { detectProjectStructureCommand, detectProjectTestCommand, detectStructureCommand, detectTestCommand } from "./environment.ts";
-import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
+import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, isPlanSkill, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
 import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, parseFactoryTemplate, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, upgradeOldDefault, writeTemplateIfMissing, type FactoryTemplate } from "./factory-template.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
@@ -15,7 +15,7 @@ import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
-import { fetchRoutedLoopModel, stepModel } from "./step-model.ts";
+import { fetchRoutedModels, stepModel, type RoutedRole } from "./step-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -557,13 +557,14 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null, model: null };
   run.live.progress = progress;
   // Not awaited: the routing read may wait for a CLI probe, and a label must never delay the run's first step.
-  let routed: string | null = null;
+  let routed: Record<RoutedRole, string | null> = { loop: null, plan: null };
   // The agent phase running now, so a routing read that lands mid-step (always the first step) still labels it.
   let agentPhase: "step" | "repair" | null = null;
-  const showModel = (phase: "step" | "repair" | null) => { agentPhase = phase; progress.model = phase ? stepModel(routed, phase, config.repairModel) : null; };
-  void fetchRoutedLoopModel(d.core).then((m) => {
+  let agentRole: RoutedRole = "loop";
+  const showModel = (phase: "step" | "repair" | null, role: RoutedRole = "loop") => { agentPhase = phase; agentRole = role; progress.model = phase ? stepModel(routed[role], phase, config.repairModel) : null; };
+  void fetchRoutedModels(d.core).then((m) => {
     routed = m;
-    if (agentPhase && run.live.progress === progress) { showModel(agentPhase); emit(); }
+    if (agentPhase && run.live.progress === progress) { showModel(agentPhase, agentRole); emit(); }
   });
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
@@ -573,7 +574,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
       progress.substate = null;
-      showModel(e.stage.kind === "skill" ? "step" : null);
+      showModel(e.stage.kind === "skill" ? "step" : null, e.stage.kind === "skill" && isPlanSkill(e.stage.skillId) ? "plan" : "loop");
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {

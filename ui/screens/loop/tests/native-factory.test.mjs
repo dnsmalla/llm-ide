@@ -489,3 +489,13 @@ test("the Test loop's step plan is bookkeeping: a skill call or a repair may edi
   assert.deepEqual(f.guardedPaths(refactorLoop, null, [plan]), [plan], "another loop's repair may not");
   assert.deepEqual(f.guardedPaths(testLoop, null, ["llm-doc/loop/test/TEST-MAP.md"]), ["llm-doc/loop/test/TEST-MAP.md"], "only the plan file");
 });
+
+test("agentRunBody: only plan-writing skills carry role plan", () => {
+  const base = { message: "m", repoRoot: "/p", timeoutMs: 1000, projectRoot: "/p", llmDocExists: false };
+  for (const skillId of [f.FACTORY_PLAN_SKILL, "skills/refactor-planner"]) {
+    assert.equal(f.agentRunBody({ ...base, stage: { kind: "skill", skillId } }).role, "plan", skillId);
+  }
+  for (const skillId of [f.FACTORY_IMPLEMENT_SKILL, f.FACTORY_INTAKE_SKILL, f.FACTORY_REVIEW_SKILL, "skills/step-review", "skills/refactor-apply"]) {
+    assert.equal("role" in f.agentRunBody({ ...base, stage: { kind: "skill", skillId } }), false, skillId);
+  }
+});

@@ -443,6 +443,10 @@ test('route: Settings model routing picks the model when the step names none (lo
     assert.equal(r.seen.provider, 'anthropic');
     r = await run({ role: 'autoTasks' });
     assert.equal(r.seen.model, 'claude-haiku-5-5');
+    // The plan role is unset here → Standard, not the loop's tier.
+    r = await run({ role: 'plan' });
+    assert.equal(r.res.statusCode, 200);
+    assert.equal(r.seen.model, 'claude-sonnet-5-5');
     // An explicit model (repair model, usage-cap fallback) wins over the role.
     r = await run({ role: 'autoTasks', model: 'm-explicit' });
     assert.equal(r.seen.model, 'm-explicit');

@@ -13,7 +13,7 @@ export const TIERS: readonly { id: string; label: string; hint: string }[] = [
 ];
 
 /** Roles that start on Standard in the draft while no tier is saved for them (Decision is never preselected). */
-const PRESELECT_ROLES: readonly string[] = ["subagents", "internal", "loop", "autoTasks"];
+const PRESELECT_ROLES: readonly string[] = ["subagents", "internal", "loop", "plan", "autoTasks"];
 
 /** The text of a role's empty option. */
 export function roleEmptyOptionLabel(role: string): string {
@@ -78,6 +78,7 @@ export const ROLES: readonly { id: string; label: string }[] = [
   { id: "subagents", label: "Sub-agents" },
   { id: "internal", label: "Internal tasks" },
   { id: "loop", label: "Loop and Factory" },
+  { id: "plan", label: "Plan" },
   { id: "autoTasks", label: "Auto Tasks" },
   { id: "decisions", label: "Decision" },
 ];

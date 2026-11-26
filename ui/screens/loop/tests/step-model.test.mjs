@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { routedLoopModel, stepModel, fetchRoutedLoopModel, modelLabel } from "../native/step-model.ts";
+import { routedLoopModel, routedRoleModel, stepModel, fetchRoutedModels, modelLabel } from "../native/step-model.ts";
 
 test("modelLabel: Claude ids read as family + version, anything else as it is", () => {
   assert.equal(modelLabel("claude-haiku-5-5"), "Haiku 5.5");
@@ -28,7 +28,15 @@ test("stepModel: repairModel wins only for repairs", () => {
   assert.equal(stepModel(null, "step"), null);
 });
 
+test("routedRoleModel reads each role's own tier", () => {
+  const r = { tiers: { strong: { model: "claude-opus-5-5" }, cheap: { model: "small" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } };
+  assert.equal(routedRoleModel(r, "loop"), "small");
+  assert.equal(routedRoleModel(r, "plan"), "claude-opus-5-5");
+  assert.equal(routedRoleModel({ ...r, featureStatus: { loop: r.featureStatus.loop, plan: { usable: false, tier: "strong" } } }, "plan"), null);
+});
+
 test("a failing routing fetch yields no model", async () => {
-  assert.equal(await fetchRoutedLoopModel({ request: async () => { throw new Error("down"); } }), null);
-  assert.equal(await fetchRoutedLoopModel({ request: async () => payload({ usable: true, tier: "cheap" }) }), "small");
+  assert.deepEqual(await fetchRoutedModels({ request: async () => { throw new Error("down"); } }), { loop: null, plan: null });
+  const r = { tiers: { cheap: { model: "small" }, strong: { model: "big" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } };
+  assert.deepEqual(await fetchRoutedModels({ request: async () => r }), { loop: "small", plan: "big" });
 });

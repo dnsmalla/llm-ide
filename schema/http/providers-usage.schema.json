@@ -655,11 +655,11 @@
                   "tier": {
                     "type": "string",
                     "x-optional": true,
-                    "description": "API v147+, agent roles (loop, autoTasks) only: the tier the role runs on; an unset role takes standard"
+                    "description": "API v147+, agent roles (loop, autoTasks, plan (API v160+)) only: the tier the role runs on; an unset role takes standard"
                   }
                 }
               },
-              "description": "API v69+. One entry per CONFIGURED feature, plus (API v147+) always one for each agent role (loop, autoTasks), judged against the Claude engine (an unset agent role reports the standard tier). `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
+              "description": "API v69+. One entry per CONFIGURED feature, plus (API v147+) always one for each agent role (loop, autoTasks, plan (API v160+)), judged against the Claude engine (an unset agent role reports the standard tier). `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
             }
           }
         },
@@ -698,7 +698,7 @@
               "additionalProperties": {
                 "type": "string"
               },
-              "description": "Keys subagents | loop | autoTasks | quickChat | pipeline | internal | decisions (API v73+); values a tier name"
+              "description": "Keys subagents | loop | autoTasks | plan (API v160+) | quickChat | pipeline | internal | decisions (API v73+); values a tier name"
             }
           }
         }

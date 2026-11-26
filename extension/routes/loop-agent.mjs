@@ -5,11 +5,11 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, provider?, role?: "loop"|"autoTasks", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory",
+//            model?, provider?, role?: "loop"|"autoTasks"|"plan", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory",
 //            readOnly?: true (API 150: no Edit/Write at all; the self-improvement review) }
 //
 // `role` (API v147): with neither model nor provider, the run takes that Settings → Model routing role's tier
-// (default loop; an unset role takes Standard), when it can run on the Claude engine; else the SDK default.
+// (default loop; an unset role takes Standard; API v160: "plan" = the steps that write a plan), when it can run on the Claude engine; else the SDK default.
 //
 // `provider` (API v66, the Mac's Loop tier route): "anthropic" or an
 // Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent =

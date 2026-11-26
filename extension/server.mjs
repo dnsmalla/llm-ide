@@ -519,7 +519,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          over `uncaught` incidents (text that can come from outside the app) and leaves them new for a manual run.
 //   v159 — PATCH /admin/members/:userId and POST /admin/invites accept `unlimited: true`; a `usdCapMonth` of 0 (= no cap)
 //          without it answers 400 VALIDATION_FAILED, so an unlimited grant is always an explicit request.
-const SERVER_API_VERSION = 159;
+//   v160 — Model routing gains an agent role `plan` (Plan steps of Loop/Factory): POST /kb/loop/agent-run accepts `role: "plan"`,
+//          PUT/GET tier-routing carry `features.plan`, and `featureStatus.plan` is always reported (unset → standard).
+const SERVER_API_VERSION = 160;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

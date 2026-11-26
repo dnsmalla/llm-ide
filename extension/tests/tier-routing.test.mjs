@@ -319,6 +319,7 @@ test('keyless CLI routes never serve untrusted-input features (internal, pipelin
       // Agent roles are judged against the Claude engine; an unset one takes Standard (keyless gemini CLI here).
       loop: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
       autoTasks: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
+      plan: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
     });
     // With an API key the same tier is a plain HTTP completion → allowed.
     setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
@@ -347,6 +348,7 @@ test('keyless CLI routes never serve decisions (its state is ticket text / test 
       subagents: { usable: true },
       loop: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
       autoTasks: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
+      plan: { usable: false, reason: 'not_agent_capable', tier: 'standard' },
     });
     setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
     assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'openai', model: 'gpt-5' });
@@ -361,6 +363,7 @@ test('tierRoutingStatus: featureStatus carries the tier\'s own reason for an unu
     loop: { usable: false, reason: 'no_key', tier: 'cheap' },
     subagents: { usable: false, reason: 'unset' },
     autoTasks: { usable: false, reason: 'unset', tier: 'standard' },
+    plan: { usable: false, reason: 'unset', tier: 'standard' },
   });
 });
 
@@ -1003,7 +1006,7 @@ test('syncTierRouting accepts a jev tier and the decisions feature', () => {
 test('a jev tier routes ONLY the decisions feature; every other feature reports decision_only and keeps its default', () => {
   const userId = freshUser();
   setSecret(db.getDb(), userId, 'jev.apiKey', 'jev-test-key');
-  const others = ['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal'];
+  const others = ['subagents', 'loop', 'autoTasks', 'plan', 'quickChat', 'pipeline', 'internal'];
   syncTierRouting({
     tiers: { cheap: { provider: 'jev', model: 'jev-latest' } },
     features: Object.fromEntries(['decisions', ...others].map((f) => [f, 'cheap'])),
@@ -1023,7 +1026,7 @@ test('a jev tier routes ONLY the decisions feature; every other feature reports 
   assert.deepEqual(st.featureStatus.decisions, { usable: true });
   for (const f of others) {
     // Agent roles also carry the tier they run on.
-    const want = ['loop', 'autoTasks'].includes(f) ? { usable: false, reason: 'decision_only', tier: 'cheap' } : { usable: false, reason: 'decision_only' };
+    const want = ['loop', 'autoTasks', 'plan'].includes(f) ? { usable: false, reason: 'decision_only', tier: 'cheap' } : { usable: false, reason: 'decision_only' };
     assert.deepEqual(st.featureStatus[f], want, f);
   }
 });
@@ -1050,5 +1053,24 @@ test('the decisions feature may use an ordinary LLM tier (other providers unchan
   assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'anthropic', model: 'claude-opus-5-5', routeFallback: {} });
   assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
     decisions: { usable: true }, pipeline: { usable: true }, loop: { usable: false, reason: 'unset', tier: 'standard' }, autoTasks: { usable: false, reason: 'unset', tier: 'standard' },
+    plan: { usable: false, reason: 'unset', tier: 'standard' },
   });
+});
+
+test('resolveAgentRoute: plan has its own tier; unset plan takes Standard even when loop is cheap', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      standard: { provider: 'anthropic', model: 'claude-sonnet-5-5' },
+      cheap: { provider: 'anthropic', model: 'claude-haiku-5-5' },
+    },
+    features: { loop: 'cheap' },
+  }, userId);
+  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-sonnet-5-5', tier: 'standard' });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.plan, { usable: true, tier: 'standard' });
+  syncTierRouting({ ...getTierRoutingConfig(userId), features: { loop: 'cheap', plan: 'strong' } }, userId);
+  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-opus-5-5', tier: 'strong' });
+  assert.deepEqual(resolveAgentRoute(userId, 'loop'), { provider: 'anthropic', model: 'claude-haiku-5-5', tier: 'cheap' });
+  assert.equal(getTierRoutingConfig(userId).features.plan, 'strong');
 });

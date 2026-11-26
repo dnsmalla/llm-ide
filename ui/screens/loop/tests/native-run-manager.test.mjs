@@ -1265,3 +1265,39 @@ test("startRun with a runId whose record is still held is refused with a notice"
   assert.match(rm.takeRunNotice(), /record is still being saved/);
   rm.resetRunManagerForTests();
 });
+
+test("a plan-skill step shows the plan role's model; other steps and repairs keep the loop role's", async () => {
+  let emit;
+  setup({
+    core: { async request(path) { return path === "/kb/routing-tiers" ? { tiers: { cheap: { model: "claude-haiku-5-5" }, strong: { model: "claude-opus-5-5" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } } : {}; } },
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const model = () => rm.liveRuns().find((r) => r.runId === a).progress.model;
+  const plan = { id: "p", name: "Plan", kind: "skill", skillId: "skills/writing-plans" };
+  emit({ type: "stage-start", stage: plan, index: 1, count: 8, iteration: 1 });
+  assert.equal(model(), "Opus 5.5");
+  emit({ type: "repair", stage: plan, attempt: 1 });
+  assert.equal(model(), "Haiku 5.5");
+  emit({ type: "stage-result", stage: plan, ok: true, iteration: 1, durationMs: 1 });
+  emit({ type: "stage-start", stage: { id: "r", name: "Refactor plan", kind: "skill", skillId: "skills/refactor-planner" }, index: 2, count: 8, iteration: 1 });
+  assert.equal(model(), "Opus 5.5");
+  emit({ type: "stage-start", stage: { id: "i", name: "Implement", kind: "skill", skillId: "skills/implement" }, index: 3, count: 8, iteration: 1 });
+  assert.equal(model(), "Haiku 5.5");
+});
+
+test("a late routing read labels a running plan step with the plan role's model", async () => {
+  let emit;
+  const routing = deferred();
+  setup({
+    core: { async request(path) { return path === "/kb/routing-tiers" ? routing.promise : {}; } },
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  emit({ type: "stage-start", stage: { id: "p", name: "Plan", kind: "skill", skillId: "skills/writing-plans" }, index: 1, count: 7, iteration: 1 });
+  routing.resolve({ tiers: { cheap: { model: "claude-haiku-5-5" }, strong: { model: "claude-opus-5-5" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } });
+  await settle();
+  assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.model, "Opus 5.5");
+});

@@ -228,7 +228,7 @@ test("validateDraft: a role on an unset tier is named with labels and the way ou
 });
 
 test("roles: the empty option says Default (built-in), Decision keeps Default", () => {
-  for (const role of ["subagents", "internal", "loop", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
+  for (const role of ["subagents", "internal", "loop", "plan", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
   assert.equal(roleEmptyOptionLabel("decisions"), "Default");
 });
 
@@ -245,7 +245,7 @@ const loadedOf = (tiers: Record<string, typeof STD>, features: Record<string, st
 
 test("draft: with Standard set, roles without a saved tier start on Standard; Decision never does", () => {
   const d = draftFromLoaded({ tiers: { standard: STD }, features: { loop: "standard", subagents: "standard" } });
-  assert.deepEqual(d.features, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
+  assert.deepEqual(d.features, { subagents: "standard", internal: "standard", loop: "standard", plan: "standard", autoTasks: "standard" });
   const kept = draftFromLoaded({ tiers: { standard: STD, cheap: STD }, features: { internal: "cheap" } });
   assert.equal(kept.features.internal, "cheap");
   assert.equal(kept.features.decisions, undefined);
@@ -259,8 +259,8 @@ test("draft: preselecting makes the section dirty (with the roles named); nothin
   const loaded = loadedOf({ standard: STD }, { loop: "standard" });
   const draft = draftFromLoaded(loaded);
   assert.equal(isDirty(loaded, draft), true);
-  assert.deepEqual(preselectedRoles(loaded, draft), ["subagents", "internal", "autoTasks"]);
-  const full = loadedOf({ standard: STD }, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
+  assert.deepEqual(preselectedRoles(loaded, draft), ["subagents", "internal", "plan", "autoTasks"]);
+  const full = loadedOf({ standard: STD }, { subagents: "standard", internal: "standard", loop: "standard", plan: "standard", autoTasks: "standard" });
   assert.equal(isDirty(full, draftFromLoaded(full)), false);
   assert.deepEqual(preselectedRoles(full, draftFromLoaded(full)), []);
 });

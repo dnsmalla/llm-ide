@@ -129,6 +129,13 @@ export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId">): ".factory
   return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_PLAN_SKILL || s.skillId === FACTORY_REVIEW_SKILL || s.skillId === STEP_REVIEW_SKILL) ? ".factory" : null;
 }
 
+/** Skills whose step writes a plan; they run on the Settings → Model routing "Plan" role. */
+const PLAN_SKILLS: ReadonlySet<string> = new Set([FACTORY_PLAN_SKILL, "skills/refactor-planner"]);
+
+export function isPlanSkill(skillId: string | null | undefined): boolean {
+  return !!skillId && PLAN_SKILLS.has(skillId);
+}
+
 /** The `/kb/loop/agent-run` body of a skill stage. */
 export interface AgentRunBody {
   message: string;
@@ -138,6 +145,7 @@ export interface AgentRunBody {
   writeScope?: ".factory";
   denyWrite?: ".factory";
   extraRoots?: string[];
+  role?: "plan";
 }
 
 /**
@@ -166,6 +174,7 @@ export function agentRunBody(a: {
     timeoutMs: a.timeoutMs,
     ...(scope ? { writeScope: scope } : {}),
     ...(implement ? { denyWrite: ".factory" as const } : {}),
+    ...(a.stage.kind === "skill" && isPlanSkill(a.stage.skillId) ? { role: "plan" as const } : {}),
     ...(wantsDocs ? { extraRoots: [`${project}/llm-doc`] } : {}),
   };
 }
