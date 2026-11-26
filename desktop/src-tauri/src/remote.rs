@@ -19,11 +19,13 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
+use crate::ssh_transport::{HubSsh, SshExec};
 
 pub const DEFAULT_SSH_PORT: u16 = 22;
 pub const CONNECT_TIMEOUT_SECS: u32 = 10;
@@ -160,29 +162,6 @@ pub fn require_confirmed_host_key(target: &PreparedTarget) -> Result<ConfirmedHo
 #[cfg(test)]
 pub fn forget_confirmation(target: &PreparedTarget) {
     confirmations().lock().unwrap_or_else(|e| e.into_inner()).remove(&confirm_key(target));
-}
-
-pub trait Runner {
-    fn run(&self, args: &[String]) -> std::io::Result<RawOutput>;
-}
-
-/// Lets a test pass a plain closure (or function) as the runner; production uses `SystemSsh`.
-impl<F> Runner for F
-where
-    F: Fn(&[String]) -> std::io::Result<RawOutput>,
-{
-    fn run(&self, args: &[String]) -> std::io::Result<RawOutput> {
-        self(args)
-    }
-}
-
-/// The real system `ssh`, found through PATH like every other host tool.
-pub struct SystemSsh;
-
-impl Runner for SystemSsh {
-    fn run(&self, args: &[String]) -> std::io::Result<RawOutput> {
-        crate::ssh_transport::run_hub_program("ssh", args, None, std::time::Duration::from_secs(60))
-    }
 }
 
 /// The fixed remote command. It is one argv element for ssh, so OpenSSH hands this exact text to the
@@ -331,14 +310,14 @@ pub fn check_key_file(path: &str) -> Result<(), FsError> {
     }
 }
 
-/// Runs the test through an injected runner. Tests use a fake; production uses `SystemSsh`.
-pub fn execute<R: Runner>(target: &PreparedTarget, runner: &R) -> Result<SshTestResult, FsError> {
+/// Runs the test through an injected runner. Tests use a fake; production uses `HubSsh`.
+pub fn execute<R: SshExec>(target: &PreparedTarget, runner: &R) -> Result<SshTestResult, FsError> {
     // R-034 #7: accept-new writes only into a throwaway known_hosts, never the user's ~/.ssh file.
     let dir = temp_ssh_dir("ssh-test")?;
     let known = dir.join("known_hosts");
     let args = ssh_args_known(target, REMOTE_COMMAND, &known, true);
     let output = runner
-        .run(&args)
+        .run(&args, None, None, Duration::from_secs(60))
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::TimedOut {
                 herr("SSH_TIMEOUT", "the server did not answer in time")
@@ -438,7 +417,7 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
     tauri::async_runtime::spawn_blocking(move || {
         let prepared = prepare(&target)?;
         check_key_file(&prepared.key_path)?;
-        execute(&prepared, &SystemSsh)
+        execute(&prepared, &HubSsh)
     })
     .await
     .map_err(|e| herr("internal", format!("the SSH test did not finish: {e}")))?

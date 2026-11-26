@@ -249,12 +249,34 @@ pub trait SshExec: Send + Sync {
     ) -> std::io::Result<RawOutput>;
 
     /// Starts a long-lived child (a port forward) and returns without waiting for it.
-    fn spawn_forward(&self, args: &[String], askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>>;
+    /// Runners that only serve one-shot calls (the hub Test) keep this default, which refuses.
+    fn spawn_forward(&self, _args: &[String], _askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn ForwardChild>> {
+        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "this runner has no port forward"))
+    }
 
     /// Starts the helper channel: a child with piped stdin and stdout, for the request and answer lines of
     /// `llmide-workspace`. Runners that only serve one-shot calls keep this default, which refuses.
     fn spawn_stdio(&self, _args: &[String], _askpass: Option<&AskpassGrant>) -> std::io::Result<Box<dyn StdioChild>> {
         Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "this runner has no helper channel"))
+    }
+}
+
+/// Lets a test pass a plain closure over the argv as the runner (stdin, askpass and deadline are ignored).
+impl<F> SshExec for F
+where
+    F: Fn(&[String]) -> std::io::Result<RawOutput> + Send + Sync,
+{
+    fn run(&self, args: &[String], _stdin: Option<&[u8]>, _askpass: Option<&AskpassGrant>, _deadline: Duration) -> std::io::Result<RawOutput> {
+        self(args)
+    }
+}
+
+/// Production runner for hub mode: the system `ssh` with the agent socket passed through (see [`run_hub_program`]).
+pub struct HubSsh;
+
+impl SshExec for HubSsh {
+    fn run(&self, args: &[String], stdin: Option<&[u8]>, _askpass: Option<&AskpassGrant>, deadline: Duration) -> std::io::Result<RawOutput> {
+        run_hub_program("ssh", args, stdin, deadline)
     }
 }
 
