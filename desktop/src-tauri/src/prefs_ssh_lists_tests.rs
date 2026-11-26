@@ -27,7 +27,7 @@ fn switch_to(host: &str, port: u16, user: &str) {
 }
 
 fn recent(host: &str, user: &str) -> SshRecentServer {
-    SshRecentServer { host: host.into(), port: 22, user: user.into(), key_path: String::new(), auth: SshAuthKind::Password, last_used: 5 }
+    SshRecentServer { host: host.into(), port: 22, user: user.into(), key_path: String::new(), auth: SshAuthKind::Password, last_used: 5, password_saved: false }
 }
 
 #[test]
@@ -118,10 +118,56 @@ fn recent_servers_are_capped_ordered_and_keyed_without_case() {
 #[test]
 fn a_recent_server_has_the_wire_fields_and_no_secret() {
     let value = serde_json::to_value(SshRecentServer {
-        host: "example.com".into(), port: 22, user: "alice".into(), key_path: "/k".into(), auth: SshAuthKind::Password, last_used: 7,
+        host: "example.com".into(), port: 22, user: "alice".into(), key_path: "/k".into(), auth: SshAuthKind::Password, last_used: 7, password_saved: true,
     })
     .unwrap();
-    assert_eq!(value, serde_json::json!({ "host": "example.com", "port": 22, "user": "alice", "keyPath": "/k", "auth": "password", "lastUsed": 7 }));
+    assert_eq!(
+        value,
+        serde_json::json!({ "host": "example.com", "port": 22, "user": "alice", "keyPath": "/k", "auth": "password", "lastUsed": 7, "passwordSaved": true })
+    );
+}
+
+#[test]
+fn remembering_a_server_early_lists_it_and_leaves_the_saved_server_alone() {
+    let _guard = fresh();
+    switch_to("saved.example", 22, "carol");
+    remember_ssh_server("Early.Example", 2222, "alice", "", SshAuthKind::Password).unwrap();
+    let block = stored_block();
+    assert_eq!(
+        block.ssh_recent_servers.iter().map(|s| (s.host.as_str(), s.port, s.user.as_str())).collect::<Vec<_>>(),
+        [("early.example", 2222, "alice"), ("saved.example", 22, "carol")]
+    );
+    assert_eq!((block.host.as_str(), block.user.as_str(), block.mode), ("saved.example", "carol", ServerMode::Ssh), "only a full connect changes the saved server");
+    assert!(remember_ssh_server("bad host", 22, "alice", "", SshAuthKind::Password).is_err());
+    assert!(remember_ssh_server("ok.example", 22, "alice", "relative", SshAuthKind::Key).is_err());
+}
+
+#[test]
+fn the_saved_password_flag_survives_a_reconnect_and_goes_with_forget() {
+    let _guard = fresh();
+    remember_ssh_server("example.com", 22, "alice", "", SshAuthKind::Password).unwrap();
+    assert!(!ssh_password_saved("example.com", 22, "alice"));
+    set_ssh_password_saved("example.com", 22, "alice", true).unwrap();
+    assert!(ssh_password_saved("EXAMPLE.com", 22, "alice"));
+    // A later connect rewrites the entry; the flag stays.
+    set_remote_ssh("example.com".into(), 22, "alice".into(), String::new(), SshAuthKind::Password, ServerMode::Local).unwrap();
+    assert!(ssh_password_saved("example.com", 22, "alice"));
+    // An unlisted login is a no-op.
+    set_ssh_password_saved("example.com", 22, "bob", true).unwrap();
+    assert!(!ssh_password_saved("example.com", 22, "bob"));
+    set_ssh_password_saved("example.com", 22, "alice", false).unwrap();
+    assert!(!ssh_password_saved("example.com", 22, "alice"));
+    set_ssh_password_saved("example.com", 22, "alice", true).unwrap();
+    forget_ssh_server("example.com", 22, "alice").unwrap();
+    assert!(!ssh_password_saved("example.com", 22, "alice"));
+}
+
+#[test]
+fn a_key_login_never_carries_the_saved_password_flag() {
+    let _guard = fresh();
+    remember_ssh_server("example.com", 22, "alice", "/home/a/.ssh/id", SshAuthKind::Key).unwrap();
+    set_ssh_password_saved("example.com", 22, "alice", true).unwrap();
+    assert!(!ssh_password_saved("example.com", 22, "alice"));
 }
 
 #[test]

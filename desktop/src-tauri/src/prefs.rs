@@ -103,8 +103,12 @@ pub struct SshRecentServer {
     pub user: String,
     pub key_path: String,
     pub auth: SshAuthKind,
-    /// Seconds since the Unix epoch of the last successful connect or key install.
+    /// Seconds since the Unix epoch of the last successful connect or key install, or of the first host-key check.
     pub last_used: u64,
+    /// True when the user chose "Remember password in Keychain" for this login. A flag only: the password itself is
+    /// in the OS keychain (`ssh_saved_password`), never in this file. It lets the list show a one-click Connect
+    /// without reading the keychain.
+    pub password_saved: bool,
 }
 
 /// A folder opened on a saved server. `server` is `ssh_server_key` for that server, so a folder is found by the same
@@ -233,8 +237,12 @@ fn recent_key(entry: &SshRecentServer) -> String {
 
 /// Puts `entry` first, replacing the same server. Returns the keys of the servers pushed past the cap, so their
 /// folders can go with them.
-fn put_recent_server(list: &mut Vec<SshRecentServer>, entry: SshRecentServer) -> Vec<String> {
+fn put_recent_server(list: &mut Vec<SshRecentServer>, mut entry: SshRecentServer) -> Vec<String> {
     let key = recent_key(&entry);
+    // A reconnect must not forget that the password is in the keychain: only the explicit setter changes the flag.
+    if let Some(old) = list.iter().find(|saved| recent_key(saved) == key) {
+        entry.password_saved = old.password_saved;
+    }
     list.retain(|saved| recent_key(saved) != key);
     list.insert(0, entry);
     let mut pushed_out = Vec::new();
@@ -257,7 +265,8 @@ fn clean_recent_server(entry: &SshRecentServer) -> Option<SshRecentServer> {
     };
     let key_ok = entry.auth == SshAuthKind::Password || crate::remote::valid_key_path(&key_path);
     let ok = crate::remote::valid_host(&host) && crate::remote::valid_user(&user) && entry.port != 0 && key_ok;
-    ok.then(|| SshRecentServer { host, port: entry.port, user, key_path, auth: entry.auth, last_used: entry.last_used })
+    let password_saved = entry.password_saved && entry.auth == SshAuthKind::Password;
+    ok.then(|| SshRecentServer { host, port: entry.port, user, key_path, auth: entry.auth, last_used: entry.last_used, password_saved })
 }
 
 /// The recent list as loaded, in file order (most recent first): invalid entries dropped, one entry per server.
@@ -1070,11 +1079,69 @@ pub fn set_remote_ssh(host: String, port: u16, user: String, key_path: String, s
             key_path: if ssh_auth == SshAuthKind::Key { block.key_path.clone() } else { String::new() },
             auth: ssh_auth,
             last_used: now_secs(),
+            password_saved: false,
         };
         let pushed_out = put_recent_server(&mut block.ssh_recent_servers, entry);
         block.ssh_recent_folders.retain(|folder| !pushed_out.contains(&folder.server));
         Ok(())
     })
+}
+
+/// Puts a login at the front of the recent list as soon as its host key is confirmed or its probe succeeded, so a
+/// later failure (foreign core, missing bundle, start failure) does not lose it. Unlike [`set_remote_ssh`] it leaves
+/// the saved server and the mode alone: only a full connect changes those.
+///
+/// Errors: the same shape errors as [`set_remote_ssh`].
+pub(crate) fn remember_ssh_server(host: &str, port: u16, user: &str, key_path: &str, ssh_auth: SshAuthKind) -> Result<(), FsError> {
+    let host = host.trim().to_string();
+    if !crate::remote::valid_host(&host) {
+        return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
+    }
+    if port == 0 {
+        return Err(herr("invalid_port", "the SSH port must be between 1 and 65535"));
+    }
+    let user = user.trim().to_string();
+    if !crate::remote::valid_user(&user) {
+        return Err(herr("invalid_user", "enter a plain SSH user name (letters, digits, '.', '_' or '-')"));
+    }
+    let key_path = key_path.trim().to_string();
+    if ssh_auth == SshAuthKind::Key && !crate::remote::valid_key_path(&key_path) {
+        return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
+    }
+    edit_remote_server(|block| {
+        let entry = SshRecentServer {
+            host: host.to_ascii_lowercase(),
+            port,
+            user,
+            key_path: if ssh_auth == SshAuthKind::Key { key_path } else { String::new() },
+            auth: ssh_auth,
+            last_used: now_secs(),
+            password_saved: false,
+        };
+        let pushed_out = put_recent_server(&mut block.ssh_recent_servers, entry);
+        block.ssh_recent_folders.retain(|folder| !pushed_out.contains(&folder.server));
+        Ok(())
+    })
+    .map(|_| ())
+}
+
+/// Whether a login's recent entry says its password is in the keychain. False for an unknown login.
+pub(crate) fn ssh_password_saved(host: &str, port: u16, user: &str) -> bool {
+    let key = ssh_server_key(user.trim(), host.trim(), port);
+    stored().remote_server.ssh_recent_servers.iter().any(|entry| recent_key(entry) == key && entry.password_saved)
+}
+
+/// Sets the saved-password flag of a login that is in the recent list; a login that is not listed is left alone
+/// (nothing to flag). Only a password login can carry the flag.
+pub(crate) fn set_ssh_password_saved(host: &str, port: u16, user: &str, saved: bool) -> Result<(), FsError> {
+    let key = ssh_server_key(user.trim(), host.trim(), port);
+    edit_remote_server(|block| {
+        if let Some(entry) = block.ssh_recent_servers.iter_mut().find(|entry| recent_key(entry) == key) {
+            entry.password_saved = saved && entry.auth == SshAuthKind::Password;
+        }
+        Ok(())
+    })
+    .map(|_| ())
 }
 
 /// Host-side writer for the saved server's mode alone. The SSH service calls it when the user switches to the saved

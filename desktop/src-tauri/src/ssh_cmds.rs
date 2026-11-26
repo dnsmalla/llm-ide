@@ -18,6 +18,7 @@ use crate::prefs::{self, RemoteServerPrefs, SshRecentServer};
 use crate::secrets;
 use crate::ssh_key_install::{self, KEYGEN_FAILED, KEYGEN_MESSAGE};
 use crate::ssh_service::{self, Deps, SshServerStatus, SshServerTarget, SshServerTest};
+use crate::ssh_saved_password;
 use crate::ssh_session;
 use crate::ssh_transport::{SshEndpoint, SystemSshExec};
 
@@ -31,11 +32,76 @@ const SESSION_FILE: &str = "ssh-session.json";
 const SSH_KEY_DIR: &str = "ssh";
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// The password flags the dialog sends instead of a stored password: the webview never receives one back.
+/// `use_saved_password` reads the stored password on the host; `remember_password` is the checkbox (absent for a key
+/// login or an older UI, which leaves the keychain alone).
+#[derive(Clone, Copy, Default)]
+struct PasswordFlags {
+    use_saved: bool,
+    remember: Option<bool>,
+}
+
+fn password_request<'a>(target: &'a SshServerTarget, typed: Option<&'a str>, flags: PasswordFlags) -> ssh_saved_password::Request<'a> {
+    let password_login = target.auth == prefs::SshAuthKind::Password;
+    ssh_saved_password::Request {
+        host: &target.host,
+        port: target.port,
+        user: &target.user,
+        typed,
+        use_saved: password_login && flags.use_saved,
+        remember: if password_login { flags.remember } else { None },
+    }
+}
+
+/// The password to log in with: typed, or read from the keychain on request. The keychain is not touched unless the
+/// recent list says a password is stored there.
+fn resolve_password(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<Option<String>, FsError> {
+    let typed = typed.filter(|p| !p.is_empty());
+    let req = password_request(target, typed, flags);
+    if typed.is_some() || !req.use_saved {
+        return Ok(typed.map(str::to_string));
+    }
+    if !prefs::ssh_password_saved(&target.host, target.port, &target.user) {
+        return Err(herr("SSH_PASSWORD_REQUIRED", "Enter the password for this server."));
+    }
+    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+    ssh_saved_password::resolve(backend.as_ref(), &req)
+}
+
+/// After a login that worked: stores the typed password (checkbox on) or removes the stored one (checkbox off), and
+/// keeps the recent list's flag in step. Never reads or returns a password.
+fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<(), FsError> {
+    let req = password_request(target, typed, flags);
+    let flagged = prefs::ssh_password_saved(&target.host, target.port, &target.user);
+    // No keychain access at all unless something is to be written or removed.
+    let needs_keychain = matches!(req.remember, Some(true)) && req.typed.is_some_and(|p| !p.is_empty()) || matches!(req.remember, Some(false)) && flagged;
+    if !needs_keychain {
+        return Ok(());
+    }
+    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+    if let Some(saved) = ssh_saved_password::apply_remember(backend.as_ref(), &req, flagged)? {
+        prefs::set_ssh_password_saved(&target.host, target.port, &target.user, saved)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn remote_ssh_server_test(target: SshServerTarget, password: Option<String>) -> Result<SshServerTest, FsError> {
+pub async fn remote_ssh_server_test(
+    target: SshServerTarget,
+    password: Option<String>,
+    use_saved_password: Option<bool>,
+    remember_password: Option<bool>,
+) -> Result<SshServerTest, FsError> {
+    let flags = PasswordFlags { use_saved: use_saved_password.unwrap_or(false), remember: remember_password };
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        ssh_service::test(&deps, &target, password.as_deref())
+        let resolved = resolve_password(&target, password.as_deref(), flags)?;
+        let result = ssh_service::test(&deps, &target, resolved.as_deref())?;
+        // A trusted answer means the login worked, so the choice about the password is applied now.
+        if result.trusted {
+            apply_remember(&target, password.as_deref(), flags)?;
+        }
+        Ok(result)
     })
     .await
     .map_err(|_| herr("internal", "the SSH server test did not finish."))?
@@ -51,16 +117,25 @@ pub async fn remote_ssh_server_confirm(target: SshServerTarget, host_key_type: S
     .map_err(|_| herr("internal", "the host-key confirmation did not finish."))?
 }
 
+/// Connects (and installs and starts the server part). `take_over` is the user's explicit "Take over" click after
+/// `SSH_CORE_FOREIGN`: it stops the core running on the account first (see `ssh_service::connect_with_options`).
 #[tauri::command]
 pub async fn remote_ssh_server_connect(
     host: tauri::State<'_, CoreHost>,
     target: SshServerTarget,
     password: Option<String>,
+    use_saved_password: Option<bool>,
+    remember_password: Option<bool>,
+    take_over: Option<bool>,
 ) -> Result<SshServerStatus, FsError> {
     let host = host.inner().clone();
+    let flags = PasswordFlags { use_saved: use_saved_password.unwrap_or(false), remember: remember_password };
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        ssh_service::connect(&deps, &host, &target, password.as_deref())
+        let resolved = resolve_password(&target, password.as_deref(), flags)?;
+        let status = ssh_service::connect_with_options(&deps, &host, &target, resolved.as_deref(), take_over.unwrap_or(false))?;
+        apply_remember(&target, password.as_deref(), flags)?;
+        Ok(status)
     })
     .await
     .map_err(|_| herr("internal", "the SSH server connect did not finish."))?
@@ -130,9 +205,19 @@ pub fn remote_ssh_server_recent() -> Vec<SshRecentServer> {
 /// Removes a saved server from the recent list, with its folders and, when nothing else needs it, its host key.
 #[tauri::command]
 pub async fn remote_ssh_server_forget(host: String, port: u16, user: String) -> Result<(), FsError> {
-    tauri::async_runtime::spawn_blocking(move || prefs::forget_ssh_server(&host, port, &user))
+    tauri::async_runtime::spawn_blocking(move || forget_server(&host, port, &user))
         .await
         .map_err(|_| herr("internal", "the saved SSH server could not be removed."))?
+}
+
+/// Forget: the stored password goes first, and only when the list says one is stored (no keychain access otherwise).
+/// If the keychain refuses, the entry stays, so the user can try again and no password is left behind unseen.
+fn forget_server(host: &str, port: u16, user: &str) -> Result<(), FsError> {
+    if prefs::ssh_password_saved(host, port, user) {
+        let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+        ssh_saved_password::forget(backend.as_ref(), host, port, user)?;
+    }
+    prefs::forget_ssh_server(host, port, user)
 }
 
 /// Stops the core and removes the server's releases. `force` uninstalls even when another desktop started the core.

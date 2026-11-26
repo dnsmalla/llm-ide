@@ -174,10 +174,19 @@ pub fn test(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Re
     locked(observed()).insert(endpoint_key(&endpoint), offered.clone());
     match pin_for(&endpoint) {
         Some(pin) if pin.key_type == offered.key_type && pin.key_b64 == offered.key_b64 => {
-            probe_trusted(deps, &endpoint, &pin, &offered, password)
+            let result = probe_trusted(deps, &endpoint, &pin, &offered, password)?;
+            // The login worked: keep it in the recent list even if the connect that follows fails.
+            remember_login(target);
+            Ok(result)
         }
         pin => Ok(base_result(&offered, false, pin.is_some())),
     }
+}
+
+/// Puts the login in the recent list at once (the saved server and the mode stay as they are). Best effort: a
+/// preference write that fails must not fail the check it follows.
+fn remember_login(target: &SshServerTarget) {
+    let _ = prefs::remember_ssh_server(&target.host, target.port, &target.user, &target.key_path, target.auth);
 }
 
 /// Pins the host key the last Test saw, after the native dialog says yes. Never logs in.
@@ -204,6 +213,8 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
         return Err(herr("cancelled", "The server's host key was not trusted, so nothing was saved."));
     }
     prefs::upsert_ssh_known_host(pin_text(&endpoint, &offered))?;
+    // The host key is trusted: the login is worth keeping even if the sign-in below fails.
+    remember_login(target);
     Ok(base_result(&offered, true, false))
 }
 
@@ -284,8 +295,31 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
 /// The operation lock is held from the connect to the attach, so a Stop or Uninstall cannot run between them.
 ///
 /// Errors: the codes of [`open_link`], plus any preference validation error.
+#[cfg(test)]
 pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password: Option<&str>) -> Result<SshServerStatus, FsError> {
+    connect_with_options(deps, host, target, password, false)
+}
+
+/// [`connect`], optionally taking over first. `take_over` stops the core that is running on the server account, even
+/// when this desktop's session record does not own it, and then continues the same connect. It is the user's explicit
+/// answer to `SSH_CORE_FOREIGN`: the caller passes it only after that click.
+///
+/// Everything else is unchanged: the host key must be pinned, the stop runs over the pinned transport
+/// (`StrictHostKeyChecking=yes`), and the stop and the connect run under one operation lock, so no other connect,
+/// stop or uninstall can run between them.
+///
+/// Errors: the codes of [`connect`], plus those of the stop (`SSH_STOP_UNKNOWN`, `SSH_STOP_FAILED`).
+pub fn connect_with_options(
+    deps: &Deps,
+    host: &CoreHost,
+    target: &SshServerTarget,
+    password: Option<&str>,
+    take_over: bool,
+) -> Result<SshServerStatus, FsError> {
     let _operation = operation();
+    if take_over {
+        stop_running_core_locked(deps, target, password)?;
+    }
     let opened = open_link_locked(deps, target, password)?;
     let mode = prefs::stored().remote_server.mode;
     prefs::set_remote_ssh(
@@ -435,6 +469,20 @@ pub fn stop_server(
     let output = run_pinned(deps, &endpoint, &pinned, password, STOP)?;
     parse_stop(&output.stdout)?;
     Ok(build_status(host))
+}
+
+/// Stops whatever core runs on the target's server account, without the ownership check, for [`connect_with_options`].
+/// The target need not be the saved server (a first connect is not saved yet), but its host key must be pinned. The
+/// operation lock is held by the caller. A live link is left alone: attaching the new one replaces it.
+fn stop_running_core_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<(), FsError> {
+    let endpoint = target_endpoint(target, password)?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    // STATUS first: it fails clearly (auth, timeout) before STOP, and keeps the same two-call shape as a forced stop.
+    read_state(deps, &endpoint, &pinned, password)?;
+    let output = run_pinned(deps, &endpoint, &pinned, password, STOP)?;
+    parse_stop(&output.stdout)?;
+    Ok(())
 }
 
 /// Stops the forward and the server core, then removes the releases. Data on the server is kept.
@@ -1352,6 +1400,74 @@ pub(crate) mod tests {
         let status = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
         assert_eq!(status.link, "off", "the test host is not in SSH mode");
         assert_eq!(exec.names(), vec!["status", "stop"]);
+    }
+
+    #[test]
+    fn connect_refuses_a_core_the_session_record_does_not_own() {
+        let fx = Fixture::new("svc-connect-foreign");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![probe_out(""), foreign_status()]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap_err();
+        assert_eq!(refused.code, "SSH_CORE_FOREIGN");
+        assert!(!exec.names().contains(&"stop"), "no stop without the explicit take over");
+    }
+
+    #[test]
+    fn take_over_stops_the_foreign_core_then_continues_the_same_connect() {
+        let fx = Fixture::new("svc-connect-take-over");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let mut outputs = vec![foreign_status(), ok(STOP_OK)];
+        outputs.extend(connect_outputs());
+        let exec = fake(outputs);
+        let deps = fx.deps(&exec, "", true, true);
+        let status = connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
+        assert_eq!(status.link, "restart_required", "the test host is not in SSH mode");
+        let names = exec.names();
+        assert_eq!(&names[..2], ["status", "stop"], "the stop comes first");
+        assert_eq!(names[2..], ["probe", "status", "install", "start", "forward"], "then the ordinary connect");
+        for call in exec.calls() {
+            assert!(has_option(&call.args, "StrictHostKeyChecking=yes"), "{} is not strict", call.name);
+        }
+    }
+
+    #[test]
+    fn take_over_without_a_pinned_host_key_runs_nothing() {
+        let fx = Fixture::new("svc-connect-take-over-unpinned");
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap_err();
+        assert_eq!(refused.code, "SSH_HOST_KEY_UNCONFIRMED");
+        assert!(exec.calls().is_empty(), "the host-key check is not skipped by a take over");
+    }
+
+    #[test]
+    fn take_over_does_not_need_the_server_to_be_the_saved_one() {
+        let fx = Fixture::new("svc-connect-take-over-unsaved");
+        set_remote_server_for_test(RemoteServerPrefs::default());
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let mut outputs = vec![foreign_status(), ok(STOP_OK)];
+        outputs.extend(connect_outputs());
+        let exec = fake(outputs);
+        let deps = fx.deps(&exec, "", true, true);
+        connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
+        assert_eq!(&exec.names()[..2], ["status", "stop"]);
+    }
+
+    #[test]
+    fn a_trusted_test_and_a_confirm_list_the_login_before_any_connect() {
+        let fx = Fixture::new("svc-remember-early");
+        set_remote_server_for_test(RemoteServerPrefs::default());
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        let seen = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
+        assert!(!seen.trusted);
+        assert!(prefs::stored().remote_server.ssh_recent_servers.is_empty(), "an untrusted key lists nothing yet");
+        confirm(&deps, &target(22, SshAuthKind::Key), &seen.host_key_type, &seen.fingerprint).unwrap();
+        let listed = prefs::stored().remote_server.ssh_recent_servers;
+        assert_eq!(listed.len(), 1, "listed once the host key is trusted, with no connect");
+        assert_eq!((listed[0].host.as_str(), listed[0].user.as_str()), (HOST, "alice"));
+        assert!(prefs::stored().remote_server.host.is_empty(), "the saved server is untouched");
     }
 
     #[test]
