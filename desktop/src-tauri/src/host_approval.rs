@@ -50,13 +50,9 @@ pub fn key() -> Result<&'static [u8; 32], String> {
     Ok(KEY.get_or_init(|| k))
 }
 
-pub fn to_hex(b: &[u8]) -> String {
-    crate::fsutil::hex(b)
-}
-
 /// Hex of the key, for the spawned core's environment.
 pub fn key_hex() -> Result<String, String> {
-    Ok(to_hex(key()?))
+    Ok(crate::fsutil::hex(key()?))
 }
 
 pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
@@ -86,7 +82,7 @@ pub const BUS_PROOF_LABEL: &str = "bus-host-proof/v1";
 /// with it. It is NOT the `/health` identity nonce, which any local process can read. It is equal in power to the
 /// Bypass key for bus approvals, so it is never logged, stored or shown; the webview keeps it in memory only.
 pub fn bus_proof_with(key: &[u8]) -> String {
-    to_hex(&hmac_sha256(key, BUS_PROOF_LABEL.as_bytes()))
+    crate::fsutil::hex(&hmac_sha256(key, BUS_PROOF_LABEL.as_bytes()))
 }
 
 pub fn bus_proof() -> Result<String, String> {
@@ -120,7 +116,7 @@ fn signed_part(purpose: &str, expiry: u64, nonce: &str) -> String {
 pub fn mint_with(key: &[u8], purpose: &str, now: u64, nonce_hex: &str) -> String {
     let expiry = now + TOKEN_TTL_MS;
     let mac = hmac_sha256(key, signed_part(purpose, expiry, nonce_hex).as_bytes());
-    format!("{FORMAT}.{expiry}.{nonce_hex}.{}", to_hex(&mac))
+    format!("{FORMAT}.{expiry}.{nonce_hex}.{}", crate::fsutil::hex(&mac))
 }
 
 pub fn mint(purpose: &str) -> Result<String, String> {
@@ -149,7 +145,7 @@ impl Verifier {
         if now >= expiry || expiry > now + TOKEN_TTL_MS {
             return false;
         }
-        let want = to_hex(&hmac_sha256(key, signed_part(purpose, expiry, nonce).as_bytes()));
+        let want = crate::fsutil::hex(&hmac_sha256(key, signed_part(purpose, expiry, nonce).as_bytes()));
         if !crate::fsutil::ct_eq(&want, mac) {
             return false;
         }
@@ -167,13 +163,13 @@ mod tests {
     fn hmac_matches_the_rfc_4231_vectors() {
         // Test case 1
         let mac = hmac_sha256(&[0x0b; 20], b"Hi There");
-        assert_eq!(to_hex(&mac), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+        assert_eq!(crate::fsutil::hex(&mac), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
         // Test case 2
         let mac = hmac_sha256(b"Jefe", b"what do ya want for nothing?");
-        assert_eq!(to_hex(&mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+        assert_eq!(crate::fsutil::hex(&mac), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
         // Test case 6: key longer than the block size
         let mac = hmac_sha256(&[0xaa; 131], b"Test Using Larger Than Block-Size Key - Hash Key First");
-        assert_eq!(to_hex(&mac), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
+        assert_eq!(crate::fsutil::hex(&mac), "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
     }
 
     const NONCE: &str = "00112233445566778899aabbccddeeff";

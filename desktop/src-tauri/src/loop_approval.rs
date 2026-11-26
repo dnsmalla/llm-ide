@@ -109,7 +109,7 @@ impl ApprovalStore {
     pub(crate) fn insert_at(&self, data: GrantData, now: u64) -> Result<(String, u64), String> {
         let mut raw = [0u8; 24];
         getrandom::fill(&mut raw).map_err(|e| format!("cannot generate an approval token: {e}"))?;
-        let token = crate::host_approval::to_hex(&raw);
+        let token = crate::fsutil::hex(&raw);
         let expires = now + GRANT_TTL_MS;
         let mut grants = self.lock();
         Self::purge(&mut grants, now);
