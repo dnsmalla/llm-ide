@@ -159,8 +159,6 @@
     "allow-get-prefs",
     "allow-set-prefs",
     "allow-remote-ssh-test",
-    "allow-remote-ssh-loop",
-    "allow-remote-ssh-worktree",
     "allow-remote-ssh-confirm",
     "allow-remote-ssh-server-test",
     "allow-remote-ssh-server-confirm",

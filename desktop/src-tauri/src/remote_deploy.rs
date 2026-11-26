@@ -3,7 +3,7 @@
 //!
 //! Trust boundary: this module never runs a shell string built from webview text. Every remote
 //! command is a constant (`stage_command` / the fixed preflight and upload scripts); the SSH argv
-//! comes from `remote::ssh_args_with`. Secrets (JWT + vault key) are generated here and sent on the
+//! comes from `remote::ssh_args_known`. Secrets (JWT + vault key) are generated here and sent on the
 //! SSH child's stdin; they never enter argv, an event, an error or a log line.
 //!
 //! The real server is only ever touched by `SystemDeploy` (system `ssh`). Tests inject a fake

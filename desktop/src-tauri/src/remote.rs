@@ -1,8 +1,6 @@
-//! Phase 1 of remote server support: validate an SSH target and test it with the system `ssh`.
-//!
-//! What this module deliberately does NOT do yet: copy/install anything on the remote host, start a
-//! service, or change where the desktop's core runs. Phase 2 adds deploy; until then "Remote server"
-//! is a stored choice plus a connection check.
+//! Test SSH for a hub target, plus what the hub deploy shares with it: the strict validators for host, user and key
+//! path, the argv builders for `ssh` (`ssh_args_known`), and the host-key confirmation (R-034 #7) that deploy,
+//! update and uninstall require before they connect. The deploy itself lives in `remote_deploy`.
 //!
 //! Security rules:
 //! - the target is validated before a child process exists: hostnames/IPs, user names and private-key
@@ -265,40 +263,6 @@ pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
     })
 }
 
-/// The argv after `ssh`: a fixed option list, then `user@host`, then one remote command. No shell.
-#[cfg(test)]
-pub fn ssh_args_with(target: &PreparedTarget, command: &str) -> Vec<String> {
-    vec![
-        "-v".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        // Long remote Loop runs sit silent for minutes; keepalives stop NAT/idle timeouts killing them
-        // and let a dead link fail in ~2 minutes instead of hanging.
-        "-o".to_string(),
-        "ServerAliveInterval=30".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=4".to_string(),
-        "-o".to_string(),
-        format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"),
-        "-o".to_string(),
-        "StrictHostKeyChecking=accept-new".to_string(),
-        "-o".to_string(),
-        "IdentitiesOnly=yes".to_string(),
-        "-p".to_string(),
-        target.port.to_string(),
-        "-i".to_string(),
-        target.key_path.clone(),
-        format!("{}@{}", target.user, target.host),
-        command.to_string(),
-    ]
-}
-
-/// The argv for the fixed Phase-1 probe. Deploy uses [`ssh_args_with`] with a constant stage command.
-#[cfg(test)]
-pub fn ssh_args(target: &PreparedTarget) -> Vec<String> {
-    ssh_args_with(target, REMOTE_COMMAND)
-}
-
 /// The deploy/update/uninstall argv (R-034 #7): `StrictHostKeyChecking=yes` against ONE temporary
 /// known_hosts file that holds only the confirmed key. `GlobalKnownHostsFile` is neutralised so a
 /// system-wide entry cannot broaden what is trusted. `accept_new` is only for the initial Test SSH,
@@ -490,70 +454,6 @@ pub async fn remote_ssh_test(target: SshTarget) -> Result<SshTestResult, FsError
     .map_err(|e| herr("internal", format!("the SSH test did not finish: {e}")))?
 }
 
-/// Run one fixed remote command over the host-key-pinned transport (the same one deploy uses).
-/// The confirmation is checked FIRST so an unconfirmed host is refused before any connection, and the
-/// runner then pins ONE confirmed key (`StrictHostKeyChecking=yes`) instead of trusting whatever answers.
-pub fn run_pinned(
-    prepared: &PreparedTarget,
-    command: &str,
-    runner: &dyn crate::remote_deploy::DeployRunner,
-) -> Result<RawOutput, FsError> {
-    require_confirmed_host_key(prepared)?;
-    runner.run(prepared, command, None)
-}
-
-/// List, merge or remove host Loop worktrees through the fixed CLI.
-#[tauri::command]
-pub async fn remote_ssh_worktree(target: SshTarget, action: String, path: String, name: String) -> Result<String, FsError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if action != "list" && action != "diff" && action != "merge" && action != "remove" && action != "prune" { return Err(herr("invalid_path", "action must be list, diff, merge, remove or prune")); }
-        if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
-        if name.len() > 120 || name.contains('\0') || name.contains('\n') || name.contains('\r') { return Err(herr("invalid_path", "invalid worktree name")); }
-        let prepared = prepare(&target)?;
-        check_key_file(&prepared.key_path)?;
-        let qpath = format!("'{}'", path.replace('\'', "'\\''"));
-        let qname = format!("'{}'", name.replace('\'', "'\\''"));
-        let command = if name.is_empty() {
-            format!("/usr/local/bin/llmide-remote-worktree {action} {qpath}")
-        } else {
-            format!("/usr/local/bin/llmide-remote-worktree {action} {qpath} {qname}")
-        };
-        let output = run_pinned(&prepared, &command, &crate::remote_deploy::SystemDeploy)?;
-        if output.code != Some(0) {
-            let body = output.stdout.trim();
-            if !body.is_empty() { return Ok(body.to_string()); }
-            return Err(herr("ssh_failed", failure_message(&output)));
-        }
-        Ok(output.stdout.trim().to_string())
-    })
-    .await
-    .map_err(|e| herr("internal", format!("the worktree command did not finish: {e}")))?
-}
-
-/// Run the fixed host Loop CLI on the remote project. Same transport and quoting as the SSH project bootstrap.
-#[tauri::command]
-pub async fn remote_ssh_loop(target: SshTarget, path: String, loop_name: String) -> Result<String, FsError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        if path.len() > 4096 || path.contains('\0') || path.contains('\n') || path.contains('\r') { return Err(herr("invalid_path", "invalid project path")); }
-        if loop_name.len() > 120 || loop_name.contains('\0') || loop_name.contains('\n') || loop_name.contains('\r') { return Err(herr("invalid_path", "invalid loop name")); }
-        let prepared = prepare(&target)?;
-        check_key_file(&prepared.key_path)?;
-        let qpath = format!("'{}'", path.replace('\'', "'\\''"));
-        let qloop = format!("'{}'", loop_name.replace('\'', "'\\''"));
-        let command = format!("/usr/local/bin/llmide-remote-loop {qpath} {qloop}");
-        let output = run_pinned(&prepared, &command, &crate::remote_deploy::SystemDeploy)?;
-        // A failed Loop still writes run.json and prints its JSON result; show that instead of a bare exit code.
-        if output.code != Some(0) {
-            let body = output.stdout.trim();
-            if !body.is_empty() { return Ok(body.to_string()); }
-            return Err(herr("ssh_failed", failure_message(&output)));
-        }
-        Ok(output.stdout.trim().to_string())
-    })
-    .await
-    .map_err(|e| herr("internal", format!("the remote Loop did not finish: {e}")))?
-}
-
 /// R-034 #7: remember the host-key fingerprint the user confirmed after a Test SSH. Deploy, update and
 /// uninstall refuse until this is called for the same host:port in this app session.
 #[tauri::command]
@@ -678,7 +578,8 @@ mod tests {
     #[test]
     fn argv_is_an_array_with_the_required_ssh_options_and_no_shell() {
         let prepared = prepare(&SshTarget { port: 2222, ..target("example.com", "alice", "/home/alice/.ssh/id_ed25519") }).unwrap();
-        let args = ssh_args(&prepared);
+        // The argv Test SSH really runs (`execute`): accept-new, against a throwaway known_hosts file.
+        let args = ssh_args_known(&prepared, REMOTE_COMMAND, Path::new("/tmp/llmide-known-hosts-test"), true);
         assert!(!args.iter().any(|a| a.contains("sh -c") || a.contains("; rm")));
         assert_eq!(args[0], "-v");
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "BatchMode=yes"));
@@ -716,19 +617,6 @@ mod tests {
         assert_eq!(require_confirmed_host_key(&other).unwrap_err().code, "host_key_unconfirmed");
         forget_confirmation(&prepared);
         assert_eq!(require_confirmed_host_key(&prepared).unwrap_err().code, "host_key_unconfirmed");
-    }
-
-    #[test]
-    fn pinned_remote_commands_refuse_an_unconfirmed_host() {
-        struct NeverRuns;
-        impl crate::remote_deploy::DeployRunner for NeverRuns {
-            fn run(&self, _: &PreparedTarget, _: &str, _: Option<&[u8]>) -> Result<RawOutput, FsError> {
-                panic!("ssh must not run for an unconfirmed host");
-            }
-        }
-        let prepared = prepare(&target("pinned-unconfirmed.example.com", "alice", "/home/alice/.ssh/id_ed25519")).unwrap();
-        forget_confirmation(&prepared);
-        assert_eq!(run_pinned(&prepared, "x", &NeverRuns).unwrap_err().code, "host_key_unconfirmed");
     }
 
     #[test]

@@ -483,8 +483,6 @@ macro_rules! product_handlers {
                 prefs::get_prefs,
                 prefs::set_prefs,
                 remote::remote_ssh_test,
-                remote::remote_ssh_loop,
-                remote::remote_ssh_worktree,
                 remote::remote_ssh_confirm,
                 ssh_cmds::remote_ssh_server_test,
                 ssh_cmds::remote_ssh_server_confirm,

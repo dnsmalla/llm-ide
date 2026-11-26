@@ -172,8 +172,6 @@ const COMMANDS: &[&str] = &[
     "get_prefs",
     "set_prefs",
     "remote_ssh_test",
-    "remote_ssh_loop",
-    "remote_ssh_worktree",
     "remote_ssh_confirm",
     "remote_ssh_server_test",
     "remote_ssh_server_confirm",
