@@ -132,5 +132,13 @@ export default defineConfig(({ mode }) => ({
   },
   clearScreen: false,
   server: { port: 5173, strictPort: true, host: "127.0.0.1", fs: { allow: [".."] } },
-  build: { target: "es2022" },
+  build: {
+    target: "es2022",
+    // The app loads its chunks from its own bundle on disk, not the network, and only on demand. The big ones are
+    // vendor code by design: Monaco's ts.worker (~7 MB), the explorer editor host with Monaco (~4 MB) and three.js
+    // on the System page (~1.5 MB). Vite's default 500 kB limit warned on every build; a new chunk above this is real.
+    chunkSizeWarningLimit: 7500,
+    // Gzip sizes describe network transfer, which a desktop bundle never does; skipping them saves build time.
+    reportCompressedSize: false,
+  },
 }));
