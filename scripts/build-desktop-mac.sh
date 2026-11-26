@@ -62,14 +62,33 @@ mkdir -p "$DESKTOP/resources"
 if ! mkdir "$LOCK" 2>/dev/null; then
   OTHER="$(cat "$LOCK/pid" 2>/dev/null || true)"
   if [ -n "$OTHER" ] && kill -0 "$OTHER" 2>/dev/null; then
-    echo "another desktop build is running (pid $OTHER); wait for it to finish" >&2
+    echo "another desktop build is running (pid $OTHER, lock $LOCK); wait for it to finish" >&2
     exit 1
   fi
   rm -rf "$LOCK"
   mkdir "$LOCK"
 fi
 echo $$ >"$LOCK/pid"
-trap 'rm -rf "$LOCK"' EXIT
+
+# Ctrl-C / kill must stop the running step's whole process tree (npm, cargo, node...) and the ticker, otherwise
+# they keep writing into desktop/resources after the lock is gone and a second build races them. Steps run in the
+# background and are `wait`ed on, because bash runs a trap only after a foreground child ends, and a non-interactive
+# bash starts background jobs with SIGINT ignored, so the INT trap has to kill the step tree itself.
+TICKER=""
+STEP_PID=""
+kill_tree() { # pid: children first, so a parent cannot respawn what we just killed
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do kill_tree "$child"; done
+  kill -TERM "$1" 2>/dev/null || true
+}
+cleanup() {
+  [ -n "$TICKER" ] && kill "$TICKER" 2>/dev/null
+  [ -n "$STEP_PID" ] && kill_tree "$STEP_PID"
+  rm -rf "$LOCK"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
 TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
@@ -85,18 +104,21 @@ BUILD_START=$SECONDS
 # which would let a multi-command step carry on past a failed command.
 run() {
   local label="$1"; shift
-  local t0=$SECONDS code=0 ticker=""
+  local t0=$SECONDS code=0 log_start=0
   if [ "$VERBOSE" = 1 ]; then
     printf '\n==> %s\n' "$label"
-    set +e; ( set -e; "$@" ); code=$?; set -e
+    set +e; ( set -e; "$@" ) & STEP_PID=$!
+    wait "$STEP_PID"; code=$?; STEP_PID=""; set -e
   else
     printf '==> %s\n' "$label" >>"$LOG_FILE"
+    log_start=$(wc -c <"$LOG_FILE" | tr -d ' ')
     printf '  %-56s ' "$label"
     if [ -t 1 ]; then # live elapsed time, so a multi-minute step does not look hung
-      ( while sleep 1; do printf '%4ss\b\b\b\b\b' $((SECONDS - t0)); done ) & ticker=$!
+      ( while sleep 1; do printf '%4ss\b\b\b\b\b' $((SECONDS - t0)); done ) & TICKER=$!
     fi
-    set +e; ( set -e; "$@" ) >>"$LOG_FILE" 2>&1; code=$?; set -e
-    [ -n "$ticker" ] && { kill "$ticker" 2>/dev/null; wait "$ticker" 2>/dev/null || true; }
+    set +e; ( set -e; "$@" ) >>"$LOG_FILE" 2>&1 & STEP_PID=$!
+    wait "$STEP_PID"; code=$?; STEP_PID=""; set -e
+    [ -n "$TICKER" ] && { kill "$TICKER" 2>/dev/null; wait "$TICKER" 2>/dev/null || true; TICKER=""; }
     if [ "$code" = 0 ]; then printf 'ok %4ss\n' $((SECONDS - t0)); else printf 'FAILED\n'; fi
   fi
   if [ "$code" != 0 ]; then
@@ -107,6 +129,18 @@ run() {
     echo "build failed at: $label (exit $code)" >&2
     exit "$code"
   fi
+  [ "$VERBOSE" = 1 ] || show_warnings "$log_start"
+}
+# A passing step can still say something worth reading (a skipped cache, a deprecated flag); quiet mode would
+# otherwise hide it in the log. Only this step's slice of the log is scanned.
+show_warnings() { # log_start_byte
+  local lines total
+  lines="$(tail -c +"$(($1 + 1))" "$LOG_FILE" | grep -iE '^[[:space:]]*warning' || true)"
+  [ -n "$lines" ] || return 0
+  # Here-strings, not `printf | head`: under pipefail, head closing early SIGPIPEs printf and kills a passing build.
+  total=$(wc -l <<<"$lines" | tr -d ' ')
+  head -n 5 <<<"$lines" | sed 's/^[[:space:]]*/      /'
+  [ "$total" -le 5 ] || printf '      (%s more in the log)\n' $((total - 5))
 }
 info() { if [ "$VERBOSE" = 1 ]; then echo "$*"; else echo "$*" >>"$LOG_FILE"; fi; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 ($2)" >&2; exit 2; }; }
@@ -154,13 +188,26 @@ BUILD_LABEL="Build the app (frontend + release Rust binary)"
 # The stamp is written only after the whole build passed, so a build that failed later (sign, smoke) is redone.
 BUILD_KEY="$(node "$DESKTOP/scripts/app-build-key.mjs")"
 STAMP="$TARGET_DIR/.app-build-key"
-if [ "$FORCE" != 1 ] && [ -d "$APP" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$BUILD_KEY" ]; then
+# The stamp lives next to the bundle, not in it, so something that swaps the bundle (the in-app feature rebuild
+# ditto-es a reduced app over this path) would leave a valid stamp for the wrong app. build-key.txt travels with
+# the bundle (and is sealed by the signature), so reuse needs both to match.
+KEY_IN_APP="$APP/Contents/Resources/build-key.txt"
+REUSE=0
+if [ "$FORCE" != 1 ] && [ -d "$APP" ] && [ -f "$STAMP" ] && [ -f "$KEY_IN_APP" ] \
+  && [ "$(cat "$STAMP")" = "$BUILD_KEY" ] && [ "$(cat "$KEY_IN_APP")" = "$BUILD_KEY" ]; then REUSE=1; fi
+if [ "$REUSE" = 1 ]; then
   printf '==> %s: unchanged since the last build, reused\n' "$BUILD_LABEL" >>"$LOG_FILE"
   if [ "$VERBOSE" = 1 ]; then
     printf '\n==> %s: unchanged since the last build, reused\n' "$BUILD_LABEL"
   else
     printf '  %-56s %s\n' "$BUILD_LABEL" "unchanged, reused"
   fi
+  # The key deliberately does not cover the core (it is restaged every build), so a reused bundle gets the fresh one.
+  refresh_core() {
+    rm -rf "$APP/Contents/Resources/core"
+    ditto "$DESKTOP/resources/core" "$APP/Contents/Resources/core"
+  }
+  run "Refresh the bundled core" refresh_core
 else
   rm -f "$STAMP"
   run "$BUILD_LABEL" tauri_build
@@ -169,8 +216,11 @@ fi
 
 # A local build records its source checkout so Settings > Build can rebuild itself; a distributed release omits it
 # (LLMIDE_OMIT_SOURCE_ROOT=1), and the in-app rebuild then refuses. Written BEFORE signing so the seal covers it.
+# Removed first so an omit-build on a reused bundle never ships a path left by an earlier local build.
+mkdir -p "$APP/Contents/Resources"
+rm -f "$APP/Contents/Resources/source-root.txt"
+printf '%s\n' "$BUILD_KEY" >"$KEY_IN_APP"
 if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
-  mkdir -p "$APP/Contents/Resources"
   printf '%s\n' "$ROOT" > "$APP/Contents/Resources/source-root.txt"
   chmod 600 "$APP/Contents/Resources/source-root.txt"
 fi
