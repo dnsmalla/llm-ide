@@ -128,6 +128,8 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
   // login needs a typed password or a stored one.
   const connectBlocked = busy || (s.auth === "password" && pw === undefined && !s.passwordSaved);
   const finish = (status: SshServerStatus | null) => {
+    // A Keychain warning stays on screen: the caller's next step (close, restart) would hide it before it is read.
+    if (status?.warning) return;
     if (status?.link === "connected") onConnected?.();
     else if (status?.link === "restart_required") onRestartRequired?.();
   };
@@ -193,6 +195,7 @@ export function SshServerForm({ m, s, password, onPassword, readOnly = false, fo
       {/* The facts show as soon as the probe returns (the trust step alone carries none). */}
       {s.test !== null && trusted && s.test.os !== null ? <TestSummary test={s.test} /> : null}
       {step !== null ? <p className="st-hint" role="status">{step}</p> : null}
+      {s.status?.warning ? <p className="st-hint" role="status" data-tone="warning">{s.status.warning}</p> : null}
       {s.foreign === "connect" ? <TakeOverPrompt busy={busy} onTakeOver={() => void takeOver()} onCancel={() => m.dismissForeign()} /> : null}
 
       {noBundle !== null ? <p className="st-hint" role="status">{noBundle}</p> : null}

@@ -169,6 +169,21 @@ export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onS
   const cardRef = useRef<HTMLDivElement>(null);
   const askRef = useRef<HTMLDivElement>(null);
   const confirmRef = useRef<HTMLDivElement>(null);
+  // Set once the dialog is closed or unmounted: a Connect that was still running must not switch (restart) the app after
+  // the user cancelled. The effect resets it on mount so a strict-mode re-run does not leave it set.
+  const closedRef = useRef(false);
+  useEffect(() => {
+    closedRef.current = false;
+    return () => {
+      closedRef.current = true;
+      m.cancel();
+    };
+  }, [m]);
+  const close = () => {
+    closedRef.current = true;
+    m.cancel();
+    onClose();
+  };
   // The dialog takes focus when it opens, except for a password server: there the form focuses the password field.
   // It takes focus again after Edit details, which unmounts the link that had it.
   useEffect(() => {
@@ -183,6 +198,7 @@ export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onS
     (confirming ? confirmRef : askRef).current?.focus();
   }, [confirming]);
   const doSwitch = async () => {
+    if (closedRef.current) return;
     // Focus leaves the Switch button before it is disabled, so it stays on the confirmation.
     confirmRef.current?.focus();
     setSwitching(true);
@@ -210,9 +226,10 @@ export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onS
       onAskSwitch={() => setConfirming(true)}
       onCancelSwitch={() => setConfirming(false)}
       onSwitch={() => void doSwitch()}
-      onClose={onClose}
+      onClose={close}
       onConnected={onConnected}
       onRestartRequired={() => {
+        if (closedRef.current) return;
         // The restart ends work running here, so it asks only then; otherwise Connect already was the user's answer.
         if (switchDecision(hasLiveWork()) === "ask") setConfirming(true);
         else void doSwitch();
@@ -221,7 +238,7 @@ export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onS
         // A switch that is running finishes on its own: Escape must not take its confirmation away mid-restart.
         if (switching) return;
         if (escapeTarget(confirming) === "confirmation") setConfirming(false);
-        else onClose();
+        else close();
       }}
       cardRef={cardRef}
       askRef={askRef}

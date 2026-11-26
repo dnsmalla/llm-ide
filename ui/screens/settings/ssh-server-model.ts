@@ -33,6 +33,11 @@ export type SshForeignAction = "stop" | "uninstall" | "connect";
 export const SSH_FOREIGN_TEXT = "Another computer started the server on this account. Stopping it ends that computer's work.";
 /** Shown when Connect finds a server part that this desktop's session record does not own. The user must click Take over. */
 export const SSH_TAKE_OVER_TEXT = "A server part from an earlier session is still running on this account (another computer, or this one before its app data was reset). Taking over stops it; any work running in it ends.";
+/**
+ * Shown for SSH_CORE_FOREIGN wherever no Take over button is offered (the app's startup, the live link, a failed start).
+ * The prompt that does offer the button shows SSH_TAKE_OVER_TEXT instead.
+ */
+export const SSH_FOREIGN_NEXT_STEP_TEXT = "A server part from an earlier session is still running on this account. To replace it, open Welcome, choose Connect to SSH server and use Take over.";
 const isForeignCore = (e: unknown): boolean => isRecord(e) && e.code === "SSH_CORE_FOREIGN";
 
 /** Strict decode of `remote_ssh_server_test` / `_confirm`; any wrong type reads as null (the host answered something unknown). */
@@ -59,7 +64,8 @@ export function decodeSshServerStatus(raw: unknown): SshServerStatus | null {
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
   if (error !== null && typeof error !== "string") return null;
   const known = SSH_LINKS.includes(link as SshServerLink) ? (link as SshServerLink) : "failed";
-  return { link: known, host, port, user, localUrl, version, claude, error, bundleAvailable: raw.bundleAvailable !== false };
+  const warning = typeof raw.warning === "string" && raw.warning.length > 0 ? raw.warning.slice(0, 300) : null;
+  return { link: known, host, port, user, localUrl, version, claude, error, bundleAvailable: raw.bundleAvailable !== false, ...(warning === null ? {} : { warning }) };
 }
 
 /** Shown beside the disabled SSH actions when the host reports no server bundle in this build. */
@@ -80,7 +86,7 @@ const SSH_ERROR_TEXT: HostErrorTable = {
   SSH_UNREACHABLE: "Could not reach the server.",
   SSH_HOST_KEY_UNCONFIRMED: "Test the connection and confirm the server's host key first.",
   SSH_HOST_KEY_CHANGED: "The server's host key changed. Test the connection again and confirm the new fingerprint.",
-  SSH_CORE_FOREIGN: SSH_TAKE_OVER_TEXT,
+  SSH_CORE_FOREIGN: SSH_FOREIGN_NEXT_STEP_TEXT,
   SSH_TIMEOUT: "The server did not answer in time.",
   SSH_START_BUSY: "The server is already starting. Try again in a moment.",
   SSH_FORWARD_FAILED: hostSentence(SSH_REQUEST_FAILED),
@@ -393,6 +399,14 @@ export class SshServerModel extends Store<SshServerState> {
     });
   }
 
+  /**
+   * The dialog was closed or cancelled: every answer still on its way is dropped (a scoped run returns null), so a late
+   * `restart_required` cannot make the closed form switch the app. The host call itself cannot be recalled.
+   */
+  cancel(): void {
+    this.#generation += 1;
+  }
+
   /** The "Remember password in Keychain" checkbox. */
   setRemember(remember: boolean): void {
     this.set({ rememberPassword: remember });
@@ -432,8 +446,8 @@ export class SshServerModel extends Store<SshServerState> {
       const options = this.#passwordOptions(password);
       const test = await (options === undefined ? this.#io.test(this.target(), password) : this.#io.test(this.target(), password, options));
       if (generation !== this.#generation) return;
+      // A Test never changes the Keychain (the host applies the checkbox only after a connect), so the flag stays.
       this.set({ test, error: null });
-      if (test.trusted) this.#syncPasswordFlag();
     } catch (e) {
       if (generation !== this.#generation) return;
       this.set({ test: null, error: sshServerErrorText(e) });
@@ -456,7 +470,8 @@ export class SshServerModel extends Store<SshServerState> {
     try {
       const test = await this.#io.confirm(this.target(), last.hostKeyType, last.fingerprint);
       if (generation !== this.#generation) return;
-      this.set({ test, error: null });
+      // The host forgets the passwords saved for a server whose key was replaced: the next sign-in is typed.
+      this.set(last.changed ? { test, error: null, passwordSaved: false } : { test, error: null });
     } catch (e) {
       if (generation !== this.#generation) return;
       this.set({ error: sshServerErrorText(e) });
@@ -513,8 +528,14 @@ export class SshServerModel extends Store<SshServerState> {
 
   /** The fingerprint prompt's "Trust this key": confirm the last test's key, then test again so the probe is filled in. */
   async trustAndTest(password?: string): Promise<void> {
+    const replacedKey = this.getState().test?.changed === true;
     await this.confirmFingerprint();
     if (this.getState().error !== null || this.getState().test?.trusted !== true) return;
+    // After a changed key the saved password is gone (the host forgot it): it must be typed again, never sent silently.
+    if (replacedKey && this.getState().auth === "password" && password === undefined) {
+      this.set({ error: sshServerErrorText({ code: "SSH_PASSWORD_REQUIRED", message: "" }) });
+      return;
+    }
     await this.test(password);
   }
 
@@ -555,7 +576,8 @@ export class SshServerModel extends Store<SshServerState> {
     const target = this.target();
     const passwordOptions = this.#passwordOptions(password, options.takeOver === true);
     const status = await this.run("connect", () => (passwordOptions === undefined ? this.#io.connect(target, password) : this.#io.connect(target, password, passwordOptions)), true, "connect");
-    if (status !== null) this.#syncPasswordFlag();
+    // A warning means the Keychain step failed: the box and the flag must not claim a saved password.
+    if (status !== null && !status.warning) this.#syncPasswordFlag();
     return status;
   }
 
@@ -617,7 +639,7 @@ export class SshServerModel extends Store<SshServerState> {
 
   /**
    * `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it.
-   * `foreignAction`: a stop or uninstall, whose SSH_CORE_FOREIGN answer asks for confirmation instead of showing an error.
+   * `foreignAction`: a stop, uninstall or connect, whose SSH_CORE_FOREIGN answer asks for confirmation (force, or Take over) instead of showing an error.
    */
   private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>, scoped = false, foreignAction: SshForeignAction | null = null): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;

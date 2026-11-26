@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   SshServerModel,
   SSH_TAKE_OVER_TEXT,
+  decodeSshServerStatus,
   UNAVAILABLE_SSH_IO,
   createSshServerIo,
   decodeSshRecentList,
@@ -171,9 +172,11 @@ test("Cancel on the take-over question sends nothing and clears it", async () =>
   assert.equal(calls.length, before);
 });
 
-test("the take-over text says what is stopped, and the foreign code reads the same everywhere", () => {
+test("the take-over text says what is stopped; where no Take over button exists the foreign code points to Welcome", () => {
   assert.match(SSH_TAKE_OVER_TEXT, /still running on this account \(another computer, or this one before its app data was reset\)\. Taking over stops it; any work running in it ends\./);
-  assert.equal(sshServerErrorText(foreign), SSH_TAKE_OVER_TEXT);
+  const elsewhere = sshServerErrorText(foreign);
+  assert.notEqual(elsewhere, SSH_TAKE_OVER_TEXT, "the startup and link paths have no Take over button to promise");
+  assert.match(elsewhere, /Welcome.*Connect to SSH server.*Take over/);
 });
 
 test("wire: the flags are camelCase arguments added only when set, and a key login sends none", async () => {
@@ -200,4 +203,67 @@ test("the recent list decodes passwordSaved for a password login only; an older 
     { ...base, auth: "key", keyPath: "/k", passwordSaved: true },
   ]);
   assert.deepEqual(list?.map((e) => e.passwordSaved), [true, false, false]);
+});
+
+const changedKey: SshServerTest = { ...unknownKey, changed: true };
+
+test("a changed host key never sends the saved password: after Trust the password must be typed", async () => {
+  const calls: Call[] = [];
+  const answers = [changedKey, trusted, trusted];
+  const m = new SshServerModel(fakeIo(calls, {
+    async test(_t, password, options) { calls.push({ command: "test", password, options }); return answers.shift() ?? trusted; },
+    async confirm() { return { ...trusted, os: null, arch: null, freeMb: null, claude: null }; },
+  }));
+  m.loadFrom(passwordEntry);
+  assert.equal(await m.connectWithTest(), null, "the changed key stops Connect at the fingerprint");
+  assert.equal(await m.trustAndConnect(), null, "Trust alone does not sign in");
+  assert.equal(m.getState().passwordSaved, false, "the host forgot the saved password with the old pin");
+  assert.match(m.getState().error ?? "", /Enter the password/);
+  assert.deepEqual(calls.map((c) => c.command), ["test"], "no second test and no connect went out with useSaved");
+  assert.ok(calls.every((c) => c.options?.useSaved !== undefined || c.command === "test"));
+  const status = await m.connectWithTest("typed");
+  assert.equal(status?.link, "connected");
+  const connect = calls.find((c) => c.command === "connect");
+  assert.equal(connect?.password, "typed");
+  assert.equal(connect?.options?.useSaved, undefined, "the typed password is used, not the saved flag");
+});
+
+test("cancel while Connect runs drops the late answer: nothing for the form to act on", async () => {
+  let release: (s: SshServerStatus) => void = () => undefined;
+  const late = new Promise<SshServerStatus>((resolve) => { release = resolve; });
+  const m = key(fakeIo([], { async connect() { return late; } }));
+  const pending = m.connectWithTest();
+  await Promise.resolve();
+  await Promise.resolve();
+  m.cancel();
+  release({ ...connected, link: "restart_required" });
+  assert.equal(await pending, null, "the form's finish gets null, so onRestartRequired is never called");
+  assert.notEqual(m.getState().status?.link, "restart_required");
+});
+
+test("a Test never flips the saved flag: unticking the box changes it only after a good Connect", async () => {
+  const calls: Call[] = [];
+  const m = new SshServerModel(fakeIo(calls));
+  m.loadFrom(passwordEntry);
+  m.setRemember(false);
+  await m.test();
+  assert.equal(m.getState().passwordSaved, true, "the password is still stored after a Test");
+  await m.connect();
+  assert.equal(m.getState().passwordSaved, false);
+});
+
+test("a connect that worked but could not save to the Keychain shows the warning and keeps the connect", async () => {
+  const warning = "Connected, but the password could not be saved in Keychain.";
+  const m = new SshServerModel(fakeIo([], { async connect() { return { ...connected, warning }; } }));
+  m.setField("host", "server.example.com");
+  m.setField("user", "deploy");
+  m.setAuth("password");
+  m.setRemember(true);
+  const status = await m.connectWithTest("typed");
+  assert.equal(status?.link, "connected");
+  assert.equal(m.getState().error, null, "the connect is not reported as failed");
+  assert.equal(m.getState().status?.warning, warning);
+  assert.equal(m.getState().passwordSaved, false, "no saved password is claimed");
+  assert.equal(decodeSshServerStatus({ ...connected, warning })?.warning, warning);
+  assert.equal(decodeSshServerStatus(connected)?.warning, undefined);
 });
