@@ -13,12 +13,12 @@ use std::collections::HashMap;
 use std::time::Duration;
 use std::sync::{Mutex, OnceLock};
 
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
+use crate::host_keys::{fingerprint_for_key_b64, known_hosts_line};
 use crate::ssh_transport::run_hub_program;
 use crate::remote::{
     prepare, require_confirmed_host_key, ssh_args_known, temp_ssh_dir, write_known_hosts,
@@ -54,34 +54,14 @@ pub trait DeployRunner: Send + Sync {
     fn run(&self, target: &PreparedTarget, command: &str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError>;
 }
 
-/// The known_hosts spelling of a target: bare host on 22, `[host]:port` otherwise (OpenSSH rule).
-pub fn known_host_name(target: &PreparedTarget) -> String {
-    if target.port == 22 { target.host.clone() } else { format!("[{}]:{}", target.host, target.port) }
-}
-
-/// OpenSSH SHA256 fingerprint of a base64 key blob: `SHA256:` + unpadded base64url.
-pub fn fingerprint_for_key_b64(key_b64: &str) -> Option<String> {
-    let bytes = base64::engine::general_purpose::STANDARD.decode(key_b64.trim()).ok()?;
-    let digest = Sha256::digest(&bytes);
-    Some(format!("SHA256:{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)))
-}
-
 /// One known_hosts line from `ssh-keyscan` output, kept only when its key hashes to the fingerprint the
-/// user confirmed. The scan's own host column is ignored (it is untrusted), and the line is re-spelled
-/// from the validated target, so a scan answer cannot inject another host pattern.
+/// user confirmed. The line is re-spelled from the validated target (see `host_keys::known_hosts_line`).
 pub fn verified_known_host_line(scan: &str, target: &PreparedTarget, key: &ConfirmedHostKey) -> Option<String> {
-    for raw in scan.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') { continue; }
-        let mut parts = line.split_whitespace();
-        let _scanned_host = parts.next()?;
-        let key_type = parts.next()?;
-        let key_b64 = parts.next()?;
-        if key_type != key.key_type { continue; }
-        if fingerprint_for_key_b64(key_b64).as_deref() != Some(key.fingerprint.as_str()) { continue; }
-        return Some(format!("{} {} {}", known_host_name(target), key_type, key_b64));
-    }
-    None
+    crate::host_keys::parse_scan(scan)
+        .find(|(key_type, key_b64)| {
+            *key_type == key.key_type && fingerprint_for_key_b64(key_b64).as_deref() == Some(key.fingerprint.as_str())
+        })
+        .map(|(key_type, key_b64)| known_hosts_line(&target.host, target.port, key_type, key_b64))
 }
 
 /// The real transport: system `ssh` with a ONE-KEY temporary known_hosts (R-034 #7). The user confirmed
@@ -951,6 +931,7 @@ mod tests {
 
     #[test]
     fn r034_a_keyscan_line_is_kept_only_when_it_matches_the_confirmed_fingerprint() {
+        use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD.encode(b"a host key blob");
         let fingerprint = fingerprint_for_key_b64(&b64).unwrap();
         let key = ConfirmedHostKey { key_type: "ssh-ed25519".into(), fingerprint: fingerprint.clone() };
@@ -966,14 +947,6 @@ mod tests {
         // A different key type is not this host key.
         let other_type = ConfirmedHostKey { key_type: "ssh-rsa".into(), fingerprint };
         assert_eq!(verified_known_host_line(&scan, &t, &other_type), None);
-    }
-
-    #[test]
-    fn r034_port_22_uses_a_bare_host_and_other_ports_bracket_it() {
-        let mut t = target();
-        assert_eq!(known_host_name(&t), "hub.example.com");
-        t.port = 2222;
-        assert_eq!(known_host_name(&t), "[hub.example.com]:2222");
     }
 
     #[test]

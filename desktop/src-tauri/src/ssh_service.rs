@@ -20,8 +20,8 @@ use crate::confirm::herr;
 use crate::core_host::CoreHost;
 use crate::fs_ops::FsError;
 use crate::prefs::{self, ServerMode, SshAuthKind};
-use crate::remote::{temp_ssh_dir, valid_fingerprint, valid_host_key_type, write_known_hosts, PreparedTarget, RawOutput};
-use crate::remote_deploy::{fingerprint_for_key_b64, known_host_name};
+use crate::remote::{temp_ssh_dir, valid_fingerprint, valid_host_key_type, write_known_hosts, RawOutput};
+use crate::host_keys::{fingerprint_for_key_b64, known_hosts_line, parse_scan};
 use crate::ssh_link::{supervise, KnownHostsDir, SshLink, SuperviseInput};
 use crate::ssh_server_scripts::{parse_core_state, parse_probe, parse_stop, parse_uninstall, ClaudeState, PROBE, STATUS, STOP, UNINSTALL};
 use crate::ssh_session::{connect_with, require_ours, ConnectInput, Link};
@@ -573,11 +573,7 @@ fn saved_endpoint(password: Option<&str>) -> Result<SshEndpoint, FsError> {
 /// column is ignored: it is untrusted, and the key is tied only to the endpoint the user typed.
 fn pick_offered(scan: &str) -> Option<Offered> {
     for wanted in KEY_PREFERENCE {
-        for raw in scan.lines() {
-            let mut fields = raw.split_whitespace();
-            let (Some(_scanned_host), Some(key_type), Some(key_b64)) = (fields.next(), fields.next(), fields.next()) else {
-                continue;
-            };
+        for (key_type, key_b64) in parse_scan(scan) {
             if key_type != wanted {
                 continue;
             }
@@ -627,13 +623,7 @@ pub(crate) fn pinned_dir(endpoint: &SshEndpoint, pin: &Pin) -> Result<KnownHosts
         Some(path) if !path.contains(['"', '\n']) => {}
         _ => return Err(herr("known_hosts_failed", "the temporary folder path cannot be used for host key checks")),
     }
-    let target = PreparedTarget {
-        host: endpoint.host.to_ascii_lowercase(),
-        port: endpoint.port,
-        user: endpoint.user.clone(),
-        key_path: String::new(),
-    };
-    let line = format!("{} {} {}", known_host_name(&target), pin.key_type, pin.key_b64);
+    let line = known_hosts_line(&endpoint.host.to_ascii_lowercase(), endpoint.port, &pin.key_type, &pin.key_b64);
     write_known_hosts(&held.dir, &line)?;
     Ok(held)
 }

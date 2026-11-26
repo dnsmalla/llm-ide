@@ -1,7 +1,12 @@
-//! The one place that runs `ssh-keyscan`. Both the SSH server test and the hub deploy scan go through it, so
-//! neither can wait forever on a host that accepts the connection and then says nothing.
+//! The one place that runs `ssh-keyscan` and reads its answer. Both the SSH server test and the hub deploy scan
+//! go through it, so neither can wait forever on a host that accepts the connection and then says nothing, and
+//! both parse, fingerprint and spell a known_hosts line the same way. What each trusts stays with its caller:
+//! the hub confirms per session, SSH server mode keeps saved pins.
 
 use std::time::Duration;
+
+use base64::Engine as _;
+use sha2::{Digest, Sha256};
 
 use crate::remote::RawOutput;
 use crate::ssh_transport::run_hub_program;
@@ -28,9 +33,54 @@ pub(crate) fn keyscan(host: &str, port: u16, key_type: Option<&str>) -> std::io:
     run_hub_program("ssh-keyscan", &keyscan_args(host, port, key_type), None, KEYSCAN_DEADLINE)
 }
 
+/// The `(key type, key base64)` pairs of `ssh-keyscan` output, in scan order. Blank lines, comments and lines
+/// with fewer than three fields are skipped. The scan's host column is ignored: it is untrusted, and callers tie
+/// a key only to the endpoint the user typed.
+pub(crate) fn parse_scan(scan: &str) -> impl Iterator<Item = (&str, &str)> {
+    scan.lines().filter_map(|raw| {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+        let mut fields = line.split_whitespace();
+        let (_scanned_host, key_type, key_b64) = (fields.next()?, fields.next()?, fields.next()?);
+        Some((key_type, key_b64))
+    })
+}
+
+/// OpenSSH SHA256 fingerprint of a base64 key blob: `SHA256:` + unpadded base64.
+pub(crate) fn fingerprint_for_key_b64(key_b64: &str) -> Option<String> {
+    let bytes = base64::engine::general_purpose::STANDARD.decode(key_b64.trim()).ok()?;
+    let digest = Sha256::digest(&bytes);
+    Some(format!("SHA256:{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(digest)))
+}
+
+/// The known_hosts spelling of a host: bare on port 22, `[host]:port` otherwise (OpenSSH rule).
+pub(crate) fn known_host_name(host: &str, port: u16) -> String {
+    if port == 22 { host.to_string() } else { format!("[{host}]:{port}") }
+}
+
+/// One known_hosts line, re-spelled from the validated endpoint so a scan answer cannot inject another host pattern.
+pub(crate) fn known_hosts_line(host: &str, port: u16, key_type: &str, key_b64: &str) -> String {
+    format!("{} {key_type} {key_b64}", known_host_name(host, port))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scan_parser_skips_noise_and_ignores_the_host_column() {
+        let scan = "# example.com:22 SSH-2.0-x\n\nbroken line\nevil.example ssh-ed25519 AAAA extra\n";
+        assert_eq!(parse_scan(scan).collect::<Vec<_>>(), vec![("ssh-ed25519", "AAAA")]);
+    }
+
+    #[test]
+    fn known_host_names_follow_the_openssh_port_rule() {
+        assert_eq!(known_host_name("hub.example.com", 22), "hub.example.com");
+        assert_eq!(known_host_name("hub.example.com", 2222), "[hub.example.com]:2222");
+        assert_eq!(known_hosts_line("h", 22, "ssh-ed25519", "AAAA"), "h ssh-ed25519 AAAA");
+    }
 
     #[test]
     fn argv_without_a_key_type() {

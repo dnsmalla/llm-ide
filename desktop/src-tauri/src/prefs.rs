@@ -193,7 +193,7 @@ pub(crate) fn parse_known_host(entry: &str) -> Option<KnownHost> {
     let (host, port) = host_port.rsplit_once(':')?;
     let port: u16 = port.parse().ok().filter(|p| *p != 0)?;
     let shape_ok = crate::remote::valid_host(host) && crate::remote::valid_host_key_type(key_type);
-    if !shape_ok || crate::remote_deploy::fingerprint_for_key_b64(key_b64).is_none() {
+    if !shape_ok || crate::host_keys::fingerprint_for_key_b64(key_b64).is_none() {
         return None;
     }
     Some(KnownHost { endpoint: endpoint_text(host, port), key_type: key_type.to_string(), key_b64: key_b64.to_string() })
