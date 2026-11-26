@@ -6,3 +6,11 @@ nav:
   - agent-runtime.md
   - chrome-extension.md
   - cross-cutting.md
+  - command-bus.md
+  - job-runner.md
+  - session-router.md
+  - provider-catalog.md
+  - connector-catalog.md
+  - extensions-catalog.md
+  - google-connectors.md
+  - calendar-ical.md

@@ -149,7 +149,7 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 
 - **Host API v1** (`schema/host-api/v1`, gateway `extension/routes/host-api/`): the desktop's pinned WSS listener the iPhone and web app pair with; see `extension/CLAUDE.md` "Host API v1 (desktop)".
 - **Sync** (`schema/sync/v1`): see `extension/CLAUDE.md` "Sync".
-- **iPhone** (`ios_app/`): wire types and sync envelope in `ios_app/SharedProtocol/` (`make test-shared-protocol`). Its v2 Mac link (`:3006`, Bonjour, PIN) is dead since the Mac app's removal and is scheduled for removal.
+- **iPhone** (`ios_app/`): wire types and sync envelope in `ios_app/SharedProtocol/` (`make test-shared-protocol`). Its old v2 Mac link (`:3006`, Bonjour, PIN) was removed with the Mac app (109c18dc0).
 
 ## Entry Points for Development
 

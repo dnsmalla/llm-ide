@@ -266,7 +266,7 @@ Bucket state is saved to `rate_limit_buckets` in SQLite on auth-GC intervals and
 
 ### Prompt cap
 
-`sanitizeForPrompt()` hard-caps output at **500 000 characters** (`utils.mjs:76`). It also strips `<<<[A-Z_]+>>>` fence markers to prevent prompt injection (`utils.mjs:70–76`). The agent runtime separately caps user message bytes at `MAX_USER_MESSAGE_BYTES = 500_000` bytes (`extension/llm_agent/runtime/loop.mjs:134`).
+`sanitizeForPrompt()` hard-caps output at **500 000 characters** (`utils.mjs:76`). It also strips `<<<[A-Z_]+>>>` fence markers to prevent prompt injection (`utils.mjs:70–76`).
 
 ### CORS
 
