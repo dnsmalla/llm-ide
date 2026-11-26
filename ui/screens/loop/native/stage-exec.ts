@@ -257,11 +257,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   let skippedProtected: string[] = [];
   const g = await guardedAgentCall<AgentRunReply>({
     before,
-    call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
-      method: "POST", body: agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: ctx.runRoot, timeoutMs, projectRoot: ctx.projectRoot, llmDocExists }),
-      timeoutMs: timeoutMs + AGENT_TRANSPORT_GRACE_MS,
-      signal: ctx.signal,
-    }),
+    call: () => postAgentRun(ctx, agentRunBody({ message: parts.join("\n\n"), stage: s, repoRoot: ctx.runRoot, timeoutMs, projectRoot: ctx.projectRoot, llmDocExists }), timeoutMs),
     changedNow: () => changedPathsNow(ctx),
     check: async (paths, b, created) => {
       // The Test loop may add new test files, but it must not rewrite an existing test to make the suite pass.
@@ -325,6 +321,25 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
     outside,
   });
   return problem === null ? result : { ...result, ok: false, output: `${problem}\n${reply}` };
+}
+
+/**
+ * POST /kb/loop/agent-run. A core older than API 160 refuses role "plan" before any agent starts, so the step is sent
+ * again without it and runs on the Loop role's model instead of failing every Factory run at Plan.
+ */
+async function postAgentRun(ctx: StageExecContext, body: ReturnType<typeof agentRunBody>, timeoutMs: number): Promise<AgentRunReply> {
+  const send = (b: ReturnType<typeof agentRunBody>) => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
+    method: "POST", body: b, timeoutMs: timeoutMs + AGENT_TRANSPORT_GRACE_MS, signal: ctx.signal,
+  });
+  try {
+    return await send(body);
+  } catch (e) {
+    const code = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+    if (body.role === undefined || code !== "invalid_role") throw e;
+    const { role: _role, ...withoutRole } = body;
+    ctx.log("the backend does not know the Plan model role (it is older than this app); this step runs on the Loop model");
+    return send(withoutRole);
+  }
 }
 
 function skillResult(r: AgentRunReply): StageRunResult {

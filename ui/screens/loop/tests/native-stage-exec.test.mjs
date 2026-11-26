@@ -92,6 +92,39 @@ test("a run without a run id sends no runId and a cancelled shell stage marks th
   assert.equal(ctx.isCancelled(), true);
 });
 
+/** A core whose agent-run refuses a body with `role` with `code` (what a core older than API 160 does for "plan"). */
+function roleRefusingCore(code) {
+  const bodies = [];
+  const core = {
+    async request(path, opts) {
+      if (path !== "/kb/loop/agent-run") return {};
+      bodies.push(opts.body);
+      if (opts.body.role !== undefined) throw Object.assign(new Error("400"), { status: 400, code });
+      return { reply: "wrote the plan", resultSubtype: "success", changedPaths: [".factory/PLAN.md"], createdPaths: [".factory/PLAN.md"] };
+    },
+  };
+  return { core, bodies };
+}
+
+test("a plan step refused by a core that does not know role \"plan\" is sent once more without the role", async () => {
+  const { core, bodies } = roleRefusingCore("invalid_role");
+  const { ctx, log } = ctxOf({ core });
+  const plan = stage({ id: "s3", name: "Plan", kind: "skill", command: null, skillId: "skills/writing-plans" });
+  await createStageDeps(ctx, loopOf([plan])).runStage(plan, []);
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].role, "plan");
+  assert.equal("role" in bodies[1], false);
+  assert.ok(log.some((l) => /older than this app/.test(l)));
+});
+
+test("any other refusal of a plan step is not retried", async () => {
+  const { core, bodies } = roleRefusingCore("VALIDATION_FAILED");
+  const { ctx } = ctxOf({ core });
+  const plan = stage({ id: "s3", name: "Plan", kind: "skill", command: null, skillId: "skills/writing-plans" });
+  await createStageDeps(ctx, loopOf([plan])).runStage(plan, []);
+  assert.equal(bodies.length, 1);
+});
+
 test("createStageDeps sends repoRoot = runRoot and writeScope for skill stages that declare it", async () => {
   const { host, calls: hostCalls } = fakeHost();
   const { core, calls } = fakeCore({ reply: "wrote the report", resultSubtype: "success", changedPaths: [".factory/READINESS.md"], createdPaths: [".factory/READINESS.md"] });
