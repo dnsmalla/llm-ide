@@ -3,19 +3,19 @@
 // A plain single-shot completion for callers that never needed an agent: no
 // tools, no history loop, no mode, no SSE. The Loop's RegressionRunner (replay
 // and same-meaning judge) is the first caller; before this route it borrowed
-// /code-assist's tool-less legacy path.
+// the tool-less legacy path of the since-removed /code-assist route.
 //
 // Body:  { prompt, language?, model?, provider?, tier?, framing? }
-//   tier 'subagent' picks LLMIDE_SUBAGENT_MODEL when `model` is absent (same
-//   resolver /code-assist uses). framing 'code-assist' wraps the prompt exactly
-//   as /code-assist's legacy path does (byte-identical model input for a caller
+//   tier 'subagent' picks LLMIDE_SUBAGENT_MODEL when `model` is absent (the
+//   resolver the removed /code-assist route used). framing 'code-assist' wraps the prompt exactly
+//   as the removed /code-assist legacy path did (byte-identical model input for a caller
 //   migrating off it); absent = the prompt is sent as is.
 // Reply: { reply, usage? } where usage is the summed model tokens of the call
-//   (omitted when the provider reported none, like /code-assist's v72 fields).
+//   (omitted when the provider reported none).
 //
 // Per user, rate-limited (llmFast bucket, server.mjs), metered in the usage
 // ledger under endpoint '/kb/complete', recorded in agent history (source
-// 'loop', engine 'complete'). Provider-config refusals use /code-assist's
+// 'loop', engine 'complete'). Provider-config refusals use the old /code-assist
 // envelope (400 PROVIDER_UNAVAILABLE), so a client's retry-without-route logic
 // is unchanged.
 import { randomUUID } from 'node:crypto';

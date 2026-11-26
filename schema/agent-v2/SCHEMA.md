@@ -63,8 +63,7 @@ SDK field addition fails this gate rather than the user's turn.
 
 ## Not covered by this schema
 
-The legacy `/code-assist` SSE stream (`server/ai-routes.mjs`) emits an event
-that also calls itself `error`, but with a different shape — `{type:'error',
-error: "…"}` rather than `{code, message, retryable}`. It is a different wire
-with a different client path, and unifying the two is out
-of scope here. Do not add it to this schema; it would make `error` ambiguous.
+The removed legacy `/code-assist` SSE stream (`server/ai-routes.mjs`; the route now answers 404) emitted an event
+that also called itself `error`, but with a different shape — `{type:'error',
+error: "…"}` rather than `{code, message, retryable}`. Do not add that shape to this
+schema; it would make `error` ambiguous.

@@ -248,7 +248,7 @@ function attach(init: RequestInit, token: string | null): RequestInit {
  * Wrap a RequestInit with an AbortController-backed timeout.
  *
  * Defaulting rules (matter for long-running endpoints like SSE streams,
- * /generate-plan, /code-assist, /generate-docx):
+ * /generate-plan, /generate-docx):
  *
  *   1. If the caller passes an explicit `timeoutMs`, honour it
  *      (including `0` meaning "no timeout").

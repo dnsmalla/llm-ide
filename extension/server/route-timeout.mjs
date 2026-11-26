@@ -17,7 +17,7 @@
 // by client cancellation; indexing routes are bounded by their own input caps.
 //
 // OPT-IN ONLY: a route absent from the map has no handler budget.
-// Streaming routes (SSE: /kb/live/:id/stream, /code-assist, agent
+// Streaming routes (SSE: /kb/live/:id/stream, /agent/v2/stream, agent
 // dispatch) must NEVER be listed — they are long-lived by design.
 //
 // Do NOT add a budget for an LLM route. See

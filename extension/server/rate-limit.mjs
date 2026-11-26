@@ -62,7 +62,7 @@ const PROFILES = {
   // exists to reject obvious mashing.
   llm:        { capacity: 3, refillRate: 1 / 30 }, // ~1 every 30s, burst 3
 
-  // Chat agent turns — /code-assist and /agent/v2/stream. Split out of
+  // Chat agent turns — /agent/v2/stream (the former /code-assist route is gone). Split out of
   // `llm` because a chat turn is not one request per user action: the Mac
   // engine starts turns on its own (auto-continue rounds 0.8 s apart, up to
   // 8; a "(continue)" follow-up after every auto-run tool; queue drains), so
