@@ -3,6 +3,7 @@
 // cleaned (safeText) and rendered as text only.
 import { safeText } from "../shell/safe-text.ts";
 import type { SelfHealDiff, SelfHealPrepared, SelfHealVerified } from "./host.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export type IncidentStatus = "new" | "fixing" | "proposed" | "ignored" | "needsHuman" | "fixed";
 export type IncidentSource = "ui" | "log" | "crash" | "server";
@@ -41,12 +42,11 @@ export interface ProposalView {
   notes: string[];
 }
 
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const BRANCH = /^self-heal\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const COMMIT = /^[0-9a-f]{40,64}$/;
 
 function decodeProposal(v: unknown): ProposalRef | null {
-  if (!isRec(v) || typeof v.branch !== "string" || typeof v.worktreePath !== "string" || typeof v.baseCommit !== "string") return null;
+  if (!isRecord(v) || typeof v.branch !== "string" || typeof v.worktreePath !== "string" || typeof v.baseCommit !== "string") return null;
   const m = BRANCH.exec(v.branch);
   return m && COMMIT.test(v.baseCommit) ? { runId: m[1], branch: v.branch, worktreePath: safeText(v.worktreePath, 1024), baseCommit: v.baseCommit } : null;
 }
@@ -127,7 +127,7 @@ export function proposalsOf(list: readonly IncidentView[]): ProposalView[] {
 }
 
 export function decodePrepared(raw: unknown): SelfHealPrepared | null {
-  if (!isRec(raw)) return null;
+  if (!isRecord(raw)) return null;
   const { mainRepo, worktreePath, branch, baseCommit } = raw;
   if (typeof mainRepo !== "string" || !mainRepo || typeof worktreePath !== "string" || !worktreePath) return null;
   if (typeof branch !== "string" || !BRANCH.test(branch) || typeof baseCommit !== "string" || !COMMIT.test(baseCommit)) return null;
@@ -135,7 +135,7 @@ export function decodePrepared(raw: unknown): SelfHealPrepared | null {
 }
 
 export function decodeVerified(raw: unknown): SelfHealVerified | null {
-  if (!isRec(raw) || typeof raw.batch !== "string" || typeof raw.passed !== "boolean" || typeof raw.timedOut !== "boolean" || typeof raw.hasChanges !== "boolean") return null;
+  if (!isRecord(raw) || typeof raw.batch !== "string" || typeof raw.passed !== "boolean" || typeof raw.timedOut !== "boolean" || typeof raw.hasChanges !== "boolean") return null;
   return {
     batch: raw.batch.slice(0, 1_048_576),
     passed: raw.passed,
@@ -150,7 +150,7 @@ export function decodeVerified(raw: unknown): SelfHealVerified | null {
 const HIDDEN = /[​-‏‪-‮⁦-⁩﻿]/g;
 
 export function decodeDiff(raw: unknown): SelfHealDiff | null {
-  if (!isRec(raw) || typeof raw.text !== "string" || typeof raw.truncated !== "boolean" || typeof raw.patchId !== "string" || !/^[0-9a-f]{64}$/.test(raw.patchId)) return null;
+  if (!isRecord(raw) || typeof raw.text !== "string" || typeof raw.truncated !== "boolean" || typeof raw.patchId !== "string" || !/^[0-9a-f]{64}$/.test(raw.patchId)) return null;
   const files = Array.isArray(raw.files) ? raw.files.filter((f): f is string => typeof f === "string" && f.length > 0 && f.length <= 400).slice(0, 100) : [];
   return { text: raw.text.replace(HIDDEN, "�"), truncated: raw.truncated, patchId: raw.patchId, files };
 }

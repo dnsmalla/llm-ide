@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // Typed view of the host's `get_prefs` / `set_prefs` (desktop/src-tauri/src/prefs.rs). Pure: decode only.
 // The host is the authority (strict schema, unknown keys refused); this side decodes defensively so a
 // malformed answer reads as "unavailable" instead of showing invented values.
@@ -112,10 +113,9 @@ export interface HostPrefsView {
 
 export type HostPrefsPatch = Partial<Omit<HostPrefs, "bypassSkipConfirm">>;
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** Defensive decode of the Loop defaults; absent/bad values fall back to the shipped defaults. */
-export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isObj(raw)) return { ...DEFAULT_LOOP_DEFAULTS };
+export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isRecord(raw)) return { ...DEFAULT_LOOP_DEFAULTS };
   const n = (v: unknown, fallback: number, max: number) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= max ? v : fallback);
   const policy = raw.protectedPathPolicy;
   return {
@@ -132,7 +132,7 @@ export function decodeLoopDefaults(raw: unknown): LoopDefaults {  if (!isObj(raw
 
 /** Defensive decode of the remote block; an older prefs file (or a bad value) reads as Local desktop. */
 export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
-  if (!isObj(raw)) return { ...DEFAULT_REMOTE_SERVER };
+  if (!isRecord(raw)) return { ...DEFAULT_REMOTE_SERVER };
   const text = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
   return {
     mode: raw.mode === "remote" || raw.mode === "ssh" ? raw.mode : "local",
@@ -149,7 +149,7 @@ export function decodeRemoteServer(raw: unknown): RemoteServerPrefs {
 }
 
 export function decodePrefs(raw: unknown): HostPrefs | null {
-  if (!isObj(raw)) return null;
+  if (!isRecord(raw)) return null;
   const { ltaMode, router, cap, compress, learn, terminal, theme } = raw;
   if (ltaMode !== "off" && ltaMode !== "shadow" && ltaMode !== "on") return null;
   if (theme !== "dark" && theme !== "light" && theme !== "midnight") return null;
@@ -178,7 +178,7 @@ export function decodePrefs(raw: unknown): HostPrefs | null {
 }
 
 export function decodePrefsView(raw: unknown): HostPrefsView | null {
-  if (!isObj(raw)) return null;
+  if (!isRecord(raw)) return null;
   const stored = decodePrefs(raw.stored);
   const launch = decodePrefs(raw.launch);
   if (!stored || !launch) return null;
@@ -187,12 +187,12 @@ export function decodePrefsView(raw: unknown): HostPrefsView | null {
 
 /** The folder choice `pick_folder` returns: an opaque token and a display name, never a path. */
 export function decodePickedChoice(raw: unknown): { token: string; name: string } | null {
-  if (raw === null || !isObj(raw)) return null;
+  if (raw === null || !isRecord(raw)) return null;
   return typeof raw.token === "string" && raw.token.length > 0 && typeof raw.name === "string" ? { token: raw.token, name: raw.name } : null;
 }
 
 /** The canonical path `pick_folder_redeem` returns: must look absolute, else it is refused. */
 export function decodePickedFolder(raw: unknown): string | null {
-  if (!isObj(raw) || typeof raw.path !== "string") return null;
+  if (!isRecord(raw) || typeof raw.path !== "string") return null;
   return raw.path.startsWith("/") || /^([A-Za-z]:[\\/]|\\\\)/.test(raw.path) ? raw.path : null;
 }

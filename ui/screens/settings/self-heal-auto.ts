@@ -5,6 +5,7 @@
 // The day is recorded BEFORE the run starts: a reload or a crash mid-run must not start a second 2-hour run that day.
 // A busy Loop run or a manual run (409 RUN_ACTIVE) does not use up the day; the check waits AUTO_WAIT_MS instead.
 import type { RunResult } from "./self-heal-run.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const AUTO_CONFIG_KEY = "llmide.selfHeal.auto";
 export const AUTO_STATE_KEY = "llmide.selfHeal.autoState";
@@ -43,12 +44,11 @@ export interface AutoDeps {
 }
 
 const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function parse(raw: string | null): Record<string, unknown> {
   try {
     const v: unknown = JSON.parse(raw ?? "{}");
-    return isRec(v) ? v : {};
+    return isRecord(v) ? v : {};
   } catch {
     return {};
   }
@@ -62,7 +62,7 @@ export function readAutoConfig(raw: string | null): AutoConfig {
 
 export function readAutoState(raw: string | null): AutoState {
   const v = parse(raw);
-  const last = isRec(v.last) && typeof v.last.at === "number" && typeof v.last.message === "string" ? { at: v.last.at, message: v.last.message } : null;
+  const last = isRecord(v.last) && typeof v.last.at === "number" && typeof v.last.message === "string" ? { at: v.last.at, message: v.last.message } : null;
   return {
     lastRunDay: typeof v.lastRunDay === "string" ? v.lastRunDay : "",
     waitUntil: typeof v.waitUntil === "number" && Number.isFinite(v.waitUntil) ? v.waitUntil : 0,

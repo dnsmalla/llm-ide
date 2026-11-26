@@ -5,6 +5,7 @@ import type { LoopDefinition } from "../model.ts";
 import { fenceAsData } from "../factory.ts";
 import type { AgentRunReply, CoreFetch } from "../stage-exec.ts";
 import { shareableScope, validateChange, resolveStage, type ImprovementChange } from "./change.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 export interface ReviewSignal { id: number; kind: string; stageKey: string | null; runId: string | null; payload: unknown }
 export interface Proposal {
@@ -29,7 +30,6 @@ const NOT_JSON = "the reply was not valid JSON";
 const NO_LIST = "the reply had no proposals list";
 const NEEDS_EVIDENCE = "needs evidence from 2 runs or a user change";
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function loopJson(loop: LoopDefinition): string {
   const stages = [...loop.config.stages].sort((a, b) => a.order - b.order).map((s) => ({
@@ -51,16 +51,16 @@ function stageStats(signals: ReviewSignal[]): string {
   const stats = new Map<string, { runs: number; failed: number; sendBacks: number }>();
   const at = (name: string) => { let s = stats.get(name); if (!s) { s = { runs: 0, failed: 0, sendBacks: 0 }; stats.set(name, s); } return s; };
   for (const signal of signals) {
-    if (signal.kind !== "run_finished" || !isObj(signal.payload)) continue;
+    if (signal.kind !== "run_finished" || !isRecord(signal.payload)) continue;
     const p = signal.payload;
     for (const s of Array.isArray(p.stages) ? p.stages : []) {
-      if (!isObj(s) || typeof s.name !== "string") continue;
+      if (!isRecord(s) || typeof s.name !== "string") continue;
       const row = at(s.name);
       row.runs += 1;
       if (s.ok === false) row.failed += 1;
     }
     for (const r of Array.isArray(p.stepReviews) ? p.stepReviews : []) {
-      if (isObj(r) && typeof r.stageName === "string" && typeof r.attempts === "number" && r.attempts > 1) at(r.stageName).sendBacks += r.attempts - 1;
+      if (isRecord(r) && typeof r.stageName === "string" && typeof r.attempts === "number" && r.attempts > 1) at(r.stageName).sendBacks += r.attempts - 1;
     }
   }
   if (stats.size === 0) return "(no run results yet)";
@@ -120,7 +120,7 @@ export function buildReviewMessage(loop: LoopDefinition, signals: ReviewSignal[]
   return head + ordered.filter((s) => kept.has(s.id)).map(signalBlock).join("\n\n");
 }
 
-const hasList = (v: unknown): v is Record<string, unknown> => isObj(v);
+const hasList = (v: unknown): v is Record<string, unknown> => isRecord(v);
 
 /** The last fenced json block that parses to an object, else the outermost {...}; undefined when nothing parses. */
 function extractJson(reply: string): unknown {
@@ -150,13 +150,13 @@ function hasEvidence(ids: number[], byId: Map<number, ReviewSignal>): boolean {
 export function parseProposals(reply: string, loop: LoopDefinition, signals: ReviewSignal[]): { proposals: Proposal[]; dropped: { reason: string }[] } {
   const dropped: { reason: string }[] = [];
   const parsed = extractJson(reply);
-  if (!isObj(parsed)) return { proposals: [], dropped: [{ reason: NOT_JSON }] };
+  if (!isRecord(parsed)) return { proposals: [], dropped: [{ reason: NOT_JSON }] };
   if (!Array.isArray(parsed.proposals)) return { proposals: [], dropped: [{ reason: NO_LIST }] };
   const byId = new Map(signals.map((s) => [s.id, s]));
   const proposals: Proposal[] = [];
   for (const raw of parsed.proposals) {
     if (proposals.length >= MAX_PROPOSALS) { dropped.push({ reason: "more than 5 proposals" }); continue; }
-    if (!isObj(raw)) { dropped.push({ reason: "the proposal is not an object" }); continue; }
+    if (!isRecord(raw)) { dropped.push({ reason: "the proposal is not an object" }); continue; }
     const verdict = validateChange(raw.change, loop);
     if (!verdict.ok) { dropped.push({ reason: verdict.reason }); continue; }
     const ids = [...new Set((Array.isArray(raw.signalIds) ? raw.signalIds : []).filter((id): id is number => typeof id === "number" && byId.has(id)))];

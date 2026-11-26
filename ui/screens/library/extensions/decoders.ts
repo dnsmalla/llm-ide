@@ -3,6 +3,7 @@
 // field is run through `cleanText` and every list is size-capped (a catalog or a diff can be huge).
 // Ids and commits are validated strictly instead of being cleaned: they go back to the server verbatim.
 import { cleanText, hasUnsafeChars, isCommit } from "./sanitize.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export class DecodeError extends Error {
   constructor(where: string, expected: string) {
@@ -12,10 +13,9 @@ export class DecodeError extends Error {
 }
 
 type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function rec(v: unknown, at: string): Rec {
-  if (!isRec(v)) throw new DecodeError(at, "object");
+  if (!isRecord(v)) throw new DecodeError(at, "object");
   return v;
 }
 function arr(v: unknown, at: string, cap: number): unknown[] {
@@ -128,7 +128,7 @@ export function decodeItem(v: unknown, at = "item"): InstalledItem {
   const scan = rec(o.scan, `${at}.scan`);
   const state = rec(o.state, `${at}.state`);
   const byRule: Record<string, number> = {};
-  if (isRec(scan.byRule)) for (const [k, n] of Object.entries(scan.byRule).slice(0, 40)) if (typeof n === "number" && Number.isFinite(n)) byRule[cleanText(k, 60)] = Math.max(0, Math.trunc(n));
+  if (isRecord(scan.byRule)) for (const [k, n] of Object.entries(scan.byRule).slice(0, 40)) if (typeof n === "number" && Number.isFinite(n)) byRule[cleanText(k, 60)] = Math.max(0, Math.trunc(n));
   let update: InstalledItem["update"];
   if (o.update != null) {
     const u = rec(o.update, `${at}.update`);
@@ -490,7 +490,7 @@ export function decodeHealth(body: unknown): HealthResult {
   const problems = arr(o.problems ?? [], "health.problems", MAX_HEALTH_PROBLEMS).map((v, i): HealthProblem => {
     const p = rec(v, `health.problems[${i}]`);
     const fix = (HEALTH_FIXES as readonly unknown[]).includes(p.fix) ? (p.fix as HealthFix) : "none";
-    const d = isRec(p.detail) ? p.detail : {};
+    const d = isRecord(p.detail) ? p.detail : {};
     const program = optText(d.program, `health.problems[${i}].detail.program`, 120);
     return { code: text(p.code, `health.problems[${i}].code`, 60), message: text(p.message, `health.problems[${i}].message`), fix, ...(program ? { program } : {}) };
   });

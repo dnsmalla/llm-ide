@@ -8,6 +8,7 @@ import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { FACTORY_BUILT_IN_STAGES, FACTORY_TEMPLATE, factoryRole, isCustomStage, type FactoryRole } from "./factory.ts";
 import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { HUMAN_REVIEW_FILE, STEP_REVIEW_DIR, STEP_REVIEWS_FILE } from "./review.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export const TEMPLATE_FILE = "system/factory-template.json";
 
@@ -172,7 +173,6 @@ function readJson(s: string): { value: unknown; lines: Map<string, number> } {
 
 // ---- validation --------------------------------------------------------------------------------------------------
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown, lo: number, hi: number): v is number => typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi;
 
 export function parseFactoryTemplate(text: string): TemplateParse {
@@ -197,7 +197,7 @@ export function parseFactoryTemplate(text: string): TemplateParse {
   };
   const err = (path: string, message: string) => errors.push({ path, line: lineOf(path), message });
   const root = read.value;
-  if (!isObj(root)) {
+  if (!isRecord(root)) {
     err("", "the file must be a JSON object with \"version\" and \"stages\"");
     return { ok: false, errors };
   }
@@ -210,7 +210,7 @@ export function parseFactoryTemplate(text: string): TemplateParse {
   }
   let budget: TemplateBudget | undefined;
   if (root.budget !== undefined) {
-    if (!isObj(root.budget)) err("budget", "budget must be an object");
+    if (!isRecord(root.budget)) err("budget", "budget must be an object");
     else {
       budget = {};
       const b = root.budget;
@@ -231,7 +231,7 @@ export function parseFactoryTemplate(text: string): TemplateParse {
 }
 
 function checkStage(raw: unknown, at: string, err: (path: string, message: string) => void): TemplateStage | null {
-  if (!isObj(raw)) { err(at, "each step must be an object with a \"role\""); return null; }
+  if (!isRecord(raw)) { err(at, "each step must be an object with a \"role\""); return null; }
   let bad = false;
   const e = (path: string, message: string) => { bad = true; err(path, message); };
   for (const k of Object.keys(raw)) if (!STAGE_KEYS.has(k)) e(`${at}.${k}`, `unknown key (allowed: ${[...STAGE_KEYS].join(", ")})`);
@@ -413,7 +413,7 @@ export function templateFromLoop(loop: LoopDefinition): { template: FactoryTempl
     if (typeof s.reviewAfter === "boolean" && s.kind !== "skill") drop(s, "its reviewAfter: only a skill step has an AI review, so it is not kept");
     const out: TemplateStage = { role: "custom", name: s.name, kind: s.kind };
     if (s.kind === "artifactCheck") {
-      const v = s.check && isObj(s.check.verdict) ? s.check.verdict : null;
+      const v = s.check && isRecord(s.check.verdict) ? s.check.verdict : null;
       const path = typeof v?.path === "string" ? v.path : null;
       const lineText = typeof v?.line === "string" ? v.line : null;
       if (!path || !lineText || verdictPathProblem(path) || lineText.length > 200 || /[\r\n]/.test(lineText) || Object.keys(s.check ?? {}).length !== 1) {
@@ -558,7 +558,7 @@ function withReviewAfter(stage: LoopStage, value: boolean | undefined): LoopStag
 
 function canonical(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  if (isObj(v)) return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
+  if (isRecord(v)) return `{${Object.keys(v).filter((k) => v[k] !== undefined).sort().map((k) => `${JSON.stringify(k)}:${canonical(v[k])}`).join(",")}}`;
   return JSON.stringify(v ?? null);
 }
 

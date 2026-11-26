@@ -3,6 +3,7 @@
 import { MAX_ITERATIONS, MIN_ITERATIONS, type LoopDefinition, type LoopStage } from "../model.ts";
 import { isFactoryLoop } from "../factory.ts";
 import { cleanLesson, MAX_LESSON_CHARS } from "../lessons.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 export type StageField = "timeoutSeconds" | "runOnce" | "reviewAfter" | "enabled";
 export type ConfigField = "maxIterations" | "maxRepairsPerStage" | "stageDelaySeconds" | "refactorBatchesPerRun" | "maxCostUsd" | "wallClockBudgetSeconds";
@@ -25,7 +26,6 @@ const CONFIG_RANGES: Readonly<Record<Exclude<ConfigField, "maxCostUsd">, readonl
 const PINNED_SKILLS: ReadonlySet<string> = new Set(["skills/factory-review", "skills/factory-intake"]);
 const FACTORY_OWNED = "the Factory template owns this setting";
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isInt = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v);
 const isNumOrNull = (v: unknown): v is number | null => v === null || (typeof v === "number" && Number.isFinite(v));
 const no = (reason: string): Verdict => ({ ok: false, reason });
@@ -119,7 +119,7 @@ function checkMove(head: Head, raw: Record<string, unknown>, loop: LoopDefinitio
 
 /** The shared check. `strict` adds the direction and range rules; a Revert inverts a strict change, so it skips them. */
 function check(raw: unknown, loop: LoopDefinition, strict: boolean): Verdict {
-  if (!isObj(raw)) return no("change is not an object");
+  if (!isRecord(raw)) return no("change is not an object");
   const op = raw.op;
   if (op !== "setPromptAddendum" && op !== "setStageField" && op !== "moveStage" && op !== "setConfig") return no(`operation ${String(op)} is not allowed`);
   if (isFactoryLoop(loop)) {

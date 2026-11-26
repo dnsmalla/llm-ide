@@ -1,4 +1,5 @@
 import { normalizeInputPath } from "./input-path.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 // Loop's persisted contract, mirroring the frozen Swift LoopEngineProjectStore/LoopDefinition/LoopStage/
 // LoopEngineConfig. This module is deliberately tolerant: loop.json is committed and older/newer builds must not
@@ -154,7 +155,6 @@ export interface LoopProjectStore {
   loops: LoopDefinition[];
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const bool = (v: unknown, d: boolean): boolean => (typeof v === "boolean" ? v : d);
@@ -167,7 +167,7 @@ const inputPathOf = (v: unknown): string => { const r = typeof v === "string" ? 
 const KINDS = new Set<LoopStageKind>(["regressionSweep", "shellCommand", "skill", "artifactCheck", "testMap", "testPrune", "incidentTriage", "codeGraph", "sdkSurfaceDiff", "unsupported"]);
 
 export function decodeStage(v: unknown): LoopStage | null {
-  if (!isObj(v) || typeof v.name !== "string") return null;
+  if (!isRecord(v) || typeof v.name !== "string") return null;
   const kind = (typeof v.kind === "string" && KINDS.has(v.kind as LoopStageKind) ? v.kind : "unsupported") as LoopStageKind;
   const severity = v.severity === "advisory" ? "advisory" : "blocking";
   return {
@@ -187,7 +187,7 @@ export function decodeStage(v: unknown): LoopStage | null {
     severity,
     timeoutSeconds: num(v.timeoutSeconds),
     detectedCommand: str(v.detectedCommand),
-    check: isObj(v.check) ? v.check : null,
+    check: isRecord(v.check) ? v.check : null,
     testOp: v.testOp === "structure" || v.testOp === "map" || v.testOp === "ledger" ? v.testOp : null,
     graphOp: v.graphOp === "snapshot" || v.graphOp === "verify" ? v.graphOp : null,
     allowsRepair: bool(v.allowsRepair, true),
@@ -203,7 +203,7 @@ export function decodeStage(v: unknown): LoopStage | null {
 }
 
 export function decodeConfig(v: unknown): LoopEngineConfig {
-  const o = isObj(v) ? v : {};
+  const o = isRecord(v) ? v : {};
   const stages = Array.isArray(o.stages) ? o.stages.map(decodeStage).filter((s): s is LoopStage => s !== null) : [];
   const rawPolicy = o.protectedPathPolicy;
   const policy: LoopEngineConfig["protectedPathPolicy"] = rawPolicy === "stop" || rawPolicy === "warn" || rawPolicy === "off" ? rawPolicy
@@ -232,12 +232,12 @@ export function decodeConfig(v: unknown): LoopEngineConfig {
     ...(typeof o.reviewEveryRuns === "number" && Number.isFinite(o.reviewEveryRuns) ? { reviewEveryRuns: o.reviewEveryRuns } : {}),
     ...(o.workMode === "one" ? { workMode: "one" as const } : {}),
     ...(typeof o.maxPassesPerRun === "number" && Number.isFinite(o.maxPassesPerRun) ? { maxPassesPerRun: o.maxPassesPerRun } : {}),
-    ...(isObj(o.envCache) ? { envCache: { keyFiles: strArray(o.envCache.keyFiles), setup: str(o.envCache.setup) ?? "", paths: strArray(o.envCache.paths) } } : {}),
+    ...(isRecord(o.envCache) ? { envCache: { keyFiles: strArray(o.envCache.keyFiles), setup: str(o.envCache.setup) ?? "", paths: strArray(o.envCache.paths) } } : {}),
   };
 }
 
 export function decodeDefinition(v: unknown, version: number): LoopDefinition | null {
-  if (!isObj(v) || typeof v.name !== "string") return null;
+  if (!isRecord(v) || typeof v.name !== "string") return null;
   const runs = typeof v.runsOnSchedule === "boolean" ? v.runsOnSchedule : version < 2;
   return {
     id: str(v.id) ?? crypto.randomUUID(),
@@ -255,7 +255,7 @@ export function decodeDefinition(v: unknown, version: number): LoopDefinition | 
 
 /** Current `{schemaVersion,loops}` schema, or the legacy bare config wrapped as the Primary "Main Loop". */
 export function decodeProjectStore(v: unknown): LoopProjectStore | null {
-  if (!isObj(v)) return null;
+  if (!isRecord(v)) return null;
   const version = num(v.schemaVersion) ?? 1;
   if (Array.isArray(v.loops)) {
     const loops = v.loops.map((l) => decodeDefinition(l, version)).filter((l): l is LoopDefinition => l !== null);

@@ -1,10 +1,11 @@
 // Plan H1.2: the action classes the core says the caller may use (GET /auth/me member.permissions).
 // Courtesy only — the core enforces every class; this hides what it would refuse. null = unknown
 // (an older core): hide nothing.
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+// NOTE: unlike kit isRecord this accepts arrays on purpose (the permission payload shape is checked below).
+const isObjectOrArray = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
 
 export function permissionsFromMe(body: unknown): ReadonlySet<string> | null {
-  if (!isRec(body) || !isRec(body.member) || !Array.isArray(body.member.permissions)) return null;
+  if (!isObjectOrArray(body) || !isObjectOrArray(body.member) || !Array.isArray(body.member.permissions)) return null;
   return new Set(body.member.permissions.filter((p): p is string => typeof p === "string"));
 }
 

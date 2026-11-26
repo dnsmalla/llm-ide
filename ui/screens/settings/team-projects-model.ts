@@ -7,12 +7,11 @@ import {
   MAX_MODES, MAX_USD_CAP_MONTH, TEAM_ROLES, canManageTeam, isMaxMode, isTeamRole,
   roleAtLeast, type MaxMode, type TeamRole,
 } from "./team-model.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 // The project picker speaks the same role vocabulary as the team screen; re-export so its sections import one module.
 export type { TeamRole };
 
-const isRec = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 const badResponse = (): never => {
   throw new ApiError(0, "BAD_RESPONSE");
@@ -76,7 +75,7 @@ export function isProjectId(v: unknown): v is string {
 }
 
 export function decodeProject(v: unknown): ProjectSummary {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (!isProjectId(v.id)) return badResponse();
   if (typeof v.name !== "string" || v.name.length === 0) return badResponse();
   if (!isTeamRole(v.role)) return badResponse();
@@ -93,12 +92,12 @@ export function decodeProject(v: unknown): ProjectSummary {
 }
 
 export function decodeProjects(v: unknown): ProjectSummary[] {
-  if (!isRec(v) || !Array.isArray(v.projects)) return badResponse();
+  if (!isRecord(v) || !Array.isArray(v.projects)) return badResponse();
   return v.projects.map(decodeProject);
 }
 
 export function decodeProjectMember(v: unknown): ProjectMember {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (!isTeamRole(v.role)) return badResponse();
   if (!isMaxMode(v.maxMode)) return badResponse();
   return {
@@ -114,24 +113,24 @@ export function decodeProjectMember(v: unknown): ProjectMember {
 }
 
 export function decodeProjectMembers(v: unknown): { project: { id: string; name: string }; members: ProjectMember[] } {
-  if (!isRec(v) || !isRec(v.project) || !Array.isArray(v.members)) return badResponse();
+  if (!isRecord(v) || !isRecord(v.project) || !Array.isArray(v.members)) return badResponse();
   if (!isProjectId(v.project.id) || typeof v.project.name !== "string") return badResponse();
   return { project: { id: v.project.id, name: v.project.name }, members: v.members.map(decodeProjectMember) };
 }
 
 export function decodeProjectMemberResponse(v: unknown): ProjectMember {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   return decodeProjectMember(v.member);
 }
 
 export function decodeProjectRemoved(v: unknown): boolean {
-  if (!isRec(v) || typeof v.removed !== "boolean") return badResponse();
+  if (!isRecord(v) || typeof v.removed !== "boolean") return badResponse();
   return v.removed;
 }
 
 /** `/auth/me.projects` (API 126), or null for an older core that does not report project roles. */
 export function projectsFromMe(v: unknown): ProjectSummary[] | null {
-  if (!isRec(v) || !Array.isArray(v.projects)) return null;
+  if (!isRecord(v) || !Array.isArray(v.projects)) return null;
   try {
     return v.projects.map(decodeProject);
   } catch {
@@ -319,7 +318,7 @@ const optStr = (v: unknown): string | null => (typeof v === "string" ? v : null)
 
 export function decodePlanTaskAssignee(v: unknown): PlanTaskAssignee | null {
   if (v === null || v === undefined) return null;
-  if (!isRec(v) || typeof v.userId !== "string" || !v.userId) return badResponse();
+  if (!isRecord(v) || typeof v.userId !== "string" || !v.userId) return badResponse();
   return {
     userId: v.userId,
     displayName: typeof v.displayName === "string" ? v.displayName : "",
@@ -328,7 +327,7 @@ export function decodePlanTaskAssignee(v: unknown): PlanTaskAssignee | null {
 }
 
 export function decodeTaskAssignment(v: unknown): TaskAssignment {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   const assignee = decodePlanTaskAssignee(v.assignee);
   if (assignee === null) return badResponse();
   if (typeof v.taskId !== "string" || typeof v.planId !== "string" || typeof v.projectId !== "string") return badResponse();
@@ -343,7 +342,7 @@ export function decodeTaskAssignment(v: unknown): TaskAssignment {
 }
 
 function decodePlanTaskRow(v: unknown): PlanTaskRow {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (typeof v.taskId !== "string" || typeof v.planId !== "string" || typeof v.projectId !== "string") return badResponse();
   if (typeof v.title !== "string" || typeof v.status !== "string" || typeof v.planTitle !== "string") return badResponse();
   return {
@@ -364,7 +363,7 @@ function decodePlanTaskRow(v: unknown): PlanTaskRow {
 }
 
 export function decodeMyAssignments(v: unknown): PlanTaskRow[] {
-  if (!isRec(v) || !Array.isArray(v.assignments)) return badResponse();
+  if (!isRecord(v) || !Array.isArray(v.assignments)) return badResponse();
   const rows = v.assignments.map(decodePlanTaskRow);
   // The cross-project list is by definition assigned rows; a null assignee there is a bad response.
   if (rows.some((r) => r.assignee === null)) return badResponse();
@@ -372,13 +371,13 @@ export function decodeMyAssignments(v: unknown): PlanTaskRow[] {
 }
 
 export function decodeProjectPlanTasks(v: unknown): { project: { id: string; name: string }; tasks: PlanTaskRow[] } {
-  if (!isRec(v) || !isRec(v.project) || !Array.isArray(v.tasks)) return badResponse();
+  if (!isRecord(v) || !isRecord(v.project) || !Array.isArray(v.tasks)) return badResponse();
   if (!isProjectId(v.project.id) || typeof v.project.name !== "string") return badResponse();
   return { project: { id: v.project.id, name: v.project.name }, tasks: v.tasks.map(decodePlanTaskRow) };
 }
 
 export function decodeAssignTaskResponse(v: unknown): { assignment: TaskAssignment; changed: boolean; action: string | null } {
-  if (!isRec(v) || typeof v.changed !== "boolean") return badResponse();
+  if (!isRecord(v) || typeof v.changed !== "boolean") return badResponse();
   return {
     assignment: decodeTaskAssignment(v.assignment),
     changed: v.changed,
@@ -387,7 +386,7 @@ export function decodeAssignTaskResponse(v: unknown): { assignment: TaskAssignme
 }
 
 export function decodeUnassignTaskResponse(v: unknown): boolean {
-  if (!isRec(v) || typeof v.unassigned !== "boolean") return badResponse();
+  if (!isRecord(v) || typeof v.unassigned !== "boolean") return badResponse();
   return v.unassigned;
 }
 

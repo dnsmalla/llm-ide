@@ -1,7 +1,8 @@
 // What a pending command will do, in words, from its stored args only (never a client-written summary). Every
 // server-supplied string goes through safeText; unknown kinds and ids are shown as unknown, never guessed.
 import { safeText } from "../safe-text";
-import { rec, type PendingApproval } from "./bus-api";
+import { isRecord } from "../../../kit/src/decode.ts";
+import type { PendingApproval } from "./bus-api";
 
 export type SourceNames = Record<string, string>;
 
@@ -27,13 +28,13 @@ export const kindTitle = (kind: string): string => KIND_TITLES[kind] ?? "A job";
 
 export function decodeSourceNames(google: unknown, ical: unknown): SourceNames {
   const out: SourceNames = {};
-  const accounts = rec(google) && Array.isArray(google.accounts) ? google.accounts.slice(0, 50) : [];
+  const accounts = isRecord(google) && Array.isArray(google.accounts) ? google.accounts.slice(0, 50) : [];
   for (const a of accounts) {
-    if (!rec(a) || typeof a.accountId !== "string" || !/^[a-f0-9]{12}$/.test(a.accountId)) continue;
+    if (!isRecord(a) || typeof a.accountId !== "string" || !/^[a-f0-9]{12}$/.test(a.accountId)) continue;
     for (const p of Array.isArray(a.products) ? a.products : []) if (p === "gcal" || p === "gdrive") out[`${p}:${a.accountId}`] = safeText(a.email, 80);
   }
-  const sources = rec(ical) && Array.isArray(ical.sources) ? ical.sources.slice(0, 50) : [];
-  for (const s of sources) if (rec(s) && typeof s.sourceId === "string" && /^[a-f0-9]{12}$/.test(s.sourceId)) out[`ical:${s.sourceId}`] = safeText(s.name, 80);
+  const sources = isRecord(ical) && Array.isArray(ical.sources) ? ical.sources.slice(0, 50) : [];
+  for (const s of sources) if (isRecord(s) && typeof s.sourceId === "string" && /^[a-f0-9]{12}$/.test(s.sourceId)) out[`ical:${s.sourceId}`] = safeText(s.name, 80);
   return out;
 }
 

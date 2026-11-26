@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // Typed decoders for every response Settings reads. They validate the shape at the
 // boundary (a wrong or hostile answer becomes DecodeError, never a half-typed object) and
 // keep only the fields the screen uses. Fixtures in schema/http/fixtures pin them (tests).
@@ -10,10 +11,9 @@ export class DecodeError extends Error {
 }
 
 type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function rec(v: unknown, at: string): Rec {
-  if (!isRec(v)) throw new DecodeError(at, "object");
+  if (!isRecord(v)) throw new DecodeError(at, "object");
   return v;
 }
 function str(v: unknown, at: string): string {
@@ -357,7 +357,7 @@ export interface StorageReport {
 }
 const optStrOrNull = (v: unknown, at: string): string | null => (v == null ? null : str(v, at));
 function decodeAgentHistoryHealth(v: unknown): AgentHistoryHealth | null {
-  if (!isRec(v)) return null;
+  if (!isRecord(v)) return null;
   return {
     rawFromDay: optStrOrNull(v.rawFromDay, "agentHistory.rawFromDay"),
     rawRows: num(v.rawRows, "agentHistory.rawRows"),
@@ -369,7 +369,7 @@ function decodeAgentHistoryHealth(v: unknown): AgentHistoryHealth | null {
 }
 export function decodeStorageReport(v: unknown): StorageReport {
   const r = rec(v, "storage");
-  const store = isRec(r.agentStore) ? r.agentStore : null;
+  const store = isRecord(r.agentStore) ? r.agentStore : null;
   return {
     generatedAt: str(r.generatedAt, "generatedAt"),
     groups: arr(r.groups, "groups").map((g, i) => {
@@ -509,7 +509,7 @@ export interface Health {
 export function decodeHealth(v: unknown): Health {
   const r = rec(v, "health");
   const checks: Record<string, boolean> = {};
-  if (isRec(r.checks)) for (const [k, x] of Object.entries(r.checks)) if (typeof x === "boolean") checks[k] = x;
+  if (isRecord(r.checks)) for (const [k, x] of Object.entries(r.checks)) if (typeof x === "boolean") checks[k] = x;
   return {
     status: str(r.status, "status"),
     apiVersion: num(r.apiVersion, "apiVersion"),

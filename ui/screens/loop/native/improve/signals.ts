@@ -4,6 +4,7 @@
 import type { LoopDefinition, LoopStage } from "../model.ts";
 import type { LoopRunIndexEntry } from "../history.ts";
 import type { CoreFetch } from "../stage-exec.ts";
+import { isRecord } from "../../../../kit/src/decode.ts";
 
 /** The core API version that serves POST /kb/loop/improve/*. */
 export const LOOP_IMPROVE_MIN_API = 150;
@@ -21,25 +22,24 @@ export interface RunFinishedPayload {
   loopbackRounds: number;
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const cap = (s: string, n: number): string => (s.length > n ? s.slice(0, n) : s);
 
 /** The run_finished payload for a finished run; `passed` is the runner's success code (see runStatusCode). */
 export function runSignalPayload(entryIn: LoopRunIndexEntry, recordIn: Record<string, unknown>): RunFinishedPayload {
   // Total: a held record comes from persisted JSON, so neither argument is trusted to be an object.
-  const entry: Partial<LoopRunIndexEntry> = isObj(entryIn) ? entryIn : {};
-  const record: Record<string, unknown> = isObj(recordIn) ? recordIn : {};
-  const stages = (Array.isArray(record.stages) ? record.stages : []).filter(isObj).map((s) => ({
+  const entry: Partial<LoopRunIndexEntry> = isRecord(entryIn) ? entryIn : {};
+  const record: Record<string, unknown> = isRecord(recordIn) ? recordIn : {};
+  const stages = (Array.isArray(record.stages) ? record.stages : []).filter(isRecord).map((s) => ({
     name: typeof s.stageName === "string" ? s.stageName : "",
-    ok: isObj(s.run) && s.run.exitCode === 0,
+    ok: isRecord(s.run) && s.run.exitCode === 0,
   }));
-  const stepReviews = (Array.isArray(record.stepReviews) ? record.stepReviews : []).filter(isObj).map((r) => ({
+  const stepReviews = (Array.isArray(record.stepReviews) ? record.stepReviews : []).filter(isRecord).map((r) => ({
     stageName: typeof r.stageName === "string" ? r.stageName : "",
     verdict: typeof r.verdict === "string" ? r.verdict : "",
     attempts: typeof r.attempts === "number" ? r.attempts : 0,
     findings: cap(typeof r.findings === "string" ? r.findings : "", FINDINGS_MAX),
   }));
-  const rounds = isObj(record.loopback) && typeof record.loopback.rounds === "number" ? record.loopback.rounds : 0;
+  const rounds = isRecord(record.loopback) && typeof record.loopback.rounds === "number" ? record.loopback.rounds : 0;
   return {
     statusCode: typeof entry.statusCode === "string" ? entry.statusCode : "",
     // A run held for a person passed all its checks and only waits for review.

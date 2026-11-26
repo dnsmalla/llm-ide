@@ -1,6 +1,7 @@
 // Run records that ended while their project was closed, kept in localStorage so a quit before the project reopens
 // does not lose them. Pure serialize/deserialize: no React, no host; run-manager.ts owns when they are written.
 import type { LoopRunIndexEntry } from "./history.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export const PENDING_KEY = "llmide.factory.pendingRecords";
 /** A held record must not fill localStorage: stage output is the only unbounded part, and the worktree keeps the rest. */
@@ -20,16 +21,12 @@ export interface PendingRecord {
   attempts?: number;
 }
 
-function isObject(v: unknown): v is Record<string, unknown> {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
 function valid(v: unknown): v is PendingRecord {
-  if (!isObject(v)) return false;
+  if (!isRecord(v)) return false;
   if (typeof v.projectRoot !== "string" || v.projectRoot === "" || typeof v.marker !== "string") return false;
-  if (!isObject(v.entry) || typeof v.entry.id !== "string" || !isObject(v.record)) return false;
+  if (!isRecord(v.entry) || typeof v.entry.id !== "string" || !isRecord(v.record)) return false;
   if (v.copy === null) return true;
-  return isObject(v.copy) && typeof v.copy.prefix === "string" && typeof v.copy.runId === "string" && typeof v.copy.endedAt === "string";
+  return isRecord(v.copy) && typeof v.copy.prefix === "string" && typeof v.copy.runId === "string" && typeof v.copy.endedAt === "string";
 }
 
 /** Tolerant: bad JSON, a non-array or storage that throws reads as no records; malformed entries are dropped. */
@@ -48,7 +45,7 @@ function truncated(p: PendingRecord): PendingRecord {
   const stages = p.record.stages;
   if (!Array.isArray(stages)) return p;
   const cut = stages.map((s: unknown) => {
-    if (!isObject(s) || !isObject(s.run) || typeof s.run.stdout !== "string" || s.run.stdout.length <= STDOUT_MAX) return s;
+    if (!isRecord(s) || !isRecord(s.run) || typeof s.run.stdout !== "string" || s.run.stdout.length <= STDOUT_MAX) return s;
     return { ...s, run: { ...s.run, stdout: s.run.stdout.slice(0, STDOUT_MAX) } };
   });
   return { ...p, record: { ...p.record, stages: cut } };

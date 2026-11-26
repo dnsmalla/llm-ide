@@ -10,6 +10,7 @@ import { STEP_REVIEW_SKILL } from "./review.ts";
 import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
 import { PROMPTS } from "../../tasks/prompts.generated.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export const FACTORY_DEFAULT_KEY = "factory";
 export const DECISIONS_PROMPT_LINE = "If .factory/DECISIONS.md exists, read it: its fenced block is the user's answer to a needs-decision, and this run must follow it.";
@@ -211,13 +212,12 @@ export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind"
   return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));
 }
 
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** The status summary for a run that stopped at the Intake gate, else null. Robust to applyTemplate's defaultKey reset. */
 export function needsDecisionSummary(outcome: Pick<LoopRunOutcome, "passed" | "failedStage">): string | null {
   const s = outcome.failedStage;
   if (outcome.passed || !s || s.kind !== "artifactCheck") return null;
-  const verdict = isRec(s.check) && isRec(s.check.verdict) ? s.check.verdict : null;
+  const verdict = isRecord(s.check) && isRecord(s.check.verdict) ? s.check.verdict : null;
   return verdict && verdict.path === READINESS_PATH ? NEEDS_DECISION_SUMMARY : null;
 }
 
@@ -347,10 +347,10 @@ export interface PickerIssue { id: string; number: number | null; title: string;
 
 /** `GET /kb/issues` rows for the picker: pull requests and untitled rows dropped, the body kept up to 100k chars. */
 export function pickerIssues(body: unknown): PickerIssue[] {
-  const rows = isRec(body) && Array.isArray(body.issues) ? body.issues : [];
+  const rows = isRecord(body) && Array.isArray(body.issues) ? body.issues : [];
   const out: PickerIssue[] = [];
   for (const row of rows) {
-    if (!isRec(row) || typeof row.title !== "string" || !row.title.trim() || row.isPR === true) continue;
+    if (!isRecord(row) || typeof row.title !== "string" || !row.title.trim() || row.isPR === true) continue;
     const number = typeof row.number === "number" && Number.isInteger(row.number) ? row.number : null;
     out.push({
       id: typeof row.id === "string" && row.id ? row.id : String(number ?? `row-${out.length}`),

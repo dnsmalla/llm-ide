@@ -1,3 +1,4 @@
+import { isRecord } from "../../kit/src/decode.ts";
 // Typed decoder for the agent/v2 SSE vocabulary (schema/agent-v2/agent-v2.schema.json) and an
 // incremental SSE framer. Pure: no DOM, no network. Unknown event types are ignored (the older
 // Mac does the same); a KNOWN type with a wrong shape is reported as malformed, never applied.
@@ -40,8 +41,6 @@ export const KNOWN_EVENT_TYPES: readonly AgentEventType[] = [
   "result", "sdk", "notice", "approval_request", "approval_resolved", "mode_set", "tasks", "tasks_progress", "error",
 ];
 
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): v is string => typeof v === "string";
 const strOrNull = (v: unknown): v is string | null => v === null || typeof v === "string";
 const num = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -52,7 +51,7 @@ function tasksOf(v: unknown): TaskItem[] | null {
   if (!Array.isArray(v)) return null;
   const out: TaskItem[] = [];
   for (const t of v) {
-    if (!isObj(t) || !str(t.id) || !str(t.title) || !str(t.status)) return null;
+    if (!isRecord(t) || !str(t.id) || !str(t.title) || !str(t.status)) return null;
     out.push({ id: t.id, title: t.title, status: t.status });
   }
   return out;
@@ -62,10 +61,10 @@ function questionsOf(v: unknown): Question[] | null {
   if (!Array.isArray(v)) return null;
   const out: Question[] = [];
   for (const q of v) {
-    if (!isObj(q) || !str(q.question) || !Array.isArray(q.options)) return null;
+    if (!isRecord(q) || !str(q.question) || !Array.isArray(q.options)) return null;
     const options: QuestionOption[] = [];
     for (const o of q.options) {
-      if (!isObj(o) || !str(o.label)) return null;
+      if (!isRecord(o) || !str(o.label)) return null;
       options.push({
         label: o.label,
         ...(str(o.description) ? { description: o.description } : {}),
@@ -78,7 +77,7 @@ function questionsOf(v: unknown): Question[] | null {
 }
 
 function suggestionOf(v: unknown): ApprovalSuggestion | null {
-  if (!isObj(v) || (v.scope !== "session" && v.scope !== "project")) return null;
+  if (!isRecord(v) || (v.scope !== "session" && v.scope !== "project")) return null;
   return {
     scope: v.scope, ...(str(v.toolName) ? { toolName: v.toolName } : {}),
     ...(str(v.pattern) ? { pattern: v.pattern } : {}), ...(str(v.label) ? { label: v.label } : {}),
@@ -89,7 +88,7 @@ function categoriesOf(v: unknown): ContextCategory[] | null {
   if (!Array.isArray(v)) return null;
   const out: ContextCategory[] = [];
   for (const c of v) {
-    if (!isObj(c) || !str(c.name) || !num(c.tokens)) return null;
+    if (!isRecord(c) || !str(c.name) || !num(c.tokens)) return null;
     out.push({ name: c.name, kind: str(c.kind) ? c.kind : "used", tokens: c.tokens });
   }
   return out;
@@ -97,7 +96,7 @@ function categoriesOf(v: unknown): ContextCategory[] | null {
 
 /** Decodes one parsed `data:` payload. */
 export function decodeEvent(raw: unknown): DecodeResult {
-  if (!isObj(raw)) return { ok: false, reason: "not_object" };
+  if (!isRecord(raw)) return { ok: false, reason: "not_object" };
   const type = raw.type;
   if (!str(type) || !(KNOWN_EVENT_TYPES as readonly string[]).includes(type)) {
     return { ok: false, reason: "unknown_type", type: str(type) ? type : undefined };
@@ -164,7 +163,7 @@ export function decodeEvent(raw: unknown): DecodeResult {
       if (raw.kind === "ToolApproval" && str(raw.toolName)) {
         return good({
           type: "approval_request", requestId: raw.requestId, kind: "ToolApproval", toolName: raw.toolName,
-          argsSummary: strOrNull(raw.argsSummary) ? raw.argsSummary : null, args: isObj(raw.args) ? raw.args : null,
+          argsSummary: strOrNull(raw.argsSummary) ? raw.argsSummary : null, args: isRecord(raw.args) ? raw.args : null,
           suggestion: suggestionOf(raw.suggestion),
         });
       }
@@ -256,7 +255,7 @@ export function decodeReplayMarker(payload: string): ReplayMarker | null {
   if (!payload.includes("\"replay_")) return null; // cheap pre-check: the common event is never parsed twice
   let raw: unknown;
   try { raw = JSON.parse(payload); } catch { return null; }
-  if (!isObj(raw)) return null;
+  if (!isRecord(raw)) return null;
   if (raw.type === "replay_info") return { kind: "info", gap: counter(raw.gap), dropped: counter(raw.dropped), ended: raw.ended === true };
   if (raw.type === "replay_truncated") return { kind: "truncated" };
   return null;
@@ -273,11 +272,11 @@ export const MAX_REATTACH_TURNS = 64;
 
 /** `GET /agent/v2/turns` body -> the running chat ids (strict: wrong shapes yield none; capped). */
 export function decodeRunningTurns(body: unknown): Array<{ sessionId: string; startedAt: string }> {
-  if (!isObj(body) || !Array.isArray(body.turns)) return [];
+  if (!isRecord(body) || !Array.isArray(body.turns)) return [];
   const out: Array<{ sessionId: string; startedAt: string }> = [];
   for (const t of body.turns) {
     if (out.length >= MAX_REATTACH_TURNS) break;
-    if (!isObj(t) || !str(t.sessionId) || t.sessionId.length === 0 || t.sessionId.length > 200) continue;
+    if (!isRecord(t) || !str(t.sessionId) || t.sessionId.length === 0 || t.sessionId.length > 200) continue;
     out.push({ sessionId: t.sessionId, startedAt: str(t.startedAt) ? t.startedAt : "" });
   }
   return out;

@@ -2,6 +2,7 @@
 // The server's own message is never shown for a known code (the text below is the contract), and for an
 // unknown code only the code itself is shown, cleaned: a hostile or odd answer cannot put its words on screen.
 import { cleanText } from "./sanitize.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export interface ExtResponse {
   status: number;
@@ -28,12 +29,11 @@ export function shellCode(e: unknown): string {
   return typeof c === "string" && /^[A-Z_]{3,32}$/.test(c) && c !== "NETWORK" ? c : "UNREACHABLE";
 }
 
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /** `{ error: { code, message?, details? } }`, a bare `{ error: "CODE" }`, or a status-only error. */
 export function toExtApiError(res: ExtResponse): ExtApiError {
-  const env = isRec(res.body) ? res.body.error : undefined;
-  if (isRec(env) && typeof env.code === "string") return new ExtApiError(res.status, cleanText(env.code, 60), isRec(env.details) ? env.details : undefined);
+  const env = isRecord(res.body) ? res.body.error : undefined;
+  if (isRecord(env) && typeof env.code === "string") return new ExtApiError(res.status, cleanText(env.code, 60), isRecord(env.details) ? env.details : undefined);
   if (typeof env === "string") return new ExtApiError(res.status, cleanText(env, 60));
   return new ExtApiError(res.status, `HTTP_${res.status}`);
 }

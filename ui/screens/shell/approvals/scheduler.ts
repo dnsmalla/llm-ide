@@ -3,7 +3,8 @@
 // approval, with the nonce from GET /bus/approvals. Everything else waits in the inbox for a click.
 // shortcut: runs only while the app runs (a hidden window too); a missed slot is not back-filled, only the current one runs.
 import { core } from "../runtime";
-import { busApi, rec, type BusApi, type BusSchedule, type EnqueueFrame, type PendingApproval } from "./bus-api";
+import { isRecord } from "../../../kit/src/decode.ts";
+import { busApi, type BusApi, type BusSchedule, type EnqueueFrame, type PendingApproval } from "./bus-api";
 
 export const SCHEDULE_TICK_MS = 60_000;
 const HOUR = 3_600_000;
@@ -32,9 +33,9 @@ export async function runSchedulesOnce(d: SchedulerDeps): Promise<{ enqueued: st
       const standingLive = s.standing && s.standingUntil !== null && Date.parse(s.standingUntil) > now;
       if (standingLive && s.lastRunAt !== null && now - Date.parse(s.lastRunAt) < (s.intervalHours * HOUR) / 2) continue;
       const res = await d.enqueue({ kind: s.kind, args: s.args, idem: idemFor(s, now), ttlMs: Math.min(s.intervalHours * HOUR, 24 * HOUR) });
-      const cmd = rec(res) && rec(res.command) ? res.command : null;
+      const cmd = isRecord(res) && isRecord(res.command) ? res.command : null;
       if (!cmd || typeof cmd.id !== "string") continue;
-      if (!(rec(res) && res.deduped === true)) out.enqueued.push(s.id);
+      if (!(isRecord(res) && res.deduped === true)) out.enqueued.push(s.id);
       const live = s.standing && s.standingUntil !== null && Date.parse(s.standingUntil) > now;
       if (cmd.state !== "awaiting_approval" || !live) continue;
       pending ??= await d.approvals();

@@ -7,11 +7,11 @@ import { DecodeError, type HealthResult } from "./decoders.ts";
 import { ExtApiError, shellCode, errorText, toExtApiError, type ExtResponse } from "./errors.ts";
 import { checkHealth, type ExtCore, type HealthKind } from "./api.ts";
 import { autoChecksOnOpen, healthKey, linkedSignal, withKey, withoutKey } from "./health-model.ts";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 type Rec = Record<string, unknown>;
-const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
 const rec = (v: unknown, at: string): Rec => {
-  if (!isRec(v)) throw new DecodeError(at, "object");
+  if (!isRecord(v)) throw new DecodeError(at, "object");
   return v;
 };
 const list = (v: unknown, at: string, cap: number): unknown[] => {

@@ -8,6 +8,7 @@
 // writes under system/graph/) and the canonical GraphDocument (`schemaVersion` + `nodes[]` + `edges[]`).
 import { DEFAULT_CAPS, type Caps, type GraphModel } from "./model.ts";
 import { EDGE_BASE_WEIGHT, parseConfidence } from "./weights.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export class GraphDecodeError extends Error {
   constructor(message: string) {
@@ -167,10 +168,9 @@ class Builder {
   }
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 function cleanMeta(v: unknown, caps: Caps): Record<string, string> | null {
-  if (!isObj(v)) return null;
+  if (!isRecord(v)) return null;
   const out: Record<string, string> = Object.create(null);
   let count = 0;
   for (const key of Object.keys(v)) {
@@ -191,7 +191,7 @@ function decodeKit(root: Record<string, unknown>, caps: Caps): GraphModel {
   const calls = root.calls;
   if (!Array.isArray(files)) throw new GraphDecodeError("graph.json has no files[] list");
   for (const f of files) {
-    if (!isObj(f)) {
+    if (!isRecord(f)) {
       b.skippedNodes++;
       continue;
     }
@@ -222,7 +222,7 @@ function decodeKit(root: Record<string, unknown>, caps: Caps): GraphModel {
     b.edge(a, c, "imports", 0);
   };
   for (const f of files) {
-    if (!isObj(f)) continue;
+    if (!isRecord(f)) continue;
     const path = relativePath(f.path, caps.maxPath);
     if (path === null) continue;
     if (Array.isArray(f.imports)) for (const t of f.imports) { const p = relativePath(t, caps.maxPath); if (p !== null) imp(path, p); }
@@ -231,7 +231,7 @@ function decodeKit(root: Record<string, unknown>, caps: Caps): GraphModel {
   if (Array.isArray(calls)) {
     const seenCall = new Set<string>();
     for (const c of calls) {
-      if (!isObj(c)) { b.skippedEdges++; continue; }
+      if (!isRecord(c)) { b.skippedEdges++; continue; }
       const from = relativePath(c.from, caps.maxPath);
       const to = relativePath(c.to, caps.maxPath);
       if (from === null || to === null) { b.skippedEdges++; continue; }
@@ -252,7 +252,7 @@ function decodeDocument(root: Record<string, unknown>, caps: Caps): GraphModel {
   const edges = root.edges;
   if (!Array.isArray(nodes) || !Array.isArray(edges)) throw new GraphDecodeError("graph document needs nodes[] and edges[]");
   for (const nd of nodes) {
-    if (!isObj(nd) || typeof nd.id !== "string" || nd.id.length === 0 || nd.id.length > caps.maxPath * 2) {
+    if (!isRecord(nd) || typeof nd.id !== "string" || nd.id.length === 0 || nd.id.length > caps.maxPath * 2) {
       b.skippedNodes++;
       continue;
     }
@@ -264,7 +264,7 @@ function decodeDocument(root: Record<string, unknown>, caps: Caps): GraphModel {
     b.node(id, cleanText(nd.title, caps.maxLabel) || id.slice(0, caps.maxLabel), kind, path, meta);
   }
   for (const e of edges) {
-    if (!isObj(e) || typeof e.fromId !== "string" || typeof e.toId !== "string") { b.skippedEdges++; continue; }
+    if (!isRecord(e) || typeof e.fromId !== "string" || typeof e.toId !== "string") { b.skippedEdges++; continue; }
     const a = b.index.get(cleanText(e.fromId, caps.maxPath * 2));
     const d = b.index.get(cleanText(e.toId, caps.maxPath * 2));
     if (a === undefined || d === undefined) { b.skippedEdges++; continue; }
@@ -281,7 +281,7 @@ export function decodeGraph(text: string, caps: Caps = DEFAULT_CAPS): GraphModel
   } catch {
     throw new GraphDecodeError("graph.json is not valid JSON");
   }
-  if (!isObj(root)) throw new GraphDecodeError("graph.json must be a JSON object");
+  if (!isRecord(root)) throw new GraphDecodeError("graph.json must be a JSON object");
   if (Array.isArray(root.files)) return decodeKit(root, caps);
   if (Array.isArray(root.nodes)) {
     if (typeof root.schemaVersion === "number" && root.schemaVersion > 1) {

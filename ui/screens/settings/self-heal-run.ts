@@ -4,6 +4,7 @@
 // with exactly one outcome post, so its incidents never stay `fixing`, and a worktree without a proposal is removed.
 import { call, type CoreClient, type CoreResponse } from "./core-api.ts";
 import type { SelfHealHost, SelfHealPrepared } from "./host.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 /** The agent step's own bound (the core enforces it); the client waits a minute longer for the answer. */
 export const AGENT_TIMEOUT_MS = 30 * 60_000;
@@ -49,11 +50,10 @@ interface Outcome {
 }
 
 const EMPTY: Outcome = { batch: "", verifyPassed: false, hasChanges: false, agentDown: false, aborted: false, proposal: null, verifyOutput: "" };
-const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
 export function decodeStart(raw: unknown): { runId: string | null; batch: string } {
-  const o = isRec(raw) ? raw : {};
+  const o = isRecord(raw) ? raw : {};
   if (o.runId === null) return { runId: null, batch: "" };
   if (typeof o.runId !== "string" || !RUN_ID.test(o.runId) || typeof o.batch !== "string" || o.batch === "") {
     throw new Error("the core returned a run this app cannot read");
@@ -63,10 +63,10 @@ export function decodeStart(raw: unknown): { runId: string | null; batch: string
 
 /** Why an agent-run answer is not a run that happened, or null when it ran. */
 export function agentProblem(r: CoreResponse): string | null {
-  const b = isRec(r.body) ? r.body : {};
+  const b = isRecord(r.body) ? r.body : {};
   if (r.status >= 200 && r.status < 300) return b.ran === false ? "The agent did not run." : null;
   if (b.error === "feature_disabled") return "The Loop agent is off: turn on Auto Tasks in Settings → Workspace, then restart the core.";
-  const code = isRec(b.error) && typeof b.error.code === "string" ? b.error.code : `HTTP ${r.status}`;
+  const code = isRecord(b.error) && typeof b.error.code === "string" ? b.error.code : `HTTP ${r.status}`;
   return `The agent run failed (${code}).`;
 }
 
@@ -115,7 +115,7 @@ export async function runSelfHealFix(client: CoreClient, sh: SelfHealHost, onSte
   let proposed = 0;
   try {
     const r = await call(client, "POST", `/kb/self-heal/runs/${runId}/outcome`, outcome);
-    proposed = isRec(r) && typeof r.proposed === "number" ? r.proposed : 0;
+    proposed = isRecord(r) && typeof r.proposed === "number" ? r.proposed : 0;
   } catch (e) {
     problem = `The outcome was not saved (${msg(e)}); the incidents go back to New when the core restarts.`;
   }

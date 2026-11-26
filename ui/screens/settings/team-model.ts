@@ -5,6 +5,7 @@
 // is decoded into the caller's component state, and is never written to storage or logged. The list
 // routes never carry it, so `TeamInvite` has no token field at all.
 import { ApiError, call, type CoreClient } from "./core-api.ts";
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const TEAM_ROLES = ["viewer", "member", "admin", "owner"] as const;
 export type TeamRole = (typeof TEAM_ROLES)[number];
@@ -91,8 +92,6 @@ export interface TeamIdentity {
   teamRole: TeamRole;
 }
 
-const isRec = (v: unknown): v is Record<string, unknown> =>
-  typeof v === "object" && v !== null && !Array.isArray(v);
 
 const badResponse = (): never => {
   throw new ApiError(0, "BAD_RESPONSE");
@@ -123,7 +122,7 @@ const INVITE_ID = /^[0-9a-f]{16}$/;
 const INVITE_TOKEN = /^[A-Za-z0-9_-]{16,512}$/;
 
 export function decodeMember(v: unknown): TeamMember {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (!isTeamRole(v.teamRole)) return badResponse();
   if (!isMaxMode(v.maxMode)) return badResponse();
   return {
@@ -139,17 +138,17 @@ export function decodeMember(v: unknown): TeamMember {
 }
 
 export function decodeMemberList(v: unknown): TeamMember[] {
-  if (!isRec(v) || !Array.isArray(v.members)) return badResponse();
+  if (!isRecord(v) || !Array.isArray(v.members)) return badResponse();
   return v.members.map((m) => decodeMember(m));
 }
 
 export function decodeMemberResponse(v: unknown): TeamMember {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   return decodeMember(v.member);
 }
 
 export function decodeInvite(v: unknown): TeamInvite {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (typeof v.id !== "string" || !INVITE_ID.test(v.id)) return badResponse();
   if (v.email !== null && typeof v.email !== "string") return badResponse();
   if (!isInviteRole(v.teamRole)) return badResponse();
@@ -169,32 +168,32 @@ export function decodeInvite(v: unknown): TeamInvite {
 }
 
 export function decodeInviteList(v: unknown): TeamInvite[] {
-  if (!isRec(v) || !Array.isArray(v.invites)) return badResponse();
+  if (!isRecord(v) || !Array.isArray(v.invites)) return badResponse();
   return v.invites.map((i) => decodeInvite(i));
 }
 
 export function decodeCreatedInvite(v: unknown): CreatedInvite {
-  if (!isRec(v)) return badResponse();
+  if (!isRecord(v)) return badResponse();
   if (typeof v.id !== "string" || !INVITE_ID.test(v.id)) return badResponse();
   if (typeof v.token !== "string" || !INVITE_TOKEN.test(v.token)) return badResponse();
   return { id: v.id, token: v.token, expiresAt: readStr(v.expiresAt) };
 }
 
 export function decodeRevoked(v: unknown): boolean {
-  if (!isRec(v) || typeof v.revoked !== "boolean") return badResponse();
+  if (!isRecord(v) || typeof v.revoked !== "boolean") return badResponse();
   return v.revoked;
 }
 
 /** `/auth/me.member.teamRole`, or null for a missing/unknown row (a solo `legacy` account has none). */
 export function teamRoleFromMe(v: unknown): TeamRole | null {
-  if (!isRec(v) || !isRec(v.member)) return null;
+  if (!isRecord(v) || !isRecord(v.member)) return null;
   const role = v.member.teamRole;
   return isTeamRole(role) ? role : null;
 }
 
 /** What Team needs from `/auth/me`: the caller's id and their enforced team role. */
 export function decodeTeamIdentity(v: unknown): TeamIdentity | null {
-  if (!isRec(v) || typeof v.id !== "string") return null;
+  if (!isRecord(v) || typeof v.id !== "string") return null;
   const teamRole = teamRoleFromMe(v);
   return teamRole === null ? null : { id: v.id, teamRole };
 }

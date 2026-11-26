@@ -1,6 +1,7 @@
 // The desktop's client for the command-bus approval and schedule routes (docs/spec/command-bus.md sections 3 and 9).
 // Every server answer is decoded defensively; a nonce is kept in memory only and never rendered or logged.
 import type { RawResponse } from "../core";
+import { isRecord } from "../../../kit/src/decode.ts";
 
 export type Raw = (path: string, init?: { method?: "GET" | "POST" | "DELETE"; body?: unknown }) => Promise<RawResponse>;
 
@@ -21,19 +22,18 @@ export class BusCallError extends Error {
 
 const ID = /^[A-Za-z0-9_-]{8,64}$/;
 const NONCE = /^[0-9a-f]{64}$/;
-export const rec = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 const str = (v: unknown, max: number): string => (typeof v === "string" ? v.slice(0, max) : "");
 const strOrNull = (v: unknown): string | null => (typeof v === "string" ? v.slice(0, 40) : null);
 
 export function decodeApprovals(b: unknown): PendingApproval[] {
-  if (!rec(b) || !Array.isArray(b.items)) return [];
+  if (!isRecord(b) || !Array.isArray(b.items)) return [];
   const out: PendingApproval[] = [];
   for (const it of b.items.slice(0, 50)) {
-    if (!rec(it) || typeof it.id !== "string" || !ID.test(it.id) || typeof it.nonce !== "string" || !NONCE.test(it.nonce)) continue;
+    if (!isRecord(it) || typeof it.id !== "string" || !ID.test(it.id) || typeof it.nonce !== "string" || !NONCE.test(it.nonce)) continue;
     if (it.tier !== "T0" && it.tier !== "T1" && it.tier !== "T2") continue;
     out.push({
       id: it.id, kind: str(it.kind, 64), tier: it.tier, reason: it.reason === "switch_off" ? "switch_off" : "tier",
-      originClient: str(it.originClient, 32), args: rec(it.args) ? it.args : {}, createdAt: str(it.createdAt, 40),
+      originClient: str(it.originClient, 32), args: isRecord(it.args) ? it.args : {}, createdAt: str(it.createdAt, 40),
       expiresAt: str(it.expiresAt, 40), nonce: it.nonce,
     });
   }
@@ -41,14 +41,14 @@ export function decodeApprovals(b: unknown): PendingApproval[] {
 }
 
 export function decodeSchedules(b: unknown): BusSchedule[] {
-  if (!rec(b) || !Array.isArray(b.items)) return [];
+  if (!isRecord(b) || !Array.isArray(b.items)) return [];
   const out: BusSchedule[] = [];
   for (const s of b.items.slice(0, 20)) {
-    if (!rec(s) || typeof s.id !== "string" || !ID.test(s.id) || !Number.isInteger(s.intervalHours)) continue;
+    if (!isRecord(s) || typeof s.id !== "string" || !ID.test(s.id) || !Number.isInteger(s.intervalHours)) continue;
     const h = s.intervalHours as number;
     if (h < 1 || h > 168) continue;
     out.push({
-      id: s.id, kind: str(s.kind, 64), args: rec(s.args) ? s.args : {}, intervalHours: h, standing: s.standing === true,
+      id: s.id, kind: str(s.kind, 64), args: isRecord(s.args) ? s.args : {}, intervalHours: h, standing: s.standing === true,
       standingUntil: strOrNull(s.standingUntil), createdAt: str(s.createdAt, 40), lastRunAt: strOrNull(s.lastRunAt),
     });
   }
@@ -69,7 +69,7 @@ export function buildScheduleInput(f: { hours: number; sourceIds: string[]; stan
 async function ok(p: Promise<RawResponse>): Promise<unknown> {
   const r = await p;
   if (r.status >= 200 && r.status < 300) return r.body;
-  const e = rec(r.body) && rec(r.body.error) ? r.body.error : null;
+  const e = isRecord(r.body) && isRecord(r.body.error) ? r.body.error : null;
   throw new BusCallError(r.status, e && typeof e.code === "string" ? e.code.slice(0, 40) : `HTTP_${r.status}`);
 }
 const enc = encodeURIComponent;
@@ -77,7 +77,7 @@ const enc = encodeURIComponent;
 export function busApi(raw: Raw) {
   return {
     /** The class the core sees this UI as; only `desktop-ui` may approve or schedule. */
-    kindsClient: async (): Promise<string | null> => { const b = await ok(raw("/bus/kinds")); return rec(b) && typeof b.client === "string" ? b.client : null; },
+    kindsClient: async (): Promise<string | null> => { const b = await ok(raw("/bus/kinds")); return isRecord(b) && typeof b.client === "string" ? b.client : null; },
     approvals: async (): Promise<PendingApproval[]> => decodeApprovals(await ok(raw("/bus/approvals"))),
     approve: (a: PendingApproval, extra: { confirm?: Record<string, unknown>; scheduleId?: string } = {}) =>
       ok(raw(`/bus/commands/${enc(a.id)}/approve`, { method: "POST", body: { nonce: a.nonce, ...extra } })),
