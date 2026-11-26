@@ -4,6 +4,7 @@ import { AccountMenu, type AccountActions } from "./AccountMenu";
 import { forgetLocalSettings } from "./forget-device";
 import { disconnectAll, readDisconnectPlan } from "./disconnect-all";
 import { GuideDialog } from "../welcome/WelcomeScreen";
+import { TourOverlay, useTour } from "./TourOverlay";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
 import { host as shellHost, invokeHost, subscribeNoProject, subscribeRootMissing } from "./host";
@@ -217,6 +218,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
 
   const [guideOpen, setGuideOpen] = useState(false);
+  const { tour, start: startTour, next: nextTour, back: backTour, skip: skipTour } = useTour();
   const [quickOpen, setQuickOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const everUsable = useRef(false);
@@ -544,7 +546,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       {pickerOpen && sshServer ? (
         <FolderPicker io={pickerIo} deps={pickerDeps} onOpened={() => { setPickerOpen(false); goHomeAfterOpen(); }} onClose={() => setPickerOpen(false)} />
       ) : null}
-      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} /> : null}
+      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} onStartTour={(flow) => { setGuideOpen(false); startTour(flow); }} /> : null}
+      {tour ? <TourOverlay tour={tour} activeSection={nav.active} onSelectSection={onSelect} onNext={nextTour} onBack={backTour} onSkip={skipTour} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
       {leave ? <LeaveProjectDialog labels={leave.labels} onStay={cancelLeave} onLeave={confirmLeave} /> : null}
       {quickOpen ? <QuickSwitchDialog recent={recentAll.entries} activeRoot={project?.root ?? null} onOpen={(i) => { setQuickOpen(false); void openRecent(i); }} onClose={() => setQuickOpen(false)} /> : null}
