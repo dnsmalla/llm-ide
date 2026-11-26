@@ -636,7 +636,7 @@ impl Prefs {
         if let Some(v) = p.backend_auto_start { n.backend_auto_start = v; }
         if let Some(v) = &p.remote_server {
             // A webview may choose mode/host/user, but the hub URL, the hub pin and every SSH trust or recent list
-            // are written only by the host's own paths (`set_remote_pin`, `set_remote_hub`, `upsert_ssh_known_host`,
+            // are written only by the host's own paths (`set_remote_pin`, `set_remote_hub`, `upsert_ssh_known_host_collect`,
             // `set_remote_ssh`, the folder and forget writers); keep whatever this host already holds.
             let mut block = v.clone().normalized();
             block.hub_url = n.remote_server.hub_url.clone();
@@ -1212,8 +1212,8 @@ pub(crate) fn set_remote_server_mode(mode: ServerMode) -> Result<PrefsView, FsEr
 }
 
 /// Host-side writer for a confirmed SSH host key: replaces any key saved for the same host and port. The webview
-/// cannot call it; the SSH service calls it only after a native yes/no dialog. Text that is not a valid pin is refused,
-/// so nothing unreadable is stored.
+/// cannot call it; the SSH service confirms a key through [`upsert_ssh_known_host_collect`] after a native yes/no
+/// dialog, and this wrapper is kept for tests. Text that is not a valid pin is refused, so nothing unreadable is stored.
 #[cfg(test)]
 pub(crate) fn upsert_ssh_known_host(pin: String) -> Result<PrefsView, FsError> {
     upsert_ssh_known_host_collect(pin).map(|(view, _)| view)
