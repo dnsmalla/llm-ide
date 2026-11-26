@@ -1,7 +1,7 @@
 // A guided tour for the side panel: dims the panel, cuts a spotlight around the step's live element, and shows a
 // tooltip card next to it (placeCard does the positioning math). A step can ask to switch tabs first; if its
 // element never mounts, the card still shows, centered, without a spotlight.
-import { useCallback, useEffect, useReducer, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { currentStep, isLastStep, tourReducer, type TourFlow, type TourState, type TourStep } from './tour-model';
 import { placeCard } from './placement';
 import type { Tab } from '../tabs';
@@ -43,9 +43,21 @@ export default function TourOverlay({ tour, activeTab, onSelectTab, onNext, onBa
 }): ReactNode {
   const step = currentStep(tour) as TourStep;
   const switching = step.screenId !== undefined && step.screenId !== activeTab;
+  // Switch to the step's own tab once, when the step begins. If the user then navigates away on
+  // their own (e.g. to check something the step's copy referenced), honor that instead of snapping
+  // them back on every render — end the tour rather than fight the user's navigation.
+  const switchedForStep = useRef(false);
+  useEffect(() => { switchedForStep.current = false; }, [tour.index]);
   useEffect(() => {
-    if (switching && step.screenId) onSelectTab(step.screenId);
-  }, [switching, step.screenId, onSelectTab]);
+    if (!step.screenId) return;
+    if (step.screenId === activeTab) { switchedForStep.current = true; return; }
+    if (!switchedForStep.current) {
+      switchedForStep.current = true;
+      onSelectTab(step.screenId);
+    } else {
+      onSkip();
+    }
+  }, [step.screenId, activeTab, onSelectTab, onSkip]);
   const target = useTourTarget(switching ? undefined : step.targetId);
   const last = isLastStep(tour);
   useEffect(() => {
