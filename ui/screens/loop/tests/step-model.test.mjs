@@ -1,6 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { routedLoopModel, stepModel, fetchRoutedLoopModel } from "../native/step-model.ts";
+import { routedLoopModel, stepModel, fetchRoutedLoopModel, modelLabel } from "../native/step-model.ts";
+
+test("modelLabel: Claude ids read as family + version, anything else as it is", () => {
+  assert.equal(modelLabel("claude-haiku-5-5"), "Haiku 5.5");
+  assert.equal(modelLabel("claude-opus-5-5"), "Opus 5.5");
+  assert.equal(modelLabel("claude-sonnet-4-5-20250929"), "Sonnet 4.5");
+  assert.equal(modelLabel("claude-sonnet-5"), "Sonnet 5");
+  assert.equal(modelLabel("glm-4.6"), "glm-4.6");
+  assert.equal(stepModel("claude-haiku-5-5", "step"), "Haiku 5.5");
+});
 
 const payload = (loop) => ({ tiers: { strong: { provider: "anthropic", model: "claude-opus-5-5" }, cheap: { provider: "x", model: "small" } }, featureStatus: { loop } });
 

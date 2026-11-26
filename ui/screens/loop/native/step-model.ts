@@ -12,9 +12,17 @@ export function routedLoopModel(r: RoutingTiers | null | undefined): string | nu
   return typeof model === "string" && model.trim() ? model.trim() : null;
 }
 
+/** `claude-haiku-5-5` → `Haiku 5.5` (a trailing date stamp is dropped); any other id is shown as it is. */
+export function modelLabel(id: string): string {
+  const m = /^claude-([a-z]+)-(\d+)(?:-(\d{1,2}))?(?:-\d{8})?$/.exec(id.trim());
+  if (!m) return id;
+  return `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}${m[3] ? `.${m[3]}` : ""}`;
+}
+
 /** Which agent-backed phase is starting: an explicit repairModel wins only for repairs. */
 export function stepModel(routed: string | null, phase: "step" | "repair", repairModel?: string | null): string | null {
-  return phase === "repair" && repairModel ? repairModel : routed;
+  const id = phase === "repair" && repairModel ? repairModel : routed;
+  return id ? modelLabel(id) : null;
 }
 
 /** Fetches routing once per run; any failure means no model is shown and never affects the run. */

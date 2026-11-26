@@ -559,7 +559,7 @@ test("the running agent step carries the routed model and clears it when the ste
   const model = () => rm.liveRuns().find((r) => r.runId === a).progress.model;
   const skill = { id: "s1", name: "Implement", kind: "skill" };
   emit({ type: "stage-start", stage: skill, index: 1, count: 8, iteration: 1 });
-  assert.equal(model(), "claude-opus-5-5");
+  assert.equal(model(), "Opus 5.5");
   emit({ type: "stage-result", stage: skill, ok: true, iteration: 1, durationMs: 1 });
   assert.equal(model(), null);
   emit({ type: "stage-start", stage: { id: "s2", name: "Verify", kind: "shellCommand" }, index: 2, count: 8, iteration: 1 });
