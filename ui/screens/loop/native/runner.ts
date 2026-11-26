@@ -73,6 +73,12 @@ export interface RunnerDeps {
    * first failure (the run then stops: the tests were red before any change), or null when they pass or cannot be run.
    */
   baselineCheck?(verifyStages: LoopStage[]): Promise<{ ok: boolean; stage: LoopStage; output: string; costUsd?: number } | null>;
+  /**
+   * For a blocking gate that reads a review's verdict (Factory Review gate): the review's findings and the code stage to
+   * send them to, when the failure is the review asking for changes. A repair agent cannot make such a gate pass.
+   * Null = no loopback for this stage (the repair path applies).
+   */
+  gateLoopback?(stage: LoopStage): Promise<{ codeStageId: string; findings: string } | null>;
   /** Typed run progress for the board; never parsed out of the log. */
   onProgress?(event: ProgressEvent): void;
   /** Waits `ms` (the stage pause). Default: a 100 ms-tick wait that ends early once `isCancelled` is true. */
@@ -309,7 +315,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
     deps.onProgress?.({ type: "iteration", iteration });
     const iterationOutcomes: StageOutcome[] = [];
     let failed: StageOutcome | null = null;
-    let trigger: { group: LoopbackGroup; verify: LoopStage; source: "tests" | "review"; text: string } | null = null;
+    let trigger: { group: LoopbackGroup; verify: LoopStage; source: "tests" | "review"; text: string; fromGate?: boolean } | null = null;
     for (const stage of stages) {
       if (runsOncePerRun(stage) && passedOnce.has(stage.id)) {
         deps.log(`↷ ${stage.name}: passed earlier in this run`);
@@ -389,6 +395,14 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
         trigger = { group: verifyGroup, verify: stage, source: "tests", text: result.output };
         break;
       }
+      if (!result.ok && stage.severity === "blocking" && deps.gateLoopback) {
+        const back = await Promise.resolve().then(() => deps.gateLoopback?.(stage) ?? null).catch(() => null);
+        const gateGroup = back ? groupOfCode(groups, back.codeStageId) : null;
+        if (back && gateGroup) {
+          trigger = { group: gateGroup, verify: stage, source: "review", text: back.findings, fromGate: true };
+          break;
+        }
+      }
       if (result.ok && verifyGroup && stage.id === verifyGroup.closerId && reviewDue.has(verifyGroup.closerId) && deps.reviewStep) {
         const head = verifyGroup.codeStages[0];
         const groupBase = groupBaseline.get(verifyGroup.closerId) ?? null;
@@ -441,7 +455,8 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       // Rounds remained when only the no-change rule fired; the recorded reason must say so, not "round limit".
       const stoppedEarly = iteration < maxRounds && noChange;
       if (iteration >= maxRounds || noChange) {
-        if (trigger.source === "review") await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, stoppedEarly ? "no change since the previous round" : "round limit reached");
+        // A gate-triggered stop has no per-step review to close; recording one would add a fake "unresolved" step review.
+        if (trigger.source === "review" && !trigger.fromGate) await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, stoppedEarly ? "no change since the previous round" : "round limit reached");
         const summary = stoppedSummary(iteration, trigger.source, stoppedEarly);
         deps.log(summary);
         return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: trigger.source, findings: findingsText(findings.concat(entry)), stopped: true } };

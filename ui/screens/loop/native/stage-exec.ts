@@ -11,7 +11,7 @@ import { evaluateArtifact } from "./artifact.ts";
 import { ROADMAP_CONTRACT, checkRoadmap } from "./refactor-areas.ts";
 import { TEST_PLAN_PATH, mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, agentRunBody, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, REVIEW_PATH, agentRunBody, factoryRole, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
 import { changesCode, headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
@@ -556,7 +556,7 @@ async function recordRoundFindings(ctx: StageExecContext, loop: LoopDefinition, 
 }
 
 /** The runner deps that execute stages for one run. Each call has its own halt state. */
-export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview" | "codeChanged" | "baselineCheck"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
+export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview" | "codeChanged" | "baselineCheck" | "gateLoopback"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior, loopback) {
@@ -584,6 +584,12 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
     // Factory only: its work item may be no code task at all (closing issues), and a red baseline must not be repaired.
     ...(isFactoryLoop(loop) ? {
       codeChanged: async () => changesCode(await runChangesNow(ctx)),
+      gateLoopback: async (s: LoopStage) => {
+        if (factoryRole(s) !== "reviewGate") return null;
+        const implement = loop.config.stages.find((c) => c.enabled && factoryRole(c) === "implement");
+        const review = await readRunFile(ctx, REVIEW_PATH);
+        return implement && review?.trim() ? { codeStageId: implement.id, findings: review } : null;
+      },
       baselineCheck: async (verifyStages: LoopStage[]) => {
         for (const stage of verifyStages) {
           ctx.log(`$ Baseline: ${stage.name}`);

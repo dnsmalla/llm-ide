@@ -951,3 +951,64 @@ test("baseline: a passing baseline runs once and leaves the loopback rounds as t
   assert.equal(a.statusSummary, b.statusSummary);
   assert.equal(a.loopback.reason, "tests");
 });
+
+// Review gate: a failed gate goes back to the code step with the review's findings instead of a repair agent.
+const gate = stage("gate", "Review gate", { kind: "artifactCheck" });
+const gateHook = (findings) => async (s) => (s.id === "gate" ? { codeStageId: "impl", findings: typeof findings === "function" ? findings() : findings } : null);
+const gateRun = (gateOk, extra = {}, over = {}) => {
+  const calls = [];
+  const contexts = [];
+  let gateRuns = 0;
+  const promise = runNativeLoop(cfg3([code("impl", "Implement"), verify, gate], over), base({
+    async runStage(s, _p, loopback) {
+      calls.push(s.id);
+      if (s.id === "impl") contexts.push(loopback);
+      if (s.id === "gate") { gateRuns += 1; return { ok: gateOk(gateRuns), output: "verdict line missing" }; }
+      return { ok: true, output: "" };
+    },
+    repair: noRepair, reviewStep: async () => ({ verdict: "approve", findings: "" }), ...extra,
+  }));
+  return { promise, calls, contexts };
+};
+
+test("review gate: a failed gate re-runs Implement with the review text, no repair, and passes on round 2", async () => {
+  const { promise, calls, contexts } = gateRun((n) => n > 1, { gateLoopback: gateHook("Verdict: changes\n- add the missing test") });
+  const out = await promise;
+  assert.equal(out.passed, true);
+  assert.deepEqual(calls, ["impl", "v", "gate", "impl", "v", "gate"]);
+  assert.equal(contexts[0], undefined);
+  assert.match(contexts[1].findings, /add the missing test/);
+  assert.match(contexts[1].findings, /review/);
+});
+
+test("review gate: a gate that keeps failing stops at the round limit as stopped.limit, never repaired", async () => {
+  let n = 0;
+  const { promise, calls } = gateRun(() => false, { gateLoopback: gateHook(() => `finding ${"ABCDEFG"[n++]}`) });
+  const out = await promise;
+  assert.equal(calls.filter((c) => c === "impl").length, 3);
+  assert.equal(out.passed, false);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(out.loopback.reason, "review");
+  assert.equal(out.failedStage.id, "gate");
+  assert.equal(out.statusSummary, "Stopped after 3 rounds: review still requests changes");
+  assert.equal(runStatusCode(out), "stopped.limit");
+  assert.equal((out.stepReviews ?? []).filter((r) => r.verdict === "unresolved").length, 0);
+});
+
+test("review gate: identical findings twice stop early", async () => {
+  const { promise, calls } = gateRun(() => false, { gateLoopback: gateHook("same finding") });
+  const out = await promise;
+  assert.equal(calls.filter((c) => c === "impl").length, 2);
+  assert.equal(out.loopback.reason, "review");
+  assert.match(out.statusSummary, /no change since the previous round/);
+});
+
+test("review gate: no hook, or a hook that returns null, keeps the repair path", async () => {
+  for (const extra of [{}, { gateLoopback: async () => null }]) {
+    const repaired = [];
+    const { promise } = gateRun((n) => n > 1, { ...extra, async repair(s) { repaired.push(s.id); return { ok: true, output: "" }; } });
+    const out = await promise;
+    assert.deepEqual(repaired, ["gate"]);
+    assert.equal(out.loopback, undefined);
+  }
+});

@@ -1271,3 +1271,17 @@ test("createStageDeps: a Factory run reports whether it changed project code; ot
   const other = { ...loopOf([stage()]), defaultKey: "refactoring", name: "Refactoring" };
   assert.equal(createStageDeps(ctxOf().ctx, other).codeChanged, undefined);
 });
+
+test("Factory deps expose gateLoopback: only the Review gate, reading REVIEW.md from the run's worktree", async () => {
+  const { FACTORY_BUILT_IN_STAGES } = await import("../native/factory.ts");
+  const stages = FACTORY_BUILT_IN_STAGES.map((s, i) => ({ ...stage(), ...s, order: i, enabled: true }));
+  const gateStage = stages.find((s) => s.id === "factory/review-gate");
+  const implement = stages.find((s) => s.skillId === "skills/test-driven-development");
+  const { fs } = fakeFs({ "system/loop-worktrees/r1/.factory/REVIEW.md": "Verdict: changes\n- add the test" });
+  const { ctx } = ctxOf({ fs });
+  const deps = createStageDeps(ctx, loopOf(stages));
+  assert.deepEqual(await deps.gateLoopback(gateStage), { codeStageId: implement.id, findings: "Verdict: changes\n- add the test" });
+  assert.equal(await deps.gateLoopback(implement), null);
+  assert.equal(await createStageDeps(ctxOf().ctx, loopOf(stages)).gateLoopback(gateStage), null);
+  assert.equal(createStageDeps(ctx, { ...loopOf(stages), defaultKey: "tests" }).gateLoopback, undefined);
+});
