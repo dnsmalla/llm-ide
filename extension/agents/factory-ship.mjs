@@ -71,10 +71,28 @@ function gitEnv(extra = {}) {
 // inside the core process at Ship time. `-c` options go before the subcommand.
 const SAFE_GIT_CONFIG = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 // The push authenticates with the saved token only: an emptied helper keeps git from reading or writing the user's keychain.
-const PUSH_GIT_CONFIG = [...SAFE_GIT_CONFIG, '-c', 'credential.helper='];
+// The repo's own config is untrusted, so it may not re-route the token-bearing request (proxy, resolve, redirect),
+// switch off TLS checks, or run an askpass program on a 401.
+const PUSH_GIT_CONFIG = [
+  ...SAFE_GIT_CONFIG, '-c', 'credential.helper=', '-c', 'core.askPass=', '-c', 'http.sslVerify=true', '-c', 'http.proxy=',
+  '-c', 'http.followRedirects=false', '-c', 'http.curloptResolve=',
+];
+
+/**
+ * True only when every push URL of origin is exactly `https://<provider host>/<repo>[.git]` (no userinfo, port or other
+ * host): only then may the token ride along. An ssh origin runs `core.sshCommand`, which would see the env token.
+ */
+export function tokenPushUrlsOk(urls, provider, repo) {
+  if (!Object.hasOwn(API, provider) || !validShipRepo(provider, repo) || !Array.isArray(urls) || urls.length === 0) return false;
+  const host = API[provider].host.replace(/^api\./, '');
+  return urls.every((u) => {
+    const m = /^https:\/\/([a-z0-9.-]+)\/(.+?)(?:\.git)?$/i.exec(u);
+    return m !== null && m[1].toLowerCase() === host && m[2].toLowerCase() === repo.toLowerCase();
+  });
+}
 
 // Mirrors desktop/workspace-core/src/project/clone.rs auth_config. The header travels in GIT_CONFIG_* env (never argv)
-// and is scoped to the provider's own https origin, so an ssh or other-host origin never receives it.
+// and is scoped to the provider's own https origin; commitAndPush sends it only after tokenPushUrlsOk.
 function pushAuthEnv(provider, token) {
   const secret = typeof token === 'string' ? token.trim() : '';
   if (!secret || !Object.hasOwn(API, provider)) return {};
@@ -270,7 +288,7 @@ export function parseShipBody(raw) {
  * records its patch id in `factory.patchid-<sha>`, so a re-ship of that exact commit is accepted even when the client's
  * id is the one the user reviewed before the commit existed.
  */
-export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider', provider = null, token = null }) {
+export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider', provider = null, repo = null, token = null }) {
   if (typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) {
     throw shipError('invalid_worktree', 'The branch must be factory/<run id> or loop/<loop>.');
   }
@@ -345,7 +363,10 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   // Remember which diff this commit is, before the push: a rejected push keeps the commit, and its re-ship must
   // recognise the reviewed id instead of refusing it as stale.
   await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
-  const pushOpts = { timeoutMs: PUSH_TIMEOUT_MS, config: PUSH_GIT_CONFIG, env: pushAuthEnv(provider, token) };
+  const pushUrls = token ? await runGit(worktree, ['remote', 'get-url', '--push', '--all', 'origin']) : null;
+  const urls = pushUrls && pushUrls.code === 0 ? pushUrls.stdout.split('\n').map((u) => u.trim()).filter(Boolean) : [];
+  const auth = tokenPushUrlsOk(urls, provider, repo) ? pushAuthEnv(provider, token) : {};
+  const pushOpts = { timeoutMs: PUSH_TIMEOUT_MS, config: PUSH_GIT_CONFIG, env: auth };
   let push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], pushOpts);
   // Every push is fast-forward only, except the first one of a branch restarted after the provider confirmed that its
   // previous MR merged (a squash or rebase merge leaves the old head on the remote, which a fresh branch cannot

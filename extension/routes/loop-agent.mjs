@@ -493,7 +493,7 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
     // Only when the caller names the loop's previous MR AND the provider itself says it merged from this branch, the first
     // push of the restarted branch may replace that merged head (and only that head); otherwise it is fast-forward only.
     const leaseSha = v.mergedMr && v.branch.startsWith('loop/') ? await (deps.mergedHeadOf ?? mergedHeadOf)(v.provider, v.repo, v.branch, v.mergedMr, token) : null;
-    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret, leaseSha, providerName: SHIP_PROVIDER_NAME[v.provider], provider: v.provider, token }));
+    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret, leaseSha, providerName: SHIP_PROVIDER_NAME[v.provider], provider: v.provider, repo: v.repo, token }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
     return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ? { details: err.details } : null);

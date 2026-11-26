@@ -35,7 +35,7 @@ const { grant } = await import('./helpers/grant.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { busHostProof } = await import('../core/host-approval.mjs');
-const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, STAGED_PATCH_EXCLUDES, stagedAddArgs, stageWorktree, stagedDiffArgs, stagedPatchId } = await import('../agents/factory-ship.mjs');
+const { commitAndPush, createDraftMr, findOpenRequest, originMatchesRepo, neutraliseMentions, STAGED_PATCH_EXCLUDES, stagedAddArgs, stageWorktree, stagedDiffArgs, stagedPatchId, tokenPushUrlsOk } = await import('../agents/factory-ship.mjs');
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 
 function git(args, cwd) {
@@ -324,13 +324,14 @@ test('rejected push opens no PR/MR', async () => {
 });
 
 // A git shim first on PATH: records a push's argv and GIT_CONFIG_* env, then either fails with `stderr` or runs real git.
-function pushShim(stderr) {
+function pushShim(stderr, pushUrls = null) {
   const dir = fs.mkdtempSync(path.join(SANDBOX, 'shim-'));
   const log = path.join(dir, 'push.json');
   const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
   fs.writeFileSync(path.join(dir, 'git'), `#!/usr/bin/env node
 const fs = require('node:fs');
 const a = process.argv.slice(2);
+${pushUrls == null ? '' : `if (a.includes('get-url')) { process.stdout.write(${JSON.stringify(pushUrls.join('\n') + '\n')}); process.exit(0); }`}
 if (a.includes('push')) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('GIT_CONFIG_')));
   fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: a, env }) + '\\n');
@@ -349,17 +350,42 @@ const b64 = (text) => Buffer.from(text).toString('base64');
 test('push authenticates with the saved token via env, never argv, with the credential helper emptied', async () => {
   for (const [provider, token, scope, user] of [['gitlab', GL_TOKEN, 'https://gitlab.com', 'oauth2'], ['github', GH_TOKEN, 'https://github.com', 'x-access-token']]) {
     fs.writeFileSync(path.join(WT, 'src', `auth-${provider}.txt`), `${provider}\n`);
-    const shim = pushShim(null);
+    const shim = pushShim(null, [`${scope}/g/p.git`]);
     try {
       const patchId = await stagedPatchId(WT, BASE);
-      await commitAndPush({ worktree: WT, branch: BRANCH, message: `auth ${provider}`, patchId, provider, token });
+      await commitAndPush({ worktree: WT, branch: BRANCH, message: `auth ${provider}`, patchId, provider, repo: 'g/p', token });
       const [push] = shim.pushes();
       assert.equal(push.env.GIT_CONFIG_COUNT, '1');
       assert.equal(push.env.GIT_CONFIG_KEY_0, `http.${scope}.extraHeader`, 'scoped to the provider origin only');
       assert.equal(push.env.GIT_CONFIG_VALUE_0, `Authorization: Basic ${b64(`${user}:${token}`)}`);
       assert.ok(push.argv.includes('credential.helper='), 'the user keychain helper is emptied');
+      for (const pinned of ['core.askPass=', 'http.sslVerify=true', 'http.proxy=', 'http.followRedirects=false', 'http.curloptResolve=']) {
+        assert.ok(push.argv.includes(pinned), `the repo config cannot override ${pinned}`);
+      }
       const argv = push.argv.join(' ');
       assert.equal(argv.includes(token) || argv.includes(b64(`${user}:${token}`)), false, 'no token on the command line');
+    } finally { shim.restore(); }
+  }
+});
+
+test('the token is sent only when every push URL is the provider https repo itself', async () => {
+  assert.equal(tokenPushUrlsOk(['https://gitlab.com/g/p.git'], 'gitlab', 'g/p'), true);
+  assert.equal(tokenPushUrlsOk(['https://gitlab.com/G/P'], 'gitlab', 'g/p'), true);
+  for (const urls of [
+    [], ['git@gitlab.com:g/p.git'], ['ssh://git@gitlab.com/g/p.git'], ['http://gitlab.com/g/p.git'],
+    ['https://user@gitlab.com/g/p.git'], ['https://gitlab.com:8443/g/p.git'], ['https://gitlab.com.evil.io/g/p.git'],
+    ['https://gitlab.com/g/other.git'], ['https://gitlab.com/g/p.git', 'https://gitlab.com/x/p.git'], ['/tmp/remote.git'],
+  ]) {
+    assert.equal(tokenPushUrlsOk(urls, 'gitlab', 'g/p'), false, JSON.stringify(urls));
+  }
+  for (const urls of [['git@gitlab.com:g/p.git'], ['https://gitlab.com/g/p.git', 'https://gitlab.com/evil/p.git']]) {
+    fs.writeFileSync(path.join(WT, 'src', 'noauth.txt'), `${urls.length}\n`);
+    const shim = pushShim(null, urls);
+    try {
+      const patchId = await stagedPatchId(WT, BASE);
+      await commitAndPush({ worktree: WT, branch: BRANCH, message: 'no auth', patchId, provider: 'gitlab', repo: 'g/p', token: GL_TOKEN });
+      const [push] = shim.pushes();
+      assert.equal(push.env.GIT_CONFIG_VALUE_0, undefined, `no token in the env for ${urls.join(', ')}`);
     } finally { shim.restore(); }
   }
 });
