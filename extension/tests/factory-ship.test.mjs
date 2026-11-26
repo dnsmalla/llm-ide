@@ -359,9 +359,10 @@ test('push authenticates with the saved token via env, never argv, with the cred
       assert.equal(push.env.GIT_CONFIG_KEY_0, `http.${scope}.extraHeader`, 'scoped to the provider origin only');
       assert.equal(push.env.GIT_CONFIG_VALUE_0, `Authorization: Basic ${b64(`${user}:${token}`)}`);
       assert.ok(push.argv.includes('credential.helper='), 'the user keychain helper is emptied');
-      for (const pinned of ['core.askPass=', 'http.sslVerify=true', 'http.proxy=', 'http.followRedirects=false', 'http.curloptResolve=']) {
-        assert.ok(push.argv.includes(pinned), `the repo config cannot override ${pinned}`);
+      for (const pinned of ['core.askPass=', 'http.sslVerify=true', 'http.followRedirects=false']) {
+        assert.ok(push.argv.includes(pinned), `pinned: ${pinned}`);
       }
+      assert.equal(push.argv.includes('http.proxy='), false, "the user's own proxy setting still applies");
       const argv = push.argv.join(' ');
       assert.equal(argv.includes(token) || argv.includes(b64(`${user}:${token}`)), false, 'no token on the command line');
     } finally { shim.restore(); }
@@ -387,6 +388,27 @@ test('the token is sent only when every push URL is the provider https repo itse
       const [push] = shim.pushes();
       assert.equal(push.env.GIT_CONFIG_VALUE_0, undefined, `no token in the env for ${urls.join(', ')}`);
     } finally { shim.restore(); }
+  }
+});
+
+test('a repository whose own config sets a transport key gets no token', async () => {
+  // A URL-scoped key outranks a plain `-c` pin, so pinning cannot help: the token is withheld instead.
+  for (const [key, value] of [
+    ['http.https://gitlab.com/.proxy', 'http://127.0.0.1:9'], ['http.sslVerify', 'false'], ['http.https://gitlab.com/g/p.git.curloptResolve', 'gitlab.com:443:127.0.0.1'],
+    ['remote.origin.proxy', 'http://127.0.0.1:9'], ['remote.origin.vcs', 'x'], ['core.askPass', '/bin/echo'],
+  ]) {
+    git(['config', key, value], REPO);
+    fs.writeFileSync(path.join(WT, 'src', 'transport.txt'), `${key}\n`);
+    const shim = pushShim(null, ['https://gitlab.com/g/p.git']);
+    try {
+      const patchId = await stagedPatchId(WT, BASE);
+      await commitAndPush({ worktree: WT, branch: BRANCH, message: `transport ${key}`, patchId, provider: 'gitlab', repo: 'g/p', token: GL_TOKEN }).catch(() => null);
+      const [push] = shim.pushes();
+      assert.equal(push?.env.GIT_CONFIG_VALUE_0, undefined, `no token with repo ${key}`);
+    } finally {
+      shim.restore();
+      git(['config', '--unset-all', key], REPO);
+    }
   }
 });
 

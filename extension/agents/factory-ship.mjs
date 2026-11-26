@@ -71,12 +71,30 @@ function gitEnv(extra = {}) {
 // inside the core process at Ship time. `-c` options go before the subcommand.
 const SAFE_GIT_CONFIG = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
 // The push authenticates with the saved token only: an emptied helper keeps git from reading or writing the user's keychain.
-// The repo's own config is untrusted, so it may not re-route the token-bearing request (proxy, resolve, redirect),
-// switch off TLS checks, or run an askpass program on a 401.
+// These pins cannot stop the REPO's own config (a URL-scoped `http.<url>.*` key outranks a plain `-c`), so a repo that
+// sets any transport key gets no token at all (repoOverridesTransport); the user's global proxy/CA settings still apply.
 const PUSH_GIT_CONFIG = [
-  ...SAFE_GIT_CONFIG, '-c', 'credential.helper=', '-c', 'core.askPass=', '-c', 'http.sslVerify=true', '-c', 'http.proxy=',
-  '-c', 'http.followRedirects=false', '-c', 'http.curloptResolve=',
+  ...SAFE_GIT_CONFIG, '-c', 'credential.helper=', '-c', 'core.askPass=', '-c', 'http.sslVerify=true',
+  '-c', 'http.followRedirects=false',
 ];
+
+/**
+ * True when the repository's own config (local or worktree scope, includes resolved) sets a key that could re-route,
+ * un-verify or hand off the token-bearing push: any `http.*` (also URL-scoped), `remote.origin.proxy`,
+ * `remote.origin.vcs` or `core.askPass`. Also true when the config cannot be read (fail closed).
+ */
+async function repoOverridesTransport(worktree) {
+  const r = await runGit(worktree, ['config', '--show-scope', '--list']);
+  if (r.code !== 0) return true;
+  return r.stdout.split('\n').some((line) => {
+    const tab = line.indexOf('\t');
+    if (tab < 0) return false;
+    const scope = line.slice(0, tab);
+    if (scope !== 'local' && scope !== 'worktree') return false;
+    const key = line.slice(tab + 1).split('=')[0].toLowerCase();
+    return key.startsWith('http.') || key === 'remote.origin.proxy' || key === 'remote.origin.vcs' || key === 'core.askpass';
+  });
+}
 
 /**
  * True only when every push URL of origin is exactly `https://<provider host>/<repo>[.git]` (no userinfo, port or other
@@ -365,7 +383,7 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
   const pushUrls = token ? await runGit(worktree, ['remote', 'get-url', '--push', '--all', 'origin']) : null;
   const urls = pushUrls && pushUrls.code === 0 ? pushUrls.stdout.split('\n').map((u) => u.trim()).filter(Boolean) : [];
-  const auth = tokenPushUrlsOk(urls, provider, repo) ? pushAuthEnv(provider, token) : {};
+  const auth = tokenPushUrlsOk(urls, provider, repo) && !(await repoOverridesTransport(worktree)) ? pushAuthEnv(provider, token) : {};
   const pushOpts = { timeoutMs: PUSH_TIMEOUT_MS, config: PUSH_GIT_CONFIG, env: auth };
   let push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], pushOpts);
   // Every push is fast-forward only, except the first one of a branch restarted after the provider confirmed that its
