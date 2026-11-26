@@ -168,6 +168,13 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 | Add a desktop screen or section | `ui/screens/<section>/` + `ui/screens/shell/sections.ts`; host commands in `desktop/src-tauri/src/` (registered in `lib.rs`, listed in `build.rs` COMMANDS, granted in `capabilities/default.json`) |
 | Add a Host API v1 command | `schema/host-api/v1` + `node scripts/generate-host-api.mjs` + `extension/routes/host-api/` + the web/iOS clients |
 
+### One copy of shared code (do not re-duplicate)
+
+- Local and SSH workspace logic lives once in `desktop/workspace-core` (`wire`, command table); the Tauri host and `desktop/workspace-helper` only adapt it.
+- Shared ssh/remote host helpers have one file each (`host_keys.rs`, `ssh_transport.rs`, `fsutil` hex/`ct_eq`); no second copy in `remote*`/`ssh_*` files.
+- UI buttons, fields, lists, dialogs and path/decode helpers live in `ui/kit`; screens must not define their own copies. Every Tauri call goes through `invokeHost`.
+- Guard: `ui/screens/shell/tests/no-duplicate-helpers.test.mjs`. Details: [`invariants.md`](docs/explanation/invariants.md#one-copy-of-shared-desktop-code-workspace-ssh-helpers-ui-building-blocks).
+
 ### Starting Points for Reading
 
 - **Server internals** — `extension/server.mjs` → follow router into `extension/routes/router.mjs`
