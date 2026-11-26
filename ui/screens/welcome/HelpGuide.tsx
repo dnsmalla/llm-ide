@@ -3,6 +3,8 @@
 // Plain text only: every string comes from help.ts and renders as text.
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { HELP_FLOWS, HELP_GROUPS, HELP_TOPICS, topicFlow, type FlowNode, type HelpGroup, type HelpTopic } from "./help";
+import { DESKTOP_TOURS } from "./tours";
+import type { TourFlow } from "../shell/tour-model";
 
 const HOME = "home";
 const byId = new Map(HELP_TOPICS.map((t) => [t.id, t]));
@@ -67,8 +69,9 @@ function TryIt({ steps }: { steps: readonly string[] }): ReactNode {
   );
 }
 
-function Topic({ t, open, onOpen }: { t: HelpTopic; open: (id: string) => void; onOpen?: () => void }): ReactNode {
+function Topic({ t, open, onOpen, onStartTour }: { t: HelpTopic; open: (id: string) => void; onOpen?: () => void; onStartTour?: (flow: TourFlow) => void }): ReactNode {
   const flow = topicFlow(t);
+  const tour = DESKTOP_TOURS.find((x) => x.id === t.id);
   return (
     <>
       <p className="help-kicker">{t.group}</p>
@@ -93,6 +96,7 @@ function Topic({ t, open, onOpen }: { t: HelpTopic; open: (id: string) => void; 
       ) : null}
       <div className="help-foot">
         {onOpen ? <button type="button" className="help-btn help-btn-primary" onClick={onOpen}>{t.group === "Settings" ? "Open Settings" : t.target ? `Open ${t.title.replace(/^Recipe: /, "")}` : "Open"} →</button> : null}
+        {tour && onStartTour ? <button type="button" className="help-btn" onClick={() => onStartTour(tour)}>Start tour →</button> : null}
         {t.related && t.related.length > 0 ? (
           <nav className="help-related" aria-label="Read next">
             <span>Read next</span>
@@ -147,7 +151,7 @@ function Home({ open }: { open: (id: string) => void }): ReactNode {
   );
 }
 
-export function GuideDialog({ onClose, onNavigate, initialTopic }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void; /** Open on this topic id instead of Home. */ initialTopic?: string }): ReactNode {
+export function GuideDialog({ onClose, onNavigate, onStartTour, initialTopic }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void; onStartTour?: (flow: TourFlow) => void; /** Open on this topic id instead of Home. */ initialTopic?: string }): ReactNode {
   const close = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
@@ -201,7 +205,7 @@ export function GuideDialog({ onClose, onNavigate, initialTopic }: { onClose: ()
           </nav>
           <article className="help-content" ref={content} aria-live="polite">
             {active
-              ? <Topic key={active.id} t={active} open={open} onOpen={active.target && onNavigate ? () => onNavigate(active.target!, active.settingsGroup) : undefined} />
+              ? <Topic key={active.id} t={active} open={open} onOpen={active.target && onNavigate ? () => onNavigate(active.target!, active.settingsGroup) : undefined} onStartTour={onStartTour} />
               : q === "" ? <Home open={open} /> : null}
           </article>
         </div>

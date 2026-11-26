@@ -37,7 +37,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
           {view.costUsd != null && view.costUsd > 0 ? <span>${view.costUsd.toFixed(2)}</span> : null}
         </div>
       ) : null}
-      {view.request ? <button type="button" className="fx-link" onClick={() => onAction("openRequest")}>{view.request.label}</button> : null}
+      {view.request ? <button type="button" className="fx-link" data-tour-id="done-mr-link" onClick={() => onAction("openRequest")}>{view.request.label}</button> : null}
       {view.lastLine ? <p className="fx-card-line" title={view.lastLine}>{view.lastLine.slice(0, 120)}</p> : null}
       {view.verdict ? <p className="fx-hint">{view.verdict}</p> : null}
       {view.stepReviews ? <p className="fx-hint">Step reviews: {formatStepReviews(view.stepReviews)}</p> : null}
@@ -72,7 +72,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" disabled={busy && a === "approve"} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" data-tour-id={`card-action-${a}`} disabled={busy && a === "approve"} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
                 setConfirmDiscard(true);
                 setDiscardStatus(null);

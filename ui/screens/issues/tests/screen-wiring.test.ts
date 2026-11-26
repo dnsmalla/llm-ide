@@ -95,7 +95,7 @@ test("Send to Factory: offered only when the entry provides it, single from the 
   assert.match(issues, /const list = rows\.filter\(\(r\) => picked\.has\(r\.id\)\);/);
   assert.match(issues, /onSendToFactory=\{deps\.sendToFactory \? \(\) => void sendIssues\(\[detailIssue\], false\) : undefined\}/);
   const detail = read("../IssueDetail.tsx");
-  assert.match(detail, /\{onSendToFactory \? <button type="button" className="iss-btn" onClick=\{onSendToFactory\}>Send to Factory<\/button> : null\}/);
+  assert.match(detail, /\{onSendToFactory \? <button type="button" className="iss-btn" data-tour-id="send-to-factory" onClick=\{onSendToFactory\}>Send to Factory<\/button> : null\}/);
   const entry = read("../index.tsx");
   assert.match(entry, /features\.usable\.has\("auto_tasks"\)/);
   assert.match(entry, /typeof __FEATURE_AUTO_TASKS__ === "undefined" \|\| __FEATURE_AUTO_TASKS__/);

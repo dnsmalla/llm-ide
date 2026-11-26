@@ -248,7 +248,7 @@ export function IssueDetail({ issue, deps, onClose, onNotice, onScheduleChanged,
             ) : null}
             <div className="iss-detail-actions">
               <button type="button" className="iss-btn iss-primary" disabled={!openUrl} onClick={openLink}>{issue.provider === "gitlab" ? "Open on GitLab" : "Open on GitHub"}</button>
-              {onSendToFactory ? <button type="button" className="iss-btn" onClick={onSendToFactory}>Send to Factory</button> : null}
+              {onSendToFactory ? <button type="button" className="iss-btn" data-tour-id="send-to-factory" onClick={onSendToFactory}>Send to Factory</button> : null}
             </div>
             {schedulable ? (
               <section className="iss-dates" aria-label="Dates">

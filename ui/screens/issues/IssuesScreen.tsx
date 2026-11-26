@@ -301,7 +301,7 @@ export function IssuesScreen({ active, deps }: SectionProps & { deps: IssuesDeps
               <h3 className="iss-col-title">{col.title} <span>{col.issues.length}</span></h3>
               <ul className="iss-cards">
                 {col.issues.slice(0, shown[col.id] ?? COLUMN_PAGE).map((i) => (
-                  <li key={i.id} className="iss-card">
+                  <li key={i.id} className="iss-card" data-tour-id="issue-card">
                     {deps.sendToFactory ? <label className="iss-check"><input type="checkbox" className="iss-pick" checked={picked.has(i.id)} onChange={() => togglePick(i.id)} aria-label={`Select ${i.title} for the Factory`} /> Select</label> : null}
                     <button type="button" className="iss-card-title" onClick={() => setSelected(i)} title="Open issue details">
                       {i.title}
