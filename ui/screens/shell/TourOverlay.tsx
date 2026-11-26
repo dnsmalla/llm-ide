@@ -5,6 +5,7 @@ import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } 
 import { Floating, Portal } from "./Floating";
 import { currentStep, isLastStep, tourReducer, type TourFlow, type TourState, type TourStep } from "./tour-model";
 import type { SectionId } from "./sections";
+import { pickTarget } from "./tour-target.ts";
 
 const TARGET_WAIT_MS = 1500;
 
@@ -24,19 +25,18 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
   useEffect(() => {
     setEl(null);
     if (!targetId) return undefined;
-    const find = () => document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
-    // A detached or zero-size node is stale (its own click unmounted it), so treat it as not found yet.
-    const isLive = (node: HTMLElement | null): node is HTMLElement => {
-      if (!node || !node.isConnected) return false;
+    const isLive = (node: HTMLElement): boolean => {
+      if (!node.isConnected) return false;
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     };
+    // Lock-on: once found, never jump to another match (every inbox card has a Start button).
+    let locked: HTMLElement | null = null;
     const check = () => {
-      setEl((prev) => {
-        if (isLive(prev)) return prev;
-        const found = find();
-        return isLive(found) ? found : null;
-      });
+      const candidates = locked ? [] : Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`));
+      const picked = pickTarget(locked, candidates, isLive);
+      if (picked) locked = picked;
+      setEl(picked);
     };
     // The desktop DOM churns constantly, so at most one layout read per frame.
     let frame = 0;
@@ -47,7 +47,7 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     check();
     // Never self-disconnects: the timeout only triggers one more check.
     const mo = new MutationObserver(schedule);
-    mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "data-tour-id"] });
     const timeout = window.setTimeout(check, TARGET_WAIT_MS);
     return () => {
       mo.disconnect();

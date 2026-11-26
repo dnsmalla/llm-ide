@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState, type ReactNode } from 'react';
 import { currentStep, isLastStep, tourReducer, type TourFlow, type TourState, type TourStep } from './tour-model';
 import { placeCard } from './placement';
+import { pickTarget } from './tour-target';
 import type { Tab } from '../tabs';
 
 const TARGET_WAIT_MS = 1500;
@@ -28,27 +29,27 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
   useEffect(() => {
     setEl(null);
     if (!targetId) return undefined;
-    const find = () => document.querySelector<HTMLElement>(`[data-tour-id="${targetId}"]`);
     // Not "live" once the step's own action unmounts it (Start Recording -> Stop Recording) or it
     // collapses to zero size — either way the spotlight must stop pinning on the stale reference.
-    const isLive = (node: HTMLElement | null): node is HTMLElement => {
-      if (!node || !node.isConnected) return false;
+    const isLive = (node: HTMLElement): boolean => {
+      if (!node.isConnected) return false;
       const rect = node.getBoundingClientRect();
       return rect.width > 0 && rect.height > 0;
     };
+    // Lock-on: once found, never jump to another match with the same id.
+    let locked: HTMLElement | null = null;
     const check = () => {
-      setEl((prev) => {
-        if (isLive(prev)) return prev;
-        const found = find();
-        return isLive(found) ? found : null;
-      });
+      const candidates = locked ? [] : Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`));
+      const picked = pickTarget(locked, candidates, isLive);
+      if (picked) locked = picked;
+      setEl(picked);
     };
     check();
     // Never disconnects itself: a target missing at TARGET_WAIT_MS degrades to a spotlight-less card
     // for now (el stays null), but a slow target (e.g. notes still generating) can still be picked up
     // once it finally appears, and a target that later unmounts is re-searched the same way.
     const mo = new MutationObserver(check);
-    mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-tour-id'] });
     const timeout = window.setTimeout(check, TARGET_WAIT_MS);
     return () => {
       mo.disconnect();
