@@ -163,6 +163,14 @@ pub struct RestartPolicy {
     crashes: VecDeque<Instant>,
 }
 
+/// The wait before retry `attempt` (1-based): `base` doubled per earlier attempt, never above `cap`. The one
+/// backoff curve for the core's crash restarts and the SSH link's reconnects.
+pub(crate) fn exponential_backoff(base: Duration, cap: Duration, attempt: u32) -> Duration {
+    // The shift is bounded so the multiplier cannot overflow; any base worth backing off from reaches `cap` first.
+    let shift = attempt.saturating_sub(1).min(16);
+    base.saturating_mul(1u32 << shift).min(cap)
+}
+
 impl RestartPolicy {
     pub fn new(t: &Tuning) -> Self {
         Self { max: t.max_crashes, window: t.crash_window, base: t.backoff_base, cap: t.backoff_cap, crashes: VecDeque::new() }
@@ -176,8 +184,7 @@ impl RestartPolicy {
         if self.crashes.len() >= self.max {
             return Decision::Fatal;
         }
-        let shift = (self.crashes.len() as u32 - 1).min(16);
-        Decision::Restart(self.base.saturating_mul(1u32 << shift).min(self.cap))
+        Decision::Restart(exponential_backoff(self.base, self.cap, self.crashes.len() as u32))
     }
 }
 

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use crate::core_host::ct_eq;
+use crate::core_host::{ct_eq, exponential_backoff};
 use crate::fs_ops::FsError;
 use crate::ssh_askpass::AskpassGrant;
 use crate::ssh_server_scripts::{parse_core_state, STATUS};
@@ -528,8 +528,7 @@ impl ForwardChild for StopAware<'_> {
 
 /// Seconds to wait before reconnect `attempt` (1-based): 1, 2, 4, 8, then 15 for every later attempt.
 fn backoff_for(attempt: u32) -> Duration {
-    let secs = 1u64.checked_shl(attempt.saturating_sub(1)).unwrap_or(u64::MAX);
-    Duration::from_secs(secs.min(MAX_BACKOFF.as_secs()))
+    exponential_backoff(Duration::from_secs(1), MAX_BACKOFF, attempt)
 }
 
 /// The production wait. Sleeps in short slices so a stop cuts it short.

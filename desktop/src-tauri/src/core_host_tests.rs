@@ -1379,3 +1379,16 @@ fn a_fake_child_reads_the_secrets_line_from_its_stdin() {
     let out = child.wait_with_output().unwrap();
     assert_eq!(String::from_utf8(out.stdout).unwrap().trim(), line, "the child read exactly the JSON line");
 }
+
+#[test]
+fn the_backoff_curve_doubles_and_stops_at_the_cap() {
+    let secs = |base: u64, cap: u64, attempt: u32| {
+        exponential_backoff(Duration::from_secs(base), Duration::from_secs(cap), attempt).as_secs()
+    };
+    // The SSH link's curve: 1, 2, 4, 8, then 15 for every later attempt (attempt 0 counts as the first).
+    let ssh: Vec<u64> = [0, 1, 2, 3, 4, 5, 6, 20, 64, 65, u32::MAX].iter().map(|a| secs(1, 15, *a)).collect();
+    assert_eq!(ssh, vec![1, 1, 2, 4, 8, 15, 15, 15, 15, 15, 15]);
+    // A core-restart style curve: 2 s base, 30 s cap.
+    let core: Vec<u64> = (1..=6).map(|a| secs(2, 30, a)).collect();
+    assert_eq!(core, vec![2, 4, 8, 16, 30, 30]);
+}
