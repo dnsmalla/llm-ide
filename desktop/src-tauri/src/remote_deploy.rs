@@ -89,7 +89,6 @@ pub fn verified_known_host_line(scan: &str, target: &PreparedTarget, key: &Confi
 /// fingerprint, and `StrictHostKeyChecking=yes` then refuses any other key at connect time.
 pub struct SystemDeploy;
 
-const SCAN_DEADLINE: Duration = Duration::from_secs(60);
 /// Every stage gets the long deadline: an install or upload can take many minutes, and a stage killed half way is
 /// worse than a slow one. The deadline only ends a server that never answers.
 const STAGE_DEADLINE: Duration = Duration::from_secs(30 * 60);
@@ -108,13 +107,8 @@ impl DeployRunner for SystemDeploy {
         let key = require_confirmed_host_key(target)?;
         let dir = temp_ssh_dir("ssh-deploy")?;
         let run = (|| {
-            let scan = run_hub_program(
-                "ssh-keyscan",
-                &["-T".into(), "10".into(), "-p".into(), target.port.to_string(), "-t".into(), key.key_type.clone(), target.host.clone()],
-                None,
-                SCAN_DEADLINE,
-            )
-            .map_err(|e| io_error("host_key_unavailable", "ssh-keyscan", e))?;
+            let scan = crate::host_keys::keyscan(&target.host, target.port, Some(&key.key_type))
+                .map_err(|e| io_error("host_key_unavailable", "ssh-keyscan", e))?;
             let line = verified_known_host_line(&scan.stdout, target, &key).ok_or_else(|| {
                 herr("host_key_changed", "the server's host key does not match the fingerprint you confirmed; test again and compare it")
             })?;

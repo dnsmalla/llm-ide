@@ -29,6 +29,7 @@ mod fs_watch;
 mod git;
 mod git_scm;
 mod host_approval;
+mod host_keys;
 mod fsutil;
 mod graph_file;
 mod mermaid_runtime;

@@ -24,8 +24,6 @@ use crate::ssh_transport::{SshEndpoint, SystemSshExec};
 /// The native dialog that asks before a new host key is pinned. The text is fixed; only the key facts vary.
 const ASK_TITLE: &str = "Trust this SSH host key?";
 const ASK_ACCEPT: &str = "Trust host key";
-/// Seconds `ssh-keyscan` waits for the server; the same bound the deploy scan uses.
-const KEYSCAN_TIMEOUT_SECS: &str = "10";
 /// The `/health` nonce check on the forwarded port, matching the local core's probe budget.
 const HEALTH_TIMEOUT: Duration = Duration::from_millis(800);
 const SESSION_FILE: &str = "ssh-session.json";
@@ -191,26 +189,17 @@ pub(crate) fn target_from_prefs(saved: &RemoteServerPrefs) -> SshServerTarget {
     }
 }
 
-/// ssh-keyscan argv. The host and port are validated by `prepare_endpoint`, so neither can start with '-'.
-pub(crate) fn keyscan_args(endpoint: &SshEndpoint) -> Vec<String> {
-    vec![
-        "-T".to_string(),
-        KEYSCAN_TIMEOUT_SECS.to_string(),
-        "-p".to_string(),
-        endpoint.port.to_string(),
-        endpoint.host.clone(),
-    ]
-}
-
-/// Runs ssh-keyscan with no stdin and no stderr. Its stdout is the scan text; the service picks the key from it.
+/// Scans the endpoint's host keys under a deadline. A silent host that never answers ends in an error rather than
+/// a hung connect; the service picks the key from the scan text.
 fn keyscan(endpoint: &SshEndpoint) -> Result<String, FsError> {
-    let output = Command::new("ssh-keyscan")
-        .args(keyscan_args(endpoint))
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .map_err(|_| herr("host_key_unavailable", "Could not run ssh-keyscan."))?;
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    let output = crate::host_keys::keyscan(&endpoint.host, endpoint.port, None).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::TimedOut {
+            herr("SSH_TIMEOUT", "ssh-keyscan did not finish in time.")
+        } else {
+            herr("host_key_unavailable", "Could not run ssh-keyscan.")
+        }
+    })?;
+    Ok(output.stdout)
 }
 
 /// The argv for the local `ssh-keygen`: an ed25519 key with no passphrase, a fixed comment, and the private key
@@ -304,7 +293,6 @@ mod tests {
     use super::*;
     use crate::prefs::{RemoteServerPrefs, SshAuthKind};
     use crate::ssh_session::bundle_for;
-    use crate::ssh_transport::{prepare_endpoint, SshAuth};
     use std::path::{Path, PathBuf};
 
     const VERSION: &str = "9.8.7";
@@ -332,12 +320,6 @@ mod tests {
 
     fn touch(path: &Path) {
         std::fs::write(path, b"tarball").unwrap();
-    }
-
-    #[test]
-    fn production_scan_argv_is_fixed() {
-        let endpoint = prepare_endpoint("example.com", 2222, "alice", SshAuth::Password).unwrap();
-        assert_eq!(keyscan_args(&endpoint), vec!["-T", "10", "-p", "2222", "example.com"]);
     }
 
     #[test]
