@@ -75,6 +75,7 @@ mod remote_tls;
 mod remote_proxy;
 mod rtk;
 mod secrets;
+mod secrets_bundle;
 mod self_heal;
 mod self_heal_fix;
 mod source_pick;

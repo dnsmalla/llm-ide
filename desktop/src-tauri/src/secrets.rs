@@ -85,7 +85,9 @@ impl SecretBackend for MemoryBackend {
     }
 }
 
-/// The real OS store via `keyring`.
+/// The real OS store via `keyring`. On macOS every account lives in ONE keychain item
+/// (`secrets_bundle`), read once per process, because macOS prompts per item; elsewhere
+/// each account is its own item (Windows caps one credential at 2560 bytes).
 pub struct OsBackend;
 
 fn map_keyring(e: keyring::Error) -> SecretError {
@@ -93,8 +95,11 @@ fn map_keyring(e: keyring::Error) -> SecretError {
     SecretError::Unavailable(e.to_string())
 }
 
-impl SecretBackend for OsBackend {
-    fn get(&self, account: &str) -> Result<Option<String>, SecretError> {
+/// One keyring item per account; the raw layer under the macOS bundle.
+struct KeyringItems;
+
+impl crate::secrets_bundle::RawStore for KeyringItems {
+    fn read(&self, account: &str) -> Result<Option<String>, SecretError> {
         let entry = keyring::Entry::new(SERVICE, account).map_err(map_keyring)?;
         match entry.get_password() {
             Ok(v) => Ok(Some(v)),
@@ -102,10 +107,29 @@ impl SecretBackend for OsBackend {
             Err(e) => Err(map_keyring(e)),
         }
     }
-    fn set(&self, account: &str, value: &str) -> Result<(), SecretError> {
+    fn write(&self, account: &str, value: &str) -> Result<(), SecretError> {
         keyring::Entry::new(SERVICE, account)
             .and_then(|e| e.set_password(value))
             .map_err(map_keyring)
+    }
+}
+
+/// Process-wide so every `default_backend()` shares one cache (one prompt per launch).
+#[cfg(target_os = "macos")]
+static OS_BUNDLE: crate::secrets_bundle::Bundle<KeyringItems> = crate::secrets_bundle::Bundle::new(KeyringItems);
+
+impl SecretBackend for OsBackend {
+    fn get(&self, account: &str) -> Result<Option<String>, SecretError> {
+        #[cfg(target_os = "macos")]
+        return OS_BUNDLE.get(account);
+        #[cfg(not(target_os = "macos"))]
+        return crate::secrets_bundle::RawStore::read(&KeyringItems, account);
+    }
+    fn set(&self, account: &str, value: &str) -> Result<(), SecretError> {
+        #[cfg(target_os = "macos")]
+        return OS_BUNDLE.set(account, value);
+        #[cfg(not(target_os = "macos"))]
+        return crate::secrets_bundle::RawStore::write(&KeyringItems, account, value);
     }
     fn name(&self) -> &'static str {
         "os"
