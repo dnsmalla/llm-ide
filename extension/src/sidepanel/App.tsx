@@ -24,22 +24,7 @@ import Settings from './components/Settings';
 import QuestionsView from './components/QuestionsView';
 import LoginView from './components/LoginView';
 import HelpPanel from './components/HelpPanel';
-
-// Trimmed tab set.  Actions / Plan / Review were moved out of the
-// extension and into the desktop app — they're project-management
-// surfaces that benefit from a bigger window and don't belong in a
-// 280-px-wide side panel.  The extension stays focused on capture
-// (Transcript), the AI surface that operates on it (Notes, Questions,
-// Chat), and the supporting bits (History, Settings).
-type Tab = 'transcript' | 'notes' | 'questions' | 'chat' | 'settings';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'transcript', label: 'Transcript' },
-  { id: 'notes', label: 'Notes' },
-  { id: 'questions', label: 'Questions' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'settings', label: 'Settings' },
-];
+import { TABS, type Tab } from './tabs';
 
 function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
