@@ -260,6 +260,9 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     if !(deps.ask)(&shown, &offered.key_type, &offered.fingerprint) {
         return Err(herr("cancelled", "The server's host key was not trusted, so nothing was saved."));
     }
+    // After the dialog, which can wait on the user for ever: a Connect must not read a saved password or re-set a flag
+    // between this confirm's flag clear and its new pin.
+    let _operation = operation();
     // A different key was pinned for this server: the passwords saved for it were meant for that key's server. Their
     // flags go before the new pin is stored, so no later connect can send one to the server behind the new key.
     // No pin at all counts as a replacement too: the pin may have been evicted while a login still holds a password.
@@ -368,6 +371,8 @@ pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password:
 /// stop or uninstall can run between them.
 ///
 /// Errors: the codes of [`connect`], plus those of the stop (`SSH_STOP_UNKNOWN`, `SSH_STOP_FAILED`).
+// The command now holds the lock itself and calls the `_locked` form; this wrapper is for callers that do not.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn connect_with_options(
     deps: &Deps,
     host: &CoreHost,
@@ -376,6 +381,18 @@ pub fn connect_with_options(
     take_over: bool,
 ) -> Result<SshServerStatus, FsError> {
     let _operation = operation();
+    connect_with_options_locked(deps, host, target, password, take_over)
+}
+
+/// [`connect_with_options`] for a caller that already holds [`operation`], so it can keep the lock across the password
+/// lookup before it and the Keychain write after it.
+pub(crate) fn connect_with_options_locked(
+    deps: &Deps,
+    host: &CoreHost,
+    target: &SshServerTarget,
+    password: Option<&str>,
+    take_over: bool,
+) -> Result<SshServerStatus, FsError> {
     if take_over {
         stop_running_core_locked(deps, target, password)?;
     }
@@ -1832,6 +1849,35 @@ pub(crate) mod tests {
         connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap();
         assert!(!old_file.exists(), "the replaced link's folder is removed");
         assert!(fx.host.attached_known_hosts().is_some_and(|file| file.is_file()), "the new link keeps its own folder");
+    }
+
+    #[test]
+    fn a_confirm_waits_for_the_operation_lock_but_asks_before_taking_it() {
+        let fx = Fixture::new("svc-confirm-serialized");
+        let login = target(22, SshAuthKind::Key);
+        let deps = fx.deps(&fake(vec![]), &scan_of("key-b"), true, true);
+        let seen = test(&deps, &login, None).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let held = operation();
+        let worker = {
+            let (login, key_type, fingerprint) = (login.clone(), seen.host_key_type.clone(), seen.fingerprint.clone());
+            std::thread::spawn(move || {
+                let result = confirm(&deps, &login, &key_type, &fingerprint);
+                let _ = done_tx.send(result.is_ok());
+            })
+        };
+        let waited = done_rx.recv_timeout(Duration::from_millis(100)).is_err();
+        let asked = fx.asks.load(Ordering::SeqCst);
+        let pinned_early = pin_for(&endpoint_shape(&login).unwrap()).is_some();
+        drop(held);
+        let finished = done_rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false);
+        // Joined before any assert, so a failure cannot leave the worker writing prefs after the Fixture is gone.
+        worker.join().unwrap();
+        assert!(waited, "the write section must wait for the lock");
+        assert_eq!(asked, 1, "the dialog ran before the lock was needed");
+        assert!(!pinned_early, "nothing is pinned while the lock is held");
+        assert!(finished, "the confirm finishes once the lock is free");
+        assert!(pin_for(&endpoint_shape(&login).unwrap()).is_some());
     }
 
     /// The known_hosts file named by the `UserKnownHostsFile` option of one argv.
