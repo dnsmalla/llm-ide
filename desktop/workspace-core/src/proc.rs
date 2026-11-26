@@ -18,13 +18,16 @@ use crate::git::kill_tree;
 const POLL: Duration = Duration::from_millis(10);
 /// How long the pipes get after the child was killed on purpose; the kill closes them, so this is a backstop.
 const AFTER_KILL: Duration = Duration::from_secs(2);
+/// Minimum time the pipes get after the child exited by itself, so one that exits right at its deadline still has its
+/// output read. A grandchild holding a pipe is still cut off after this.
+const AFTER_EXIT_GRACE: Duration = Duration::from_secs(2);
 
 /// What to enforce. A pipe that is not piped on the child is simply read as empty.
 pub struct Limits<'a> {
     pub timeout: Duration,
     /// When set to true the child is killed and the wait ends as `Cancelled`.
     pub cancel: Option<&'a AtomicBool>,
-    /// Bytes of stdout kept; `None` leaves stdout alone. One byte more is read, to tell that the output was cut.
+    /// Bytes of stdout kept; `None` does not take the pipe at all (the child keeps its handle). One byte more is read, to tell that the output was cut.
     pub stdout_cap: Option<usize>,
     /// Bytes of stderr kept. The rest is read and thrown away, so the child never blocks on a full pipe.
     pub stderr_keep: usize,
@@ -92,7 +95,7 @@ fn drain_stderr(stream: Option<impl Read + Send + 'static>, keep: usize) -> Opti
 /// Waits for `child` under `limits`. `feed` runs once after the pipes are being drained (it writes the child's stdin);
 /// a failure kills the child. The child is always reaped before this returns.
 pub fn run_capped(child: &mut Child, limits: &Limits<'_>, feed: impl FnOnce(&mut Child) -> io::Result<()>) -> Ran {
-    let out = drain_stdout(child.stdout.take(), limits.stdout_cap);
+    let out = limits.stdout_cap.and_then(|cap| drain_stdout(child.stdout.take(), Some(cap)));
     let err = drain_stderr(child.stderr.take(), limits.stderr_keep);
     let deadline = Instant::now() + limits.timeout;
     let ending = match feed(child) {
@@ -139,7 +142,7 @@ fn wait_for_exit(child: &mut Child, limits: &Limits<'_>, deadline: Instant, out:
 
 fn collect(ending: Ending, out: Option<StdoutDrain>, err: Option<Receiver<Vec<u8>>>, deadline: Instant, child: &mut Child) -> Ran {
     let killed = !matches!(ending, Ending::Exited(_));
-    let limit = if killed { Instant::now() + AFTER_KILL } else { deadline };
+    let limit = if killed { Instant::now() + AFTER_KILL } else { deadline.max(Instant::now() + AFTER_EXIT_GRACE) };
     let wait = |now: Instant| limit.saturating_duration_since(now);
     let mut ending = ending;
     let (stdout, truncated) = match out {
@@ -224,6 +227,14 @@ mod tests {
         let ran = run_capped(&mut child, &limits(300), |_| Ok(()));
         assert!(matches!(ran.ending, Ending::PipesHeld), "{:?}", ran.ending);
         assert!(started.elapsed() < Duration::from_secs(10));
+    }
+
+    #[test]
+    fn a_child_exiting_at_the_deadline_still_returns_its_output() {
+        let mut child = shell("sleep 0.3; echo late");
+        let ran = run_capped(&mut child, &limits(400), |_| Ok(()));
+        assert!(matches!(ran.ending, Ending::Exited(s) if s.success()), "{:?}", ran.ending);
+        assert_eq!(ran.stdout, b"late\n");
     }
 
     #[test]
