@@ -250,7 +250,7 @@ export function parseShipBody(raw) {
  * `patchId`; nothing is committed and the index is reset), `secret_detected` (the staged diff matched scanForSecrets;
  * nothing is committed and the index is reset), `commit_failed`, `push_rejected` (the local commit stays; a re-ship
  * pushes it). With nothing new to commit it pushes the current HEAD again (the re-ship after a failed push). A commit
- * records its patch id in `factory.patchid.<sha>`, so a re-ship of that exact commit is accepted even when the client's
+ * records its patch id in `factory.patchid-<sha>`, so a re-ship of that exact commit is accepted even when the client's
  * id is the one the user reviewed before the commit existed.
  */
 export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider' }) {

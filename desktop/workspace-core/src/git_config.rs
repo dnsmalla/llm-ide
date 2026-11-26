@@ -59,9 +59,11 @@ fn is_lower_hex(s: &str, len: usize) -> bool {
 
 /// `patchid-<40 or 64 lowercase hex> = <64 lowercase hex>` and nothing else (no quotes, comments or other text).
 fn factory_patch_id_line(line: &str) -> bool {
+    // Only the blanks git itself skips: str::trim would also drop Unicode spaces git keeps.
+    let blank = |c: char| c == ' ' || c == '\t';
     let Some((key, value)) = line.split_once('=') else { return false };
-    let Some(commit) = key.trim().strip_prefix("patchid-") else { return false };
-    (is_lower_hex(commit, 40) || is_lower_hex(commit, 64)) && is_lower_hex(value.trim(), 64)
+    let Some(commit) = key.trim_matches(blank).strip_prefix("patchid-") else { return false };
+    (is_lower_hex(commit, 40) || is_lower_hex(commit, 64)) && is_lower_hex(value.trim_matches(blank), 64)
 }
 
 fn key_ok(k: &str) -> bool {
@@ -289,6 +291,9 @@ mod tests {
             format!("[factory]\n\tpatchid-{sha1} = {sha256} ; x\n"),
             format!("[factory]\n\tpatchid-{sha1} = \"{sha256}\"\n"),
             format!("[factory]\n\tpatchid-{sha1} = !sh -c x\n"),
+            format!("[factory]\n\tpatchid-{sha1}\u{a0}= {sha256}\n"),
+            format!("[factory]\n\tpatchid-{sha1} = {sha256}\u{3000}\n"),
+            format!("[factory]\n\tpatchid-{sha1} = {sha256}\u{b}\n"),
         ] {
             assert!(check_config(bad.as_bytes()).is_err(), "{bad:?}");
         }
