@@ -1,15 +1,14 @@
 // Welcome → Connect to SSH server: the dialog over the Welcome page. It is the same SSH form as Settings, in a modal,
-// plus the switch step that appears once the connection works while the app is not yet working on the server.
-// The password lives in this dialog's state only: closing the dialog unmounts it, and the password goes with it.
+// with ONE Connect button (check, install and start, connect, switch). The switch restarts the app, so it asks first
+// only when Loop work is running on this computer; otherwise it just switches.
+// The typed password lives in this dialog's state only: closing the dialog unmounts it, and the password goes with it.
+// A password the user chose to remember is in the Keychain, and only the host ever reads it.
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import "../settings/settings.css";
 import { Button, ErrorText } from "@llmide/ui-kit";
 import { SshServerForm } from "../settings/sections/SshServerForm.tsx";
 import { sshServerErrorText, type SshServerModel, type SshServerState } from "../settings/ssh-server-model.ts";
-import { escapeTarget, switchQuestion } from "./ssh-recent.ts";
-
-/** Here the password is dropped when the dialog closes, so the Settings hint ("kept until you quit") would be wrong. */
-const DIALOG_PASSWORD_HINT = "Used only for this connection. It is never saved.";
+import { escapeTarget, switchDecision, switchQuestion } from "./ssh-recent.ts";
 
 export interface SwitchStepProps {
   host: string;
@@ -28,14 +27,17 @@ export interface SwitchStepProps {
 }
 
 /**
- * The switch step: a button, then the confirmation. Connect has already saved the server (not the mode). Only the
- * confirmation's Switch saves the SSH mode and restarts the app; Cancel saves nothing, so the next start stays local.
+ * The switch step. Connect has already saved the server (not the mode). With no Loop work running the dialog switches
+ * by itself and this shows only the restart; with work running it shows the confirmation. Cancel saves nothing, so the
+ * next start stays local. The "Switch" button is the way back after a failed automatic switch.
  */
 export function SwitchStep({ host, confirming, switching, switchError, onAsk, onCancel, onSwitch, askRef, confirmRef }: SwitchStepProps): ReactNode {
   return (
     <div className="st-note" role="status">
       <p className="st-ok">The connection works. Switch to this server to work on it in the app.</p>
-      {confirming ? (
+      {switching && !confirming ? (
+        <p className="st-hint" role="status">Restarting the app onto {host}…</p>
+      ) : confirming ? (
         <div ref={confirmRef ?? undefined} tabIndex={-1} className="st-note" role="alertdialog" aria-label="Switch to this server">
           <p>{switchQuestion(host)}</p>
           <div className="st-row">
@@ -71,6 +73,8 @@ export interface SshConnectDialogViewProps {
   onSwitch: () => void;
   onClose: () => void;
   onConnected: () => void;
+  /** The server is saved and connected but the app must restart to use it: the wrapper switches or asks. */
+  onRestartRequired: () => void;
   /** Escape: the wrapper decides whether it closes the switch confirmation or the dialog. */
   onEscape: () => void;
   cardRef: RefObject<HTMLDivElement | null> | null;
@@ -79,7 +83,7 @@ export interface SshConnectDialogViewProps {
 }
 
 export function SshConnectDialogView(p: SshConnectDialogViewProps): ReactNode {
-  // While the switch is offered, Test and Connect are off: a second connect would start under the question.
+  // While the switch is offered, Connect is off: a second connect would start under the question.
   const restart = p.s.status?.link === "restart_required";
   const host = (p.s.status?.host || p.s.host).trim();
   return (
@@ -114,7 +118,7 @@ export function SshConnectDialogView(p: SshConnectDialogViewProps): ReactNode {
             readOnly={p.readOnly}
             focusPassword={p.passwordOnly}
             onConnected={p.onConnected}
-            passwordHint={DIALOG_PASSWORD_HINT}
+            onRestartRequired={p.onRestartRequired}
             disableActions={restart}
           />
           {restart ? (
@@ -145,14 +149,21 @@ export interface SshConnectDialogProps {
   passwordOnly: boolean;
   onClose: () => void;
   onConnected: () => void;
-  /** Saves the SSH mode and restarts the app to work on the server. Called only after the user confirms the switch. */
+  /** Saves the SSH mode and restarts the app to work on the server. Called after Connect, or after the user confirms. */
   onSwitch: () => Promise<void>;
+  /**
+   * True when Loop work is running on this computer, so the restart must ask first. Without a signal the dialog
+   * asks, because a silent restart would end that work.
+   */
+  hasLiveWork?: () => boolean;
+  /** Open with the switch question already shown (the connect that led here found work running). */
+  askSwitch?: boolean;
 }
 
-export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onSwitch }: SshConnectDialogProps): ReactNode {
+export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onSwitch, hasLiveWork = () => true, askSwitch = false }: SshConnectDialogProps): ReactNode {
   const [password, setPassword] = useState("");
   const [readOnly, setReadOnly] = useState(passwordOnly);
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState(askSwitch);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -201,6 +212,11 @@ export function SshConnectDialog({ m, s, passwordOnly, onClose, onConnected, onS
       onSwitch={() => void doSwitch()}
       onClose={onClose}
       onConnected={onConnected}
+      onRestartRequired={() => {
+        // The restart ends work running here, so it asks only then; otherwise Connect already was the user's answer.
+        if (switchDecision(hasLiveWork()) === "ask") setConfirming(true);
+        else void doSwitch();
+      }}
       onEscape={() => {
         // A switch that is running finishes on its own: Escape must not take its confirmation away mid-restart.
         if (switching) return;

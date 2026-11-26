@@ -29,8 +29,8 @@ const plain = (html) => html.replace(/<!-- -->/g, "").replaceAll("&#x27;", "'").
 const TRUSTED = { hostKeyType: "ssh-ed25519", fingerprint: "SHA256:AAAA1111bbbbCCCC2222dddd3333eeee4444ffff", trusted: true, changed: false, os: "Linux", arch: "x86_64", freeMb: 20480, installedVersion: null, claude: "missing", glibc: null };
 const UNKNOWN = { ...TRUSTED, trusted: false, os: null, arch: null, freeMb: null, claude: null };
 const CHANGED = { ...UNKNOWN, changed: true };
-const KEY = { host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/me/.ssh/id_ed25519", auth: "key", lastUsed: 1700000000000 };
-const PASSWORD = { host: "pw.example.com", port: 2222, user: "ops", keyPath: "", auth: "password", lastUsed: 1699000000000 };
+const KEY = { host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/me/.ssh/id_ed25519", auth: "key", lastUsed: 1700000000000, passwordSaved: false };
+const PASSWORD = { host: "pw.example.com", port: 2222, user: "ops", keyPath: "", auth: "password", lastUsed: 1699000000000, passwordSaved: false };
 const status = (link, extra = {}) => ({ link, host: "server.example.com", port: 22, user: "deploy", localUrl: "http://127.0.0.1:3456", version: "1.2.3", claude: "2.0.0", error: null, ...extra });
 const SWITCH_SENTENCE = "The app restarts and works on server.example.com. Running Loop or agent work on this computer stops.";
 const FORGET_SENTENCE = "Forget deploy@server.example.com? Its saved host key is removed too.";
@@ -272,7 +272,7 @@ test("the dialog's form is the shared SSH form, with the same fields as Settings
   const m = new model.SshServerModel(fakeIo());
   const html = renderToStaticMarkup(h(dialog.SshConnectDialogView, dialogProps(m)));
   assert.match(html, /Sign in with/);
-  assert.match(html, />Test</);
+  assert.doesNotMatch(html, />Test</, "one Connect, no separate Test");
   assert.match(html, />Connect</);
   assert.equal(typeof form.SshServerForm, "function");
 });
@@ -320,33 +320,32 @@ test("the switch step's two containers are focus targets, so focus survives the 
   assert.match(confirm, /tabindex="-1"[^>]*role="alertdialog"/, "the confirmation container can take focus");
 });
 
-test("while the switch is offered, Test and Connect are disabled; otherwise they are not", () => {
+test("while the switch is offered, Connect is disabled; otherwise it is not", () => {
   const m = new model.SshServerModel(fakeIo());
   m.loadFrom(KEY);
   const saved = { ...m.getState(), status: status("restart_required") };
   const offered = renderToStaticMarkup(h(dialog.SshConnectDialogView, { ...dialogProps(m), s: saved }));
-  assert.match(offered, /<button[^>]*disabled=""[^>]*>Test</, "Test is off under the switch");
   assert.match(offered, /<button[^>]*disabled=""[^>]*>Connect</, "Connect is off under the switch");
   // With a trusted host key and no switch offered, Connect is on: only the restart answer turns it off.
   const trusted = { ...m.getState(), test: TRUSTED };
   const plainHtml = renderToStaticMarkup(h(dialog.SshConnectDialogView, { ...dialogProps(m), s: trusted }));
-  assert.doesNotMatch(plainHtml, /disabled=""[^>]*>Test</);
   assert.doesNotMatch(plainHtml, /disabled=""[^>]*>Connect</);
 });
 
-test("the Welcome dialog's password hint says the password is used only for this connection", () => {
+test("the password hint is the same in the dialog and in Settings, and says what the checkbox does", () => {
   const m = new model.SshServerModel(fakeIo());
   m.setAuth("password");
-  const html = plain(renderToStaticMarkup(h(dialog.SshConnectDialogView, dialogProps(m))));
-  assert.match(html, /Used only for this connection\. It is never saved\./);
-  assert.doesNotMatch(html, /Kept only until you quit/);
-});
-
-test("the Settings form keeps its own password hint", () => {
-  const m = new model.SshServerModel(fakeIo());
-  m.setAuth("password");
-  const html = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: m.getState(), password: "", onPassword() {} })));
-  assert.match(html, /Kept only until you quit the app\. It is never saved\./);
+  const dialogHtml = plain(renderToStaticMarkup(h(dialog.SshConnectDialogView, dialogProps(m))));
+  const formHtml = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: m.getState(), password: "", onPassword() {} })));
+  for (const html of [dialogHtml, formHtml]) {
+    assert.match(html, /Used for this connection only\. It is not saved unless you tick the box below\./);
+    assert.match(html, /Remember password in Keychain/);
+    assert.doesNotMatch(html, /It is never saved|Kept only until you quit/, "the old, inaccurate hints are gone");
+  }
+  m.setRemember(true);
+  const saved = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: m.getState(), password: "", onPassword() {} })));
+  assert.match(saved, /Saved in the Keychain on this computer after a good sign-in\. App files never hold it\./);
+  assert.match(saved, /<input[^>]*type="checkbox"[^>]*checked=""|<input[^>]*checked=""[^>]*type="checkbox"/);
 });
 
 test("the recent list sits inside the card, under the Connect… button", () => {
@@ -359,4 +358,91 @@ test("the Welcome page has one connect card: the Remote hosts card is gone", () 
   const html = plain(renderToStaticMarkup(h(welcome.WelcomeScreen, { project: null, recent: { entries: [], reset: false }, error: null, actions, ssh: { io: fakeIo(), switchToServer: async () => undefined } })));
   assert.doesNotMatch(html, /Remote hosts/);
   assert.equal((html.match(/wc-ssh-card/g) ?? []).length, 1);
+});
+
+// ---- one Connect, take over, remembered password --------------------------------------------------------------------
+
+test("the restart asks only when Loop work is running; with nothing running Connect was the answer", () => {
+  assert.equal(recent.switchDecision(true), "ask");
+  assert.equal(recent.switchDecision(false), "switch");
+});
+
+test("the dialog's switch step shows the restart, not a second button, while an automatic switch runs", () => {
+  const html = plain(renderToStaticMarkup(h(dialog.SwitchStep, { host: "server.example.com", confirming: false, switching: true, switchError: null, onAsk() {}, onCancel() {}, onSwitch() {} })));
+  assert.match(html, /Restarting the app onto server\.example\.com…/);
+  assert.doesNotMatch(html, /Switch to this server now/);
+  const failed = plain(renderToStaticMarkup(h(dialog.SwitchStep, { host: "server.example.com", confirming: false, switching: false, switchError: "The switch failed.", onAsk() {}, onCancel() {}, onSwitch() {} })));
+  assert.match(failed, /Switch to this server now/, "after a failed automatic switch the button is the way back");
+  assert.match(failed, /The switch failed\./);
+});
+
+test("a password server with a password in the Keychain connects from the list in one click, sending no password", async () => {
+  const calls = [];
+  const saved = { ...PASSWORD, passwordSaved: true };
+  const m = new model.SshServerModel(fakeIo({
+    test: async (target, password, options) => { calls.push(["test", password, options]); return TRUSTED; },
+    connect: async (target, password, options) => { calls.push(["connect", password, options]); return status("connected"); },
+  }));
+  assert.equal(await recent.connectRecentServer(m, saved), "connected");
+  assert.deepEqual(calls, [["test", undefined, { useSaved: true, remember: true }], ["connect", undefined, { useSaved: true, remember: true }]]);
+});
+
+test("a password server without a stored password still opens the dialog for it", async () => {
+  const m = new model.SshServerModel(fakeIo());
+  assert.equal(await recent.connectRecentServer(m, PASSWORD), "dialog");
+});
+
+test("a remembered password the server now refuses opens the dialog, so the user can type the new one", async () => {
+  const m = new model.SshServerModel(fakeIo({ test: async () => { throw { code: "SSH_AUTH_FAILED", message: "" }; } }));
+  assert.equal(await recent.connectRecentServer(m, { ...PASSWORD, passwordSaved: true }), "dialog");
+  assert.equal(m.getState().error, "The server refused this login.");
+});
+
+test("a server part left running by an earlier session opens the dialog with the take-over question", async () => {
+  const m = new model.SshServerModel(fakeIo({ test: async () => TRUSTED, connect: async () => { throw { code: "SSH_CORE_FOREIGN", message: "" }; } }));
+  assert.equal(await recent.connectRecentServer(m, KEY), "dialog");
+  assert.equal(m.getState().foreign, "connect");
+  const html = plain(renderToStaticMarkup(h(dialog.SshConnectDialogView, dialogProps(m))));
+  assert.match(html, /A server part from an earlier session is still running on this account \(another computer, or this one before its app data was reset\)\. Taking over stops it; any work running in it ends\./);
+  assert.match(html, />Take over</);
+  assert.match(html, />Cancel</);
+});
+
+test("the take-over button repeats Connect with the flag", async () => {
+  const connects = [];
+  const m = new model.SshServerModel(fakeIo({
+    test: async () => TRUSTED,
+    connect: async (target, password, options) => { connects.push(options); if (connects.length === 1) throw { code: "SSH_CORE_FOREIGN", message: "" }; return status("connected"); },
+  }));
+  m.loadFrom(KEY);
+  await m.connectWithTest();
+  const view = dialog.SshConnectDialogView(dialogProps(m));
+  const formNode = findNode(view, (n) => n.type?.name === "SshServerForm");
+  assert.ok(formNode, "the shared form is in the dialog");
+  const rendered = formNode.type(formNode.props);
+  // The prompt is its own component: its handlers are props on the element.
+  const prompt = findNode(rendered, (n) => typeof n.props.onTakeOver === "function");
+  assert.ok(prompt, "Take over is offered");
+  await prompt.props.onTakeOver();
+  assert.deepEqual(connects.map((o) => o?.takeOver), [undefined, true]);
+});
+
+test("the dialog shows the check step, the facts as soon as the probe returns, and then the setup step", () => {
+  const m = new model.SshServerModel(fakeIo());
+  m.loadFrom(KEY);
+  const checking = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: { ...m.getState(), busy: "test" }, password: "", onPassword() {} })));
+  assert.match(checking, /Checking the server…/);
+  const installing = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: { ...m.getState(), busy: "connect", test: TRUSTED }, password: "", onPassword() {} })));
+  assert.match(installing, /Linux x86_64/, "the facts box is on screen while the server part is set up");
+  assert.match(installing, /Installing the server part, starting it and connecting…/);
+  const updating = plain(renderToStaticMarkup(h(form.SshServerForm, { m, s: { ...m.getState(), busy: "connect", test: { ...TRUSTED, installedVersion: "1.0.0" } }, password: "", onPassword() {} })));
+  assert.match(updating, /Updating the server part if needed, starting it and connecting…/);
+});
+
+test("the recent list marks a login whose password is in the Keychain", () => {
+  const html = plain(renderToStaticMarkup(h(list.RecentSshServersView, {
+    servers: [{ ...PASSWORD, passwordSaved: true }], busy: false, message: null, menuKey: null, forgetKey: null, forgetError: null,
+    onToggleMenu() {}, onAskForget() {}, onCancelForget() {}, onForget() {}, onEdit() {}, onConnect() {},
+  })));
+  assert.match(html, /Password \(in Keychain\)/);
 });

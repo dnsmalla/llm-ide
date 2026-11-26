@@ -90,16 +90,22 @@ test("password field appears only for Password auth and has type=\"password\" an
   const html = renderToStaticMarkup(VIEW(passwordAuth));
   assert.match(html, /<input[^>]*type="password"[^>]*>/);
   assert.match(html, /<input[^>]*type="password"[^>]*autocomplete="off"|<input[^>]*autocomplete="off"[^>]*type="password"/i);
-  assert.match(plain(html), /Kept only until you quit the app\. It is never saved\./);
+  assert.match(plain(html), /Used for this connection only\. It is not saved unless you tick the box below\./);
+  assert.match(html, /<input[^>]*type="checkbox"/, "the Keychain checkbox sits under the password");
+  assert.match(plain(html), /Remember password in Keychain/);
+  assert.doesNotMatch(plain(renderToStaticMarkup(VIEW(keyAuth))), /Remember password in Keychain/, "a key login has no such checkbox");
 });
 
-test("Connect is disabled until the fingerprint is confirmed", async () => {
+test("there is one Connect and no Test button; a password login needs a password or a stored one", async () => {
   const untested = await model({ test: async () => UNKNOWN });
-  assert.match(renderToStaticMarkup(VIEW(untested)), /<button[^>]*disabled=""[^>]*>Connect</);
-  const pending = await model({ test: async () => UNKNOWN }, async (x) => { await x.test(); });
-  assert.match(renderToStaticMarkup(VIEW(pending)), /<button[^>]*disabled=""[^>]*>Connect</, "an untrusted key keeps Connect disabled");
-  const trusted = await model({ test: async () => TRUSTED }, async (x) => { await x.test(); });
-  assert.doesNotMatch(renderToStaticMarkup(VIEW(trusted)), /<button[^>]*disabled=""[^>]*>Connect</);
+  const html = renderToStaticMarkup(VIEW(untested));
+  assert.doesNotMatch(html, />Test</, "the separate Test button is gone");
+  assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*>Connect</, "a key login can connect at once: Connect checks the server itself");
+  const noPassword = await model({}, async (x) => { x.setAuth("password"); });
+  assert.match(renderToStaticMarkup(VIEW(noPassword)), /<button[^>]*disabled=""[^>]*>Connect</, "a typed or stored password is needed");
+  assert.doesNotMatch(renderToStaticMarkup(PASSWORD(noPassword)), /<button[^>]*disabled=""[^>]*>Connect</);
+  noPassword.loadFrom({ host: "server.example.com", port: 22, user: "deploy", keyPath: "", auth: "password", lastUsed: 1, passwordSaved: true });
+  assert.doesNotMatch(renderToStaticMarkup(VIEW(noPassword)), /<button[^>]*disabled=""[^>]*>Connect</, "a password in the Keychain is enough");
 });
 
 test("the fingerprint prompt and Trust this key show for an untrusted key", async () => {

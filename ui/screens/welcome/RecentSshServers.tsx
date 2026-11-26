@@ -40,7 +40,7 @@ export function RecentSshServersView(p: RecentSshServersViewProps): ReactNode {
             <li key={key} className="wc-ssh-row" data-auth={e.auth}>
               <div className="wc-ssh-row-main">
                 <span className="wc-ssh-name">{key}</span>
-                <span className="wc-ssh-auth">{e.auth === "key" ? "Key file" : "Password"}</span>
+                <span className="wc-ssh-auth">{e.auth === "key" ? "Key file" : e.passwordSaved ? "Password (in Keychain)" : "Password"}</span>
               </div>
               <div className="wc-ssh-row-actions">
                 <button type="button" className="sh-button sh-button-primary" disabled={p.busy} onClick={() => p.onConnect(e)}>Connect</button>
