@@ -6,6 +6,7 @@ import {
   type HostApiCapability, type HostApiCommandName, type HostApiErrorCode, type HostApiEventMap, type HostApiEventName,
   type HostApiRequest, type HostApiResult,
 } from "./types.generated.ts";
+import { isRecord } from "../../../ui/kit/src/decode.ts";
 
 export type ConnectionState =
   | { kind: "idle" }
@@ -102,7 +103,6 @@ export const defaultBackoff = (attempt: number) => Math.min(30_000, 500 * 2 ** a
 const EVENTS = new Set<string>(HOST_API_EVENT_NAMES);
 const CAPS = new Set<string>(HOST_API_CAPABILITIES);
 const CODES = new Set<string>(HOST_API_ERROR_CODES);
-const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const unreachable = (m: string) => new HostApiError("host_unreachable", m, true);
 const refused = (e: HostApiError): { id: string; done: Promise<never> } => {
   const done = Promise.reject(e);
@@ -383,7 +383,7 @@ export class HostConnection implements HostLink {
     if (typeof data !== "string" || data.length > HOST_API_LIMITS.maxFrameBytes) return;
     let f: unknown;
     try { f = JSON.parse(data); } catch { return; }
-    if (!isObj(f) || f.apiVersion !== HOST_API_VERSION) return;
+    if (!isRecord(f) || f.apiVersion !== HOST_API_VERSION) return;
     const rev = Number.isInteger(f.rev) && (f.rev as number) >= 0 ? (f.rev as number) : null;
     const replyTo = typeof f.replyTo === "string" ? f.replyTo : null;
     if (f.type === "response" || f.type === "error") {
@@ -393,10 +393,10 @@ export class HostConnection implements HostLink {
       this.#pending.delete(replyTo);
       this.#o.clearTimer(p.timer);
       if (f.type === "response") {
-        return isObj(f.result) ? p.resolve(f.result as never) : p.reject(new HostApiError("internal", "The host sent an unreadable reply."));
+        return isRecord(f.result) ? p.resolve(f.result as never) : p.reject(new HostApiError("internal", "The host sent an unreadable reply."));
       }
-      const e = isObj(f.error) ? f.error : {};
-      const d = isObj(e.details) ? e.details : {};
+      const e = isRecord(f.error) ? f.error : {};
+      const d = isRecord(e.details) ? e.details : {};
       return p.reject(new HostApiError(
         CODES.has(e.code as string) ? (e.code as HostApiErrorCode) : "internal",
         typeof e.message === "string" && e.message ? e.message.slice(0, 500) : "The host refused the request.",
@@ -404,7 +404,7 @@ export class HostConnection implements HostLink {
         Number.isInteger(d.retryAfterMs) ? (d.retryAfterMs as number) : null,
       ));
     }
-    if (f.type !== "event" || typeof f.command !== "string" || !EVENTS.has(f.command) || !isObj(f.payload) || rev === null) return;
+    if (f.type !== "event" || typeof f.command !== "string" || !EVENTS.has(f.command) || !isRecord(f.payload) || rev === null) return;
     const gap = this.#rev >= 0 && rev > this.#rev + 1;
     this.#rev = Math.max(this.#rev, rev);
     if (f.command === "host.capabilities" && Array.isArray(f.payload.capabilities)) this.#caps = this.#known(f.payload.capabilities);

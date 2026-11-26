@@ -45,7 +45,7 @@ function sources(dir) {
   return out;
 }
 
-const files = ["ui/screens", "ui/kit/src", "desktop/src"].flatMap((dir) => sources(join(REPO, dir)).map((f) => ({ rel: relative(REPO, f), text: readFileSync(f, "utf8") })));
+const files = ["ui/screens", "ui/kit/src", "desktop/src", "web/src"].flatMap((dir) => sources(join(REPO, dir)).map((f) => ({ rel: relative(REPO, f), text: readFileSync(f, "utf8") })));
 
 test("the scan finds the source trees", () => {
   assert.ok(files.length > 200, `only ${files.length} files scanned`);
