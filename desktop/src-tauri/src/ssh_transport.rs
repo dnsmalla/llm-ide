@@ -110,9 +110,15 @@ impl ArgvStyle {
     pub(crate) const SERVER: ArgvStyle = ArgvStyle { tty: false, verbose: false, keepalive: true };
 }
 
-/// The one hardened exec argv. `command` may be a runtime string for the hub deploy stages; those are fixed
-/// constants too (see `remote_deploy`), never webview text.
-pub(crate) fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &str, style: ArgvStyle) -> Vec<String> {
+/// The hub's argv: the same hardened options, with a runtime `command` string for the hub deploy stages (fixed
+/// constants too, see `remote_deploy`, never webview text). Only `remote::ssh_args_known` calls this; every
+/// server-mode caller goes through `exec_args` / `exec_args_tty`, which take a `&'static str`.
+pub(crate) fn hub_exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &str, style: ArgvStyle) -> Vec<String> {
+    exec_args_with(ep, known_hosts, strict, command, style)
+}
+
+/// The one hardened exec argv. Private: the public entry points fix the command's lifetime to `'static`.
+fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &str, style: ArgvStyle) -> Vec<String> {
     // `-v` only where the caller parses ssh's debug output; otherwise it would just add noise to stderr.
     let mut args = Vec::new();
     if style.verbose {
