@@ -28,13 +28,14 @@ impl std::fmt::Debug for StoredSession {
     }
 }
 
+/// The same URL shape `remote_tls` accepts (https://host[:port], no path, query, user info or whitespace).
 fn valid_hub(hub: &str) -> bool {
-    hub.starts_with("https://") && hub.len() <= 300 && !hub.contains('@') && !hub.contains(['\r', '\n', ' ', '\t'])
+    hub.len() <= 300 && crate::remote_tls::split_hub(hub).is_ok()
 }
 
 /// Empty = ordinary WebPKI trust (the common public-domain case). Anything else must be a real pin.
 fn valid_pin(pin: &str) -> bool {
-    pin.is_empty() || (pin.len() == 50 && pin.starts_with("sha256:") && pin[7..].chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    pin.is_empty() || crate::remote_tls::valid_pin(pin)
 }
 
 fn valid_refresh(token: &str) -> bool {
