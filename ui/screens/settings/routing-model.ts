@@ -38,7 +38,8 @@ export function visibleRoles(l: { featureStatus?: Record<string, unknown> } | nu
 
 /** The text of a role's empty option. */
 export function roleEmptyOptionLabel(role: string): string {
-  if (role === "plan") return "Follows Loop and Factory";
+  // Plan is not preselected (saving must not pin it), but unset it still runs on the built-in Standard default.
+  if (role === "plan") return "Default (built-in)";
   return PRESELECT_ROLES.includes(role) ? "Default (built-in)" : "Default";
 }
 

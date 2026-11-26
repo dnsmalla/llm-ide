@@ -228,8 +228,7 @@ test("validateDraft: a role on an unset tier is named with labels and the way ou
 });
 
 test("roles: the empty option says Default (built-in), Decision keeps Default", () => {
-  for (const role of ["subagents", "internal", "loop", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
-  assert.equal(roleEmptyOptionLabel("plan"), "Follows Loop and Factory");
+  for (const role of ["subagents", "internal", "loop", "autoTasks", "plan"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
   assert.equal(roleEmptyOptionLabel("decisions"), "Default");
 });
 

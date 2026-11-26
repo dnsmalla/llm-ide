@@ -363,7 +363,7 @@ test('tierRoutingStatus: featureStatus carries the tier\'s own reason for an unu
     loop: { usable: false, reason: 'no_key', tier: 'cheap' },
     subagents: { usable: false, reason: 'unset' },
     autoTasks: { usable: false, reason: 'unset', tier: 'standard' },
-    plan: { usable: false, reason: 'no_key', tier: 'cheap' },   // unset plan follows loop
+    plan: { usable: false, reason: 'unset', tier: 'standard' },
   });
 });
 
@@ -1057,7 +1057,7 @@ test('the decisions feature may use an ordinary LLM tier (other providers unchan
   });
 });
 
-test('resolveAgentRoute: plan has its own tier; unset plan follows the loop role; explicit plan wins', () => {
+test('resolveAgentRoute: plan has its own tier; unset plan takes Standard even when loop is cheap', () => {
   const userId = freshUser();
   syncTierRouting({
     tiers: {
@@ -1067,14 +1067,8 @@ test('resolveAgentRoute: plan has its own tier; unset plan follows the loop role
     },
     features: { loop: 'cheap' },
   }, userId);
-  // Unset plan inherits loop (cheap), not Standard.
-  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-haiku-5-5', tier: 'cheap' });
-  assert.deepEqual(tierRoutingStatus(userId).featureStatus.plan, { usable: true, tier: 'cheap' });
-  syncTierRouting({ ...getTierRoutingConfig(userId), features: { loop: 'strong' } }, userId);
-  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-opus-5-5', tier: 'strong' });
-  assert.deepEqual(tierRoutingStatus(userId).featureStatus.plan, { usable: true, tier: 'strong' });
-  syncTierRouting({ ...getTierRoutingConfig(userId), features: { loop: 'strong', plan: 'cheap' } }, userId);
-  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-haiku-5-5', tier: 'cheap' });
+  assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-sonnet-5-5', tier: 'standard' });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.plan, { usable: true, tier: 'standard' });
   syncTierRouting({ ...getTierRoutingConfig(userId), features: { loop: 'cheap', plan: 'strong' } }, userId);
   assert.deepEqual(resolveAgentRoute(userId, 'plan'), { provider: 'anthropic', model: 'claude-opus-5-5', tier: 'strong' });
   assert.deepEqual(resolveAgentRoute(userId, 'loop'), { provider: 'anthropic', model: 'claude-haiku-5-5', tier: 'cheap' });

@@ -219,7 +219,7 @@ export function tierRoutingStatus(userId, db) {
   }
   // Agent roles run on the Claude engine and an unset one takes Standard (resolveAgentRoute): report that.
   for (const feature of AGENT_FEATURES) {
-    const tier = effectiveAgentTier(cfg.features, feature);
+    const tier = cfg.features?.[feature] || AGENT_DEFAULT_TIER;
     const s = status[tier];
     const prior = featureStatus[feature];
     if (!s?.usable) featureStatus[feature] = { usable: false, reason: s?.reason || 'unset', tier };
@@ -280,19 +280,6 @@ export const AGENT_FEATURES = Object.freeze(['loop', 'autoTasks', 'plan']);
 const AGENT_DEFAULT_TIER = 'standard';
 
 /**
- * The tier an AGENT_FEATURES role runs on. An unset `plan` follows the `loop` role (then Standard) — `plan` was added
- * after users had already set Loop, and without this a user who chose Strong for Loop would silently get plan steps on
- * Standard after upgrading. Resolving to the same tier NAME means the same provider/model as loop. An explicit `plan`
- * always wins. Single point shared by resolveAgentRoute and tierRoutingStatus so the UI label matches the real route.
- */
-function effectiveAgentTier(features, feature) {
-  const own = features?.[feature];
-  if (own) return own;
-  if (feature === 'plan' && features?.loop) return features.loop;
-  return AGENT_DEFAULT_TIER;
-}
-
-/**
  * The Agent-engine route for an AGENT_FEATURES role: its tier, else Standard. `{ provider, model, tier }`, or null
  * (→ the engine's own default) when that tier is unset, unusable or cannot run on the Claude engine — warned once
  * per window, so a silent fall back to the SDK default is visible in the log. Never throws.
@@ -301,7 +288,7 @@ export function resolveAgentRoute(userId, feature, db) {
   if (!userId || !AGENT_FEATURES.includes(feature)) return null;
   try {
     db ??= getDb();
-    const tier = effectiveAgentTier(getTierRoutingConfig(userId, db).features, feature);
+    const tier = getTierRoutingConfig(userId, db).features[feature] || AGENT_DEFAULT_TIER;
     const hit = checkTier(userId, tier, db);
     if (!hit) return null;
     const reason = featureReason(feature, hit.route, hit.via) || agentUnusableReason(hit.route, userId, db);
