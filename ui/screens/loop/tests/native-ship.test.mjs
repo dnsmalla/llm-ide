@@ -110,6 +110,10 @@ test("shipState maps secret_detected to a secret message that contains no diff t
   assert.doesNotMatch(m.shipCopy({ ...secret, rule: "x", file: "/etc/passwd" }), /\/etc\/passwd/, "an absolute path is not echoed");
   assert.equal(m.shipState({ ok: false, code: "push_rejected" }), "rejected");
   assert.match(m.shipCopy({ ok: false, code: "push_rejected", message: "remote: secret hook said no" }), /No pull request or merge request was opened/);
+  assert.equal(m.shipState({ ok: false, code: "push_auth_failed" }), "auth");
+  const authCopy = m.shipCopy({ ok: false, code: "push_auth_failed", message: "glpat-secret leaked" });
+  assert.match(authCopy, /did not accept the saved token.*write_repository/);
+  assert.doesNotMatch(authCopy, /glpat/);
   assert.equal(m.shipState({ ok: false, code: "provider_error" }), "error");
   assert.equal(m.shipState({ ok: false, code: "invalid_worktree" }), "error");
   assert.equal(m.shipState({ ok: false, code: "diff_changed" }), "changed");

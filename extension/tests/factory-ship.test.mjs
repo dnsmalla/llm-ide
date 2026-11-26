@@ -323,6 +323,75 @@ test('rejected push opens no PR/MR', async () => {
   }
 });
 
+// A git shim first on PATH: records a push's argv and GIT_CONFIG_* env, then either fails with `stderr` or runs real git.
+function pushShim(stderr) {
+  const dir = fs.mkdtempSync(path.join(SANDBOX, 'shim-'));
+  const log = path.join(dir, 'push.json');
+  const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  fs.writeFileSync(path.join(dir, 'git'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const a = process.argv.slice(2);
+if (a.includes('push')) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.startsWith('GIT_CONFIG_')));
+  fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify({ argv: a, env }) + '\\n');
+  ${stderr == null ? '' : `process.stderr.write(${JSON.stringify(stderr)}); process.exit(128);`}
+}
+const r = require('node:child_process').spawnSync(${JSON.stringify(real)}, a, { stdio: 'inherit' });
+process.exit(r.status ?? 1);
+`);
+  fs.chmodSync(path.join(dir, 'git'), 0o755);
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${dir}:${oldPath}`;
+  return { pushes: () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []), restore: () => { process.env.PATH = oldPath; } };
+}
+const b64 = (text) => Buffer.from(text).toString('base64');
+
+test('push authenticates with the saved token via env, never argv, with the credential helper emptied', async () => {
+  for (const [provider, token, scope, user] of [['gitlab', GL_TOKEN, 'https://gitlab.com', 'oauth2'], ['github', GH_TOKEN, 'https://github.com', 'x-access-token']]) {
+    fs.writeFileSync(path.join(WT, 'src', `auth-${provider}.txt`), `${provider}\n`);
+    const shim = pushShim(null);
+    try {
+      const patchId = await stagedPatchId(WT, BASE);
+      await commitAndPush({ worktree: WT, branch: BRANCH, message: `auth ${provider}`, patchId, provider, token });
+      const [push] = shim.pushes();
+      assert.equal(push.env.GIT_CONFIG_COUNT, '1');
+      assert.equal(push.env.GIT_CONFIG_KEY_0, `http.${scope}.extraHeader`, 'scoped to the provider origin only');
+      assert.equal(push.env.GIT_CONFIG_VALUE_0, `Authorization: Basic ${b64(`${user}:${token}`)}`);
+      assert.ok(push.argv.includes('credential.helper='), 'the user keychain helper is emptied');
+      const argv = push.argv.join(' ');
+      assert.equal(argv.includes(token) || argv.includes(b64(`${user}:${token}`)), false, 'no token on the command line');
+    } finally { shim.restore(); }
+  }
+});
+
+test('an authentication failure answers push_auth_failed with fixed text and no token', async () => {
+  const stderrs = ["fatal: could not read Username for 'https://gitlab.com': terminal prompts disabled", 'remote: HTTP Basic: Access denied', 'fatal: Authentication failed for ...', 'fatal: unable to access: The requested URL returned error: 403'];
+  for (const stderr of stderrs) {
+    fs.writeFileSync(path.join(WT, 'src', 'authfail.txt'), `${stderr.length}\n`);
+    const shim = pushShim(`${stderr} ${GL_TOKEN}\n`);
+    const seen = fakeProvider(() => json(201, {}));
+    try {
+      const r = await ship(shipBody({ provider: 'gitlab', repo: 'g/p' }));
+      assert.equal(r.status, 409, r.raw);
+      assert.equal(r.body.error.code, 'push_auth_failed');
+      assert.match(r.body.error.message, /^GitLab did not accept the saved token for the push\. .*write_repository/);
+      assert.equal(r.raw.includes(GL_TOKEN) || r.raw.includes(b64(`oauth2:${GL_TOKEN}`)), false);
+      assert.equal(seen.length, 0, 'no MR call after a failed push');
+    } finally { shim.restore(); _setPinnedFetchForTests(null); }
+  }
+});
+
+test('a protected-branch decline stays push_rejected', async () => {
+  fs.writeFileSync(path.join(WT, 'src', 'protected.txt'), 'p\n');
+  const shim = pushShim(' ! [remote rejected] factory/run1 -> factory/run1 (protected branch hook declined)\n');
+  fakeProvider(() => json(201, {}));
+  try {
+    const r = await ship(shipBody());
+    assert.equal(r.status, 409, r.raw);
+    assert.equal(r.body.error.code, 'push_rejected');
+  } finally { shim.restore(); _setPinnedFetchForTests(null); }
+});
+
 test('ship rejects a worktree outside system/loop-worktrees with invalid_worktree', async () => {
   // A real Loop worktree of the allow-listed repo, but in the old sibling layout.
   const stray = path.join(SANDBOX, '.llmide-loop-worktrees', 'run9');

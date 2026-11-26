@@ -10,7 +10,7 @@ import { isCiHookPath } from "./protected.ts";
 /** The `POST /kb/loop/ship` body. `repo` is the provider slug (owner/name), never a path. */
 export interface ShipBody { worktree: string; branch: string; provider: "github" | "gitlab"; repo: string; base: string; title: string; body: string; patchId: string; allowSecret?: boolean; /** The loop's previous MR, only on the first ship of a branch restarted after it merged. */ mergedMr?: string }
 export type ShipResult = { ok: true; url: string; commit: string; reused: boolean; secretOverride?: { rule: string; file: string | null; line: number | null; hits?: { rule: string; file: string | null; line: number }[]; total?: number } } | { ok: false; code: string; message?: string; rule?: string; file?: string; line?: number; hits?: { rule: string; file: string | null; line: number }[]; total?: number };
-export type ShipState = "shipped" | "secret" | "rejected" | "changed" | "error";
+export type ShipState = "shipped" | "secret" | "rejected" | "auth" | "changed" | "error";
 export interface WorktreeDiff { text: string; truncated: boolean; patchId: string; files: string[]; additions: number; deletions: number }
 export interface DiffFile { path: string; lines: string[] }
 
@@ -95,6 +95,7 @@ export function shipState(result: ShipResult): ShipState {
   if (result.ok) return "shipped";
   if (result.code === "secret_detected") return "secret";
   if (result.code === "push_rejected") return "rejected";
+  if (result.code === "push_auth_failed") return "auth";
   if (result.code === "diff_changed") return "changed";
   return "error";
 }
@@ -123,6 +124,8 @@ export function shipCopy(result: ShipResult): string {
     }
     case "rejected":
       return "The remote rejected the push. No pull request or merge request was opened. Check branch protection and your git credentials, then ship again.";
+    case "auth":
+      return "The provider did not accept the saved token for the push. Save a token with write access (GitLab: write_repository; GitHub: repo contents write) in Settings, then ship again.";
     case "changed":
       return "The changes changed since you opened this review. Read the new diff, then ship again.";
     default: {

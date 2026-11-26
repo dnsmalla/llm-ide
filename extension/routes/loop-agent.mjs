@@ -446,7 +446,7 @@ async function handleSyncBase(req, res, { userId } = {}, deps = {}) {
 // refused scan or push never opens a PR/MR. A second ship reuses the open PR/MR.
 const SHIP_BODY_LIMIT = 64 * 1024;
 const SHIP_STATUS = Object.freeze({
-  invalid_worktree: 400, diff_changed: 409, secret_detected: 422, push_rejected: 409, commit_failed: 500, provider_error: 502, fetch_failed: 502, lease_rejected: 409,
+  invalid_worktree: 400, diff_changed: 409, secret_detected: 422, push_rejected: 409, push_auth_failed: 409, commit_failed: 500, provider_error: 502, fetch_failed: 502, lease_rejected: 409,
 });
 const SHIP_PROVIDER_NAME = Object.freeze({ github: 'GitHub', gitlab: 'GitLab' });
 
@@ -493,7 +493,7 @@ async function handleLoopShip(req, res, { userId } = {}, deps = {}) {
     // Only when the caller names the loop's previous MR AND the provider itself says it merged from this branch, the first
     // push of the restarted branch may replace that merged head (and only that head); otherwise it is fast-forward only.
     const leaseSha = v.mergedMr && v.branch.startsWith('loop/') ? await (deps.mergedHeadOf ?? mergedHeadOf)(v.provider, v.repo, v.branch, v.mergedMr, token) : null;
-    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret, leaseSha, providerName: SHIP_PROVIDER_NAME[v.provider] }));
+    ({ commit, secretOverride } = await commitAndPush({ worktree: rootCheck.root, branch: v.branch, message: v.title, patchId: v.patchId, allowSecret: v.allowSecret, leaseSha, providerName: SHIP_PROVIDER_NAME[v.provider], provider: v.provider, token }));
   } catch (err) {
     const known = Object.hasOwn(SHIP_STATUS, err?.code);
     return shipFail(res, known ? SHIP_STATUS[err.code] : 500, known ? err.code : 'commit_failed', known ? err.message : 'The commit could not be made.', err?.details ? { details: err.details } : null);

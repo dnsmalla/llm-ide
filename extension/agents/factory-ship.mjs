@@ -70,6 +70,23 @@ function gitEnv(extra = {}) {
 // repo-relative hooks folder (for example `core.hooksPath=.husky`), and a hook would then run agent-written code
 // inside the core process at Ship time. `-c` options go before the subcommand.
 const SAFE_GIT_CONFIG = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false'];
+// The push authenticates with the saved token only: an emptied helper keeps git from reading or writing the user's keychain.
+const PUSH_GIT_CONFIG = [...SAFE_GIT_CONFIG, '-c', 'credential.helper='];
+
+// Mirrors desktop/workspace-core/src/project/clone.rs auth_config. The header travels in GIT_CONFIG_* env (never argv)
+// and is scoped to the provider's own https origin, so an ssh or other-host origin never receives it.
+function pushAuthEnv(provider, token) {
+  const secret = typeof token === 'string' ? token.trim() : '';
+  if (!secret || !Object.hasOwn(API, provider)) return {};
+  const user = provider === 'gitlab' ? 'oauth2' : 'x-access-token';
+  return {
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: `http.https://${API[provider].host.replace(/^api\./, '')}.extraHeader`,
+    GIT_CONFIG_VALUE_0: `Authorization: Basic ${Buffer.from(`${user}:${secret}`).toString('base64')}`,
+  };
+}
+
+const PUSH_AUTH_RE = /could not read username|authentication failed|http basic: access denied|requested url returned error: 40[13]|terminal prompts disabled|invalid username or password|permission to .* denied|denied to /i;
 
 // The host's `git::base_args()` (desktop/src-tauri/src/git.rs) for the one call whose BYTES are hashed into the
 // patch id: a config difference (quotepath, an external diff driver, submodule settings, attributes) would change
@@ -248,12 +265,12 @@ export function parseShipBody(raw) {
  *
  * Throws `{ code }`: `invalid_worktree` (not on `branch`), `diff_changed` (the staged patch id is not the reviewed
  * `patchId`; nothing is committed and the index is reset), `secret_detected` (the staged diff matched scanForSecrets;
- * nothing is committed and the index is reset), `commit_failed`, `push_rejected` (the local commit stays; a re-ship
+ * nothing is committed and the index is reset), `commit_failed`, `push_auth_failed` (the token was not accepted), `push_rejected` (the local commit stays; a re-ship
  * pushes it). With nothing new to commit it pushes the current HEAD again (the re-ship after a failed push). A commit
  * records its patch id in `factory.patchid-<sha>`, so a re-ship of that exact commit is accepted even when the client's
  * id is the one the user reviewed before the commit existed.
  */
-export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider' }) {
+export async function commitAndPush({ worktree, branch, message, author = null, patchId, allowSecret = false, leaseSha = null, providerName = 'the provider', provider = null, token = null }) {
   if (typeof branch !== 'string' || !FACTORY_BRANCH_RE.test(branch)) {
     throw shipError('invalid_worktree', 'The branch must be factory/<run id> or loop/<loop>.');
   }
@@ -328,7 +345,8 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   // Remember which diff this commit is, before the push: a rejected push keeps the commit, and its re-ship must
   // recognise the reviewed id instead of refusing it as stale.
   await runGit(worktree, ['config', `factory.patchid-${sha}`, current]);
-  let push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], { timeoutMs: PUSH_TIMEOUT_MS });
+  const pushOpts = { timeoutMs: PUSH_TIMEOUT_MS, config: PUSH_GIT_CONFIG, env: pushAuthEnv(provider, token) };
+  let push = await runGit(worktree, ['push', '--no-verify', '-u', 'origin', branch], pushOpts);
   // Every push is fast-forward only, except the first one of a branch restarted after the provider confirmed that its
   // previous MR merged (a squash or rebase merge leaves the old head on the remote, which a fresh branch cannot
   // fast-forward). That retry replaces the remote tip only if it is still exactly the merged head: any other commit
@@ -336,9 +354,13 @@ export async function commitAndPush({ worktree, branch, message, author = null, 
   let leaseTried = false;
   if (push.code !== 0 && typeof leaseSha === 'string' && /^[0-9a-f]{40,64}$/.test(leaseSha)) {
     leaseTried = true;
-    push = await runGit(worktree, ['push', '--no-verify', '-u', `--force-with-lease=refs/heads/${branch}:${leaseSha}`, 'origin', `refs/heads/${branch}:refs/heads/${branch}`], { timeoutMs: PUSH_TIMEOUT_MS });
+    push = await runGit(worktree, ['push', '--no-verify', '-u', `--force-with-lease=refs/heads/${branch}:${leaseSha}`, 'origin', `refs/heads/${branch}:refs/heads/${branch}`], pushOpts);
   }
   if (push.code !== 0 && leaseTried) throw shipError('lease_rejected', `The branch on ${providerName} has commits that are not from the merged MR; nothing was overwritten.`);
+  // Classified from stderr, which is never put in the message (it can echo a URL or header).
+  if (push.code !== 0 && PUSH_AUTH_RE.test(push.stderr)) {
+    throw shipError('push_auth_failed', `${providerName} did not accept the saved token for the push. Save a token with write access (GitLab: write_repository; GitHub: repo contents write) in Settings, then ship again.`);
+  }
   if (push.code !== 0) throw shipError('push_rejected', 'The remote refused the push. No pull or merge request was opened.');
   return { commit: sha, pushed: true, ...(secretOverride ? { secretOverride } : {}) };
 }

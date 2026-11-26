@@ -521,7 +521,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          without it answers 400 VALIDATION_FAILED, so an unlimited grant is always an explicit request.
 //   v160 — Model routing gains an agent role `plan` (Plan steps of Loop/Factory): POST /kb/loop/agent-run accepts `role: "plan"`,
 //          PUT/GET tier-routing carry `features.plan`, and `featureStatus.plan` is always reported (unset → standard).
-const SERVER_API_VERSION = 160;
+//   v161 — POST /kb/loop/ship pushes with the saved provider token and answers 409 `push_auth_failed` when the provider
+//          did not accept it (a protected-branch or hook decline stays `push_rejected`).
+const SERVER_API_VERSION = 161;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
