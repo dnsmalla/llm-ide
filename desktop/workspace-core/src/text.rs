@@ -57,11 +57,16 @@ pub fn format_rfc3339_utc(secs: i64) -> String {
 pub const FOLDER_NAME_MAX_CHARS: usize = 60;
 
 /// The name the app shows for a project folder: its last component without control characters, at most
-/// `FOLDER_NAME_MAX_CHARS`. A path with no usable last component shows as `project`. The desktop and the helper both
+/// `FOLDER_NAME_MAX_CHARS`. A name that is not UTF-8 is shown lossily; a path with no usable last component (or only control characters) shows as `project`. The desktop and the helper both
 /// use it, so a folder reads the same whichever side opened it.
 pub fn folder_display_name(root: &std::path::Path) -> String {
-    let name = root.file_name().and_then(|n| n.to_str()).unwrap_or("project");
-    name.chars().filter(|c| !c.is_control()).take(FOLDER_NAME_MAX_CHARS).collect()
+    let raw = root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let name: String = raw.chars().filter(|c| !c.is_control()).take(FOLDER_NAME_MAX_CHARS).collect();
+    if name.is_empty() {
+        "project".to_string()
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +89,6 @@ mod tests {
         assert_eq!(folder_display_name(std::path::Path::new(&long)).chars().count(), FOLDER_NAME_MAX_CHARS);
         assert_eq!(folder_display_name(std::path::Path::new("/x/a\u{7}b\nc")), "abc");
         assert_eq!(folder_display_name(std::path::Path::new("/")), "project");
+        assert_eq!(folder_display_name(std::path::Path::new("/x/\u{7}\n")), "project");
     }
 }
