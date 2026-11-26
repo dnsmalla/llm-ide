@@ -27,7 +27,8 @@ const MAX_HEADERS: usize = 64 * 1024;
 #[derive(Debug)]
 pub struct ProxyHandle {
     pub url: String,
-    #[allow(dead_code)] // kept for the launch diagnostics and the no-token-in-display test
+    /// Only the tests read it back; the token reaches the webview inside `url`.
+    #[cfg(test)]
     pub token: String,
     stop: Arc<AtomicBool>,
     port: u16,
@@ -269,7 +270,7 @@ fn start_on(agent: ureq::Agent, hub_url: &str, ports: &[u16]) -> Result<ProxyHan
             });
         }
     });
-    Ok(ProxyHandle { url: format!("http://127.0.0.1:{port}/{token}"), token, stop, port })
+    Ok(ProxyHandle { url: format!("http://127.0.0.1:{port}/{token}"), #[cfg(test)] token, stop, port })
 }
 
 #[cfg(test)]
