@@ -5,6 +5,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Desktop: simpler Connect to SSH server
+
+- One **Connect** button replaces Test then Connect. The dialog shows its steps (checking the server, the facts box, installing or updating the server part, starting and connecting) and shows an error under the step that failed.
+- The restart into SSH mode asks first only when Loop work is running or queued on this computer; otherwise Connect switches by itself.
+- **Take over**: when Connect finds a server part that this desktop's session record does not own (for example after its app data was reset), the dialog explains it and offers Take over, which stops that server part and continues the same Connect. It never happens without the click, and the host key is still checked.
+- A server is added to the recent list as soon as its host key is trusted or its check works, so a later failure no longer loses it.
+- Optional **Remember password in Keychain** (off by default): the password goes into the existing single secrets Keychain item, the window never receives it back, a remembered server connects in one click from the list, and Forget or unticking removes it.
+
 ### API v162: removed chat routes and desktop Remote screen
 
 - `POST /chat` and `POST /code-assist` now answer the generic unknown-route 404 (they answered 410) (`SERVER_API_VERSION` 162).
