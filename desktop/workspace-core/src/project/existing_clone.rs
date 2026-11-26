@@ -21,6 +21,12 @@ pub fn adopt_existing(root: &Path, req: &CloneRequest, git: &Path) -> Option<Clo
     if !is_real_dir(&dest) || !is_real_dir(&git_dir) {
         return None;
     }
+    // `git clone` writes the index last, so a missing one means the checkout failed half-way. A clone of an empty
+    // repository has no index either, but also no commit, so only an index-less clone WITH a commit is refused.
+    let has_index = std::fs::symlink_metadata(git_dir.join("index")).map(|m| m.is_file()).unwrap_or(false);
+    if !has_index && has_commit(&git_dir, git) {
+        return None;
+    }
     let inside = match (dest.canonicalize(), root.canonicalize()) {
         (Ok(d), Ok(r)) => d.starts_with(r),
         _ => false,
@@ -59,6 +65,24 @@ fn origin_url(git_dir: &Path, git: &Path) -> Option<String> {
         .ok()?;
     let url = String::from_utf8(out.stdout).ok()?.trim().to_string();
     (out.status.success() && !url.is_empty()).then_some(url)
+}
+
+/// Whether `git_dir`'s HEAD names a commit; pinned and env-cleared like `origin_url`. A git failure counts as a commit,
+/// so an unreadable repository is never adopted without an index.
+fn has_commit(git_dir: &Path, git: &Path) -> bool {
+    Command::new(git)
+        .arg("--git-dir")
+        .arg(git_dir)
+        .args(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"])
+        .env_clear()
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .current_dir(git_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success() || s.code() != Some(1))
+        .unwrap_or(true)
 }
 
 /// The host and repository path of a remote: `https://[user@]host/path`, `ssh://[user@]host[:port]/path` or
@@ -120,6 +144,30 @@ mod tests {
         assert_eq!(split_remote("https://gitlab.com@evil.com/g/p").map(|r| r.0), Some("evil.com".into()));
         assert_eq!(split_remote("https://evil.com/@gitlab.com/g/p").map(|r| r.0), Some("evil.com".into()));
         assert_eq!(split_remote("git@evil:gitlab.com/g/p").map(|r| r.0), Some("evil".into()));
+    }
+
+    #[test]
+    fn refuses_a_clone_whose_checkout_never_finished() {
+        let root = project_with_clone("noindex", "app", "https://github.com/o/app.git");
+        let dest = root.join("code").join("app");
+        let out = Command::new("git")
+            .args(["-c", "user.name=T", "-c", "user.email=t@example.com", "commit", "-q", "--allow-empty", "-m", "x"])
+            .current_dir(&dest)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        assert!(adopt_existing(&root, &request("github", "o/app"), &git()).is_some(), "a healthy clone is adopted");
+        std::fs::remove_file(dest.join(".git").join("index")).unwrap();
+        assert_eq!(adopt_existing(&root, &request("github", "o/app"), &git()), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn adopts_a_clone_of_an_empty_repository_without_an_index() {
+        let root = project_with_clone("emptyrepo", "app", "https://github.com/o/app.git");
+        assert!(!root.join("code").join("app").join(".git").join("index").exists());
+        assert!(adopt_existing(&root, &request("github", "o/app"), &git()).is_some());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

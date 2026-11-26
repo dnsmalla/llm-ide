@@ -249,6 +249,28 @@ fn inherited_env(parent: &[(OsString, OsString)]) -> Vec<(OsString, OsString)> {
     parent.iter().filter(|(name, _)| !is_git_config_pair(name)).cloned().collect()
 }
 
+/// Appends the Homebrew dirs missing from `parent`'s PATH on macOS, so git finds `git-lfs` when the app was launched
+/// from Finder. Never reorders the existing entries; `mac` is a parameter for the test.
+fn with_git_lfs_dirs(mut env: Vec<(OsString, OsString)>, mac: bool) -> Vec<(OsString, OsString)> {
+    if !mac {
+        return env;
+    }
+    let current = env.iter().position(|(name, _)| name == "PATH");
+    let mut dirs: Vec<PathBuf> = current.map(|i| std::env::split_paths(&env[i].1).collect()).unwrap_or_default();
+    for extra in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        if !dirs.iter().any(|d| d == Path::new(extra)) {
+            dirs.push(PathBuf::from(extra));
+        }
+    }
+    if let Ok(joined) = std::env::join_paths(dirs) {
+        match current {
+            Some(i) => env[i].1 = joined,
+            None => env.push(("PATH".into(), joined)),
+        }
+    }
+    env
+}
+
 fn clone_with_fallback(
     git: &Path,
     remote: &str,
@@ -354,7 +376,7 @@ fn clone_into(
     // The child's environment is the inherited one minus config pairs, then the clone's own pair (if a token is set).
     // Set on this child only, never on the process.
     let mut cmd = Command::new(git);
-    cmd.args(&args).env_clear().envs(inherited_env(parent)).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
+    cmd.args(&args).env_clear().envs(with_git_lfs_dirs(inherited_env(parent), cfg!(target_os = "macos"))).envs(env).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped());
     #[cfg(unix)]
     {
         // Own process group, so the cap and the cancel flag can kill git together with its helpers (kill_tree).
@@ -373,6 +395,8 @@ fn clone_into(
     if status.success() {
         return Ok(());
     }
+    // A failed checkout (e.g. a missing LFS filter) leaves files but no index; `destination` guaranteed dest was new.
+    let _ = std::fs::remove_dir_all(dest);
     let msg: String = err.chars().filter(|c| !c.is_control()).take(400).collect();
     Err(if msg.trim().is_empty() { "git clone failed".into() } else { format!("git clone failed: {msg}") })
 }
@@ -665,6 +689,28 @@ mod tests {
         ];
         let names: Vec<String> = inherited_env(&parent).into_iter().map(|(n, _)| n.to_string_lossy().into_owned()).collect();
         assert_eq!(names, ["PATH", "GIT_CONFIG_GLOBAL"]);
+    }
+
+    #[test]
+    fn git_lfs_dirs_are_appended_on_macos_only() {
+        let env = |path: &str| vec![(OsString::from("PATH"), OsString::from(path))];
+        let path_of = |e: Vec<(OsString, OsString)>| e[0].1.to_string_lossy().into_owned();
+        assert_eq!(path_of(with_git_lfs_dirs(env("/usr/bin:/bin"), true)), "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin");
+        assert_eq!(path_of(with_git_lfs_dirs(env("/usr/local/bin:/usr/bin"), true)), "/usr/local/bin:/usr/bin:/opt/homebrew/bin");
+        assert_eq!(path_of(with_git_lfs_dirs(env("/usr/bin"), false)), "/usr/bin");
+        let none = with_git_lfs_dirs(Vec::new(), true);
+        assert_eq!(none[0].1.to_string_lossy(), "/opt/homebrew/bin:/usr/local/bin");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_clone_removes_the_partial_destination() {
+        let s = Scratch::new("failed");
+        let git = fake_git(&s.0, "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"; echo 'checkout failed' >&2; exit 128");
+        let p = plan(&s.0, &request("github", "o/r", None)).unwrap();
+        let err = run(&p, None, &AtomicBool::new(false), &git).unwrap_err();
+        assert!(err.contains("checkout failed"), "{err}");
+        assert!(!p.dest.exists(), "the half-checked-out folder is removed");
     }
 
     #[cfg(unix)]
