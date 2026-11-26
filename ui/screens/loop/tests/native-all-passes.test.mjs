@@ -12,7 +12,8 @@ const config = (over = {}) => decodeConfig({ stages: [stage("s")], maxIterations
 function fake({ results = [], moved = [] }) {
   const st = { passes: 0, logs: [], progressCalls: 0 };
   const deps = {
-    async runStage() { const ok = results[st.passes] ?? true; st.passes += 1; return { ok, output: ok ? "" : "red" }; },
+    // NOTE: a fixed durationMs keeps two separate runs comparable; the runner would otherwise measure wall-clock time.
+    async runStage() { const ok = results[st.passes] ?? true; st.passes += 1; return { ok, output: ok ? "" : "red", durationMs: 0 }; },
     async repair() { return { ok: false, output: "no" }; },
     log() {},
     isCancelled: () => false,
