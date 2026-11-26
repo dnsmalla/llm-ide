@@ -216,8 +216,3 @@ export function buildLongFixture(): FixtureEvent[] {
   closing(raw);
   return raw.map((ev, seq) => ({ seq, ...ev }) as FixtureEvent);
 }
-
-/** Number of text deltas in a built fixture (what the bench compares against). */
-export function countDeltas(events: readonly FixtureEvent[]): number {
-  return events.filter((e) => e.type === "delta").length;
-}

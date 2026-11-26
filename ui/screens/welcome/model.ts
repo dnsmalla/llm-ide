@@ -65,14 +65,6 @@ export async function registerNewProject(project: ProjectInfo, deps: RegisterDep
   return warnings;
 }
 
-export interface GuideSection {
-  id: string;
-  title: string;
-  /** Plain text paragraphs, rendered as text. */
-  paragraphs: readonly string[];
-  steps?: readonly string[];
-}
-
 
 export const PROJECT_EXPLAINER =
   "A project is a folder. system/ holds the data LLM-IDE manages and llm-doc/ holds the notes it writes for you, next to your own source, code and data. Choose a new folder to start, an existing project to resume, or a cloned code repo: LLM-IDE adds what it needs without overwriting your files.";

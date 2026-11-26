@@ -14,4 +14,3 @@ export const MAX_IMAGE_BASE64_CHARS = 6_000_000;
 export const MAX_IMAGES_TOTAL_BASE64_CHARS = 14_000_000;
 /** Raw bytes whose base64 form still fits one image. */
 export const MAX_IMAGE_BYTES = Math.floor((MAX_IMAGE_BASE64_CHARS / 4) * 3);
-export const IMAGE_MIMES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
