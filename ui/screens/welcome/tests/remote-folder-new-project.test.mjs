@@ -117,8 +117,29 @@ test("a name that is not a single folder name is refused before the host is aske
   const picker = await pickerAt(io, deps([]));
   picker.setNewProjectName("a/b");
   assert.equal(await picker.createProject(), null);
-  assert.equal(picker.getState().newProjectError, "A folder name cannot contain /.");
+  assert.equal(picker.getState().newProjectError, "The name cannot contain / \\ : * ? \" < > | or control characters.");
   assert.deepEqual(io.calls.filter((c) => c.startsWith("create")), []);
+});
+
+test("the server project name follows the local New project rules", async () => {
+  const { validateProjectName } = await load("../welcome/model.ts");
+  const bad = ["con", "NUL.txt", "a:b", "a*b", ".hidden", "dot.", "x".repeat(81), "   ", "a\u0007b"];
+  for (const name of bad) {
+    const io = fakeIo();
+    const picker = await pickerAt(io, deps([]));
+    picker.setNewProjectName(name);
+    assert.equal(await picker.createProject(), null, JSON.stringify(name));
+    assert.equal(picker.getState().newProjectError, validateProjectName(name).error, JSON.stringify(name));
+    assert.deepEqual(io.calls.filter((c) => c.startsWith("create")), [], JSON.stringify(name));
+  }
+});
+
+test("a valid server project name is trimmed before the host is asked", async () => {
+  const io = fakeIo();
+  const picker = await pickerAt(io, deps([]));
+  picker.setNewProjectName("  notes  ");
+  await picker.createProject();
+  assert.ok(io.calls.includes(`create:${HOME}/projects:notes`));
 });
 
 test("new_project_warnings_offer_try_again", async () => {

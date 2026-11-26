@@ -9,6 +9,7 @@
 // - a folder that is outside the home folder is listed but never entered or selected (the host refuses it too).
 
 import { Store } from "../settings/store.ts";
+import { validateProjectName } from "../welcome/model.ts";
 import { beginServerFolderOpen, endServerFolderOpen } from "../shell/host.ts";
 
 /** One folder as the host lists it. The host lists folders only. */
@@ -454,12 +455,13 @@ export class FolderPickerModel extends Store<PickerState> {
   async createProject(): Promise<RemoteProject | null> {
     const s = this.getState();
     if (s.busy || s.path === null || s.pending !== null) return null;
-    const error = folderNameError(s.newProjectName);
-    if (error !== null) {
-      this.set({ newProjectError: error });
+    // Same rules as the local New project (reserved names, bad characters, length), not just the folder-name check.
+    const check = validateProjectName(s.newProjectName);
+    if (!check.ok) {
+      this.set({ newProjectError: check.error });
       return null;
     }
-    const name = s.newProjectName.trim();
+    const name = check.name;
     this.set({ busy: true, newProjectError: null });
     try {
       const created = await createServerProject(this.#io, s.path, name, this.#deps);
