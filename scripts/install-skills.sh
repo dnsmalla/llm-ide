@@ -22,7 +22,7 @@ if [ ! -f "$KIT/scripts/install.sh" ]; then
   exit 1
 fi
 
-# llm-ide stacks: TypeScript extension + Swift mac app.
+# llm-ide stacks: TypeScript extension + Swift (ios_app, graph-kit).
 STACKS="${LLMIDE_SKILL_STACKS:-typescript,swift}"
 
 # claude: only install skills (kit has no claude-specific agents/commands).

@@ -55,7 +55,7 @@ const MCP_SDK_IMPORT = {
 
 // Claude model ids belong to ONE file: schema/models/anthropic-models.json.
 // Three hand-kept lists previously disagreed badly enough that the server's own
-// DEFAULT_MODEL was an id the Mac coerces away as retired. Literals are allowed
+// DEFAULT_MODEL was an id the desktop UI coerces away as retired. Literals are allowed
 // only where the id genuinely is the subject — the linker itself, the provider
 // dispatch layer that routes by id prefix, and tests.
 //
