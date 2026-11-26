@@ -5,8 +5,9 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { Dialog } from "./Dialog";
 import { bulkMessage, confirmMatches, deletePhrase, needsTypedConfirm, previewNames, type BulkProgress } from "./bulk.ts";
 import { writeErrorText } from "./write-host.ts";
-import { baseOf, nameProblem, nameProblemText, withExtension } from "./note-ops.ts";
+import { nameProblem, nameProblemText, withExtension } from "./note-ops.ts";
 import { normalizeTag } from "./frontmatter-edit.ts";
+import { baseName } from "../../../kit/src/paths.ts";
 
 /** A folder path for a new note: relative, visible segments only. Null when fine. */
 export function folderProblem(folder: string): string | null {
@@ -63,10 +64,10 @@ export function NewNoteDialog({ defaultFolder, onCreate, onClose, error, busy }:
 }
 
 export function RenameDialog({ rel, onRename, onClose, error, busy }: { rel: string; onRename: (newName: string) => void; onClose: () => void; error: string | null; busy: boolean }): ReactNode {
-  const [name, setName] = useState(baseOf(rel));
+  const [name, setName] = useState(baseName(rel));
   const candidate = withExtension(name);
   const problem = nameProblem(candidate);
-  const unchanged = candidate === baseOf(rel);
+  const unchanged = candidate === baseName(rel);
   const ok = problem === null && !unchanged && !busy;
   return (
     <Dialog title="Rename note" onClose={onClose} busy={busy}>
@@ -80,7 +81,7 @@ export function RenameDialog({ rel, onRename, onClose, error, busy }: { rel: str
         <p className="lib-muted lib-path">{rel}</p>
         <label className="lib-field">
           <span>New file name</span>
-          <input data-autofocus type="text" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={problem !== null && name !== baseOf(rel)} />
+          <input data-autofocus type="text" value={name} onChange={(e) => setName(e.target.value)} aria-invalid={problem !== null && name !== baseName(rel)} />
         </label>
         {problem && !unchanged && <StatusBanner severity="warning" message={nameProblemText(problem)} />}
         {error && <StatusBanner severity="error" message={error} />}
@@ -117,7 +118,7 @@ export function DeleteDialog({ rels, titles, progress, onConfirm, onCancelRun, o
             <ul className="lib-delete-list" aria-label="Notes to delete">
               {shown.map((r) => (
                 <li key={r}>
-                  <strong>{titles.get(r) ?? baseOf(r)}</strong> <span className="lib-muted lib-path">{r}</span>
+                  <strong>{titles.get(r) ?? baseName(r)}</strong> <span className="lib-muted lib-path">{r}</span>
                 </li>
               ))}
               {more > 0 && <li className="lib-muted">and {more.toLocaleString()} more</li>}

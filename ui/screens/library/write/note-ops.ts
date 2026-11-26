@@ -2,6 +2,7 @@
 // path (notes_write.rs); this module only produces good candidates and gives early, readable errors.
 
 import { renderNote } from "./frontmatter-edit.ts";
+import { baseName, parentOf } from "../../../kit/src/paths.ts";
 
 export const NOTE_EXTENSIONS = ["md", "markdown", "txt"] as const;
 export const MAX_NAME_CHARS = 120;
@@ -95,15 +96,6 @@ export function initialNoteText(title: string, nowMs: number): string {
   );
 }
 
-export function parentOf(rel: string): string {
-  const i = rel.lastIndexOf("/");
-  return i < 0 ? "" : rel.slice(0, i);
-}
-
-export function baseOf(rel: string): string {
-  return rel.slice(rel.lastIndexOf("/") + 1);
-}
-
 /** The new path for renaming `rel` to `newName` in the same folder. */
 export function renamedRel(rel: string, newName: string): string {
   const dir = parentOf(rel);
@@ -112,7 +104,7 @@ export function renamedRel(rel: string, newName: string): string {
 
 /** Where "Save my version as a copy" writes after a conflict. */
 export function conflictCopyRel(rel: string, taken: (rel: string) => boolean): string {
-  const name = baseOf(rel);
+  const name = baseName(rel);
   const dot = name.lastIndexOf(".");
   const stem = dot > 0 ? name.slice(0, dot) : name;
   const ext = dot > 0 ? name.slice(dot + 1) : "md";

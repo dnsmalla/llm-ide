@@ -5,10 +5,11 @@ import { FakeWriteHost } from "./fake-write-host.ts";
 import { EditorSession, detectEol, toFileEol } from "../write/editor-session.ts";
 import { WriteQueue } from "../write/write-queue.ts";
 import { WriteError, type SavedNote } from "../write/write-host.ts";
-import { baseOf, conflictCopyRel, dateStamp, initialNoteText, nameProblem, newNoteRel, renamedRel, slugify, uniqueRel, withExtension } from "../write/note-ops.ts";
+import { conflictCopyRel, dateStamp, initialNoteText, nameProblem, newNoteRel, renamedRel, slugify, uniqueRel, withExtension } from "../write/note-ops.ts";
 import { applySummary, applySummaryDetailed, buildRequest, decodeSummary, extractTranscript, renderSummarySection, resummarize, SummarizeError, summarizeErrorText } from "../write/resummarize.ts";
 import { readKey } from "../write/frontmatter-edit.ts";
 import { parseNote } from "../frontmatter.ts";
+import { baseName } from "../../../kit/src/paths.ts";
 
 const REL = "notes/a.md";
 const mk = (text: string) => {
@@ -170,7 +171,7 @@ test("names: slugs, validation, never-overwrite candidates", () => {
   assert.equal(uniqueRel("a/b/", "n", "md", () => false), "a/b/n.md");
   assert.equal(renamedRel("a/b/c.md", "d.md"), "a/b/d.md");
   assert.equal(renamedRel("c.md", "d.md"), "d.md");
-  assert.equal(baseOf("a/b/c.md"), "c.md");
+  assert.equal(baseName("a/b/c.md"), "c.md");
   assert.equal(conflictCopyRel("a/b.md", () => false), "a/b (conflict copy).md");
   const init = initialNoteText("Plan: Q4", t);
   assert.equal(parseNote(init).data.title, "Plan: Q4");

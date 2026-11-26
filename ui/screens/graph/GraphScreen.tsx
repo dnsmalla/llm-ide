@@ -143,7 +143,7 @@ export function GraphScreen({ store, active, projectRoot, openFile, createView, 
       <h3 className="gr-quick-title">Quick Pick</h3>
       {repos.map((r) => (
         <button key={r} type="button" className="gr-quick-repo" data-on={target === r || undefined} disabled={generating} title={`Load graph for ${lastSegment(r)}`} onClick={() => { setTarget(r); setMode("code"); setGenerateError(null); runGeneration(r, "code"); }}>
-          <span>‹/› {r.split("/").pop()}</span><span aria-hidden="true">▶</span>
+          <span>‹/› {lastSegment(r)}</span><span aria-hidden="true">▶</span>
         </button>
       ))}
     </div>

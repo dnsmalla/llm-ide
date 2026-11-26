@@ -68,8 +68,6 @@ export interface ControllerDeps {
 }
 
 const MAX_WATCH_REFRESH_PAGES = 20;
-/** Any line break (CR, LF, VT, FF, NEL, LS, PS): a name holding one tears across the records this app writes one per line. */
-const LINE_BREAK = /[\r\n\v\f\u0085\u2028\u2029]/;
 const RANGE_BYTES = 1024 * 1024;
 
 export function gitDecoFor(index: string, worktree: string, kind: string): GitDeco {
@@ -640,7 +638,7 @@ export class ExplorerController {
 
   /** The message for a name `validName` refused. A line break gets its own sentence, as on the Mac: a pasted wrapped line is invisible in a one-line field. */
   private nameProblem(name: string): string {
-    return LINE_BREAK.test(name.trim()) ? "Names can't contain line breaks." : "A name cannot be empty or contain slashes.";
+    return entryNameProblem(name, { refuseBackslash: true }) === "line_break" ? "Names can't contain line breaks." : "A name cannot be empty or contain slashes.";
   }
 
   async createEntry(dir: string, name: string, kind: "file" | "dir"): Promise<string | null> {
