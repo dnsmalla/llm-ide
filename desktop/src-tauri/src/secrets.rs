@@ -48,6 +48,12 @@ impl fmt::Display for SecretError {
                  (on Linux, start a Secret Service such as gnome-keyring or KWallet); \
                  LLM-IDE will not fall back to a plaintext file."
             ),
+            Self::Corrupt(account) if *account == crate::secrets_bundle::BUNDLE_ACCOUNT => write!(
+                f,
+                "the '{SERVICE}' keychain item '{account}' is unreadable; refusing to replace it \
+                 because it holds the vault key. Do not delete it unless you accept losing the \
+                 encrypted vault (the separate 'vault-key' item, if present, is a backup copy)."
+            ),
             Self::Corrupt(account) => write!(
                 f,
                 "stored secret '{account}' in the OS store is unusable (too short or not text); \

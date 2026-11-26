@@ -20,6 +20,9 @@ pub const BUNDLE_ACCOUNT: &str = "secrets";
 /// Per-account items written by builds before the bundle; copied in on first use.
 const LEGACY_ACCOUNTS: [&str; 4] = [ACCOUNT_JWT, ACCOUNT_VAULT, ACCOUNT_HUB_SESSION, ACCOUNT_LOCAL_LOGIN];
 
+/// Accounts also written to their legacy item on every set (downgrade safety).
+const LEGACY_MIRRORED: [&str; 2] = [ACCOUNT_JWT, ACCOUNT_VAULT];
+
 type Map = BTreeMap<String, String>;
 
 /// Raw item access (one OS keychain item per account). `None` means "no such item".
@@ -46,11 +49,31 @@ impl<R: RawStore> Bundle<R> {
 
     pub fn set(&self, account: &str, value: &str) -> Result<(), SecretError> {
         self.with_map(|map| {
-            let mut next = map.clone();
+            // Re-read before writing: another instance (a different data dir) shares this item,
+            // and writing back our cached copy would erase what it saved for other accounts.
+            let mut next = match self.raw.read(BUNDLE_ACCOUNT)? {
+                Some(text) => parse(&text)?,
+                None => map.clone(),
+            };
+            let is_core = LEGACY_MIRRORED.contains(&account);
+            if is_core && next.get(account).is_some_and(|stored| stored != value) {
+                // Another instance created this core secret first and its core may already use
+                // it: never replace it. Adopting the stored map lets the caller's retry read it.
+                *map = next;
+                return Err(SecretError::Unavailable(format!(
+                    "'{account}' was just created by another LLM-IDE instance; retry"
+                )));
+            }
             next.insert(account.to_string(), value.to_string());
             self.raw.write(BUNDLE_ACCOUNT, &encode(&next)?)?;
-            // The cache changes only after the keychain accepted the write.
+            // The cache follows the bundle as soon as it is written, so a failed mirror write below
+            // cannot make a retry generate (and store) a second vault key.
             *map = next;
+            // NOTE: the two core secrets are mirrored to their legacy items too, so a downgraded
+            // build still finds the vault key instead of generating a new one and orphaning the vault.
+            if is_core {
+                self.raw.write(account, value)?;
+            }
             Ok(())
         })
     }
@@ -68,7 +91,7 @@ impl<R: RawStore> Bundle<R> {
     fn load(&self) -> Result<Map, SecretError> {
         match self.raw.read(BUNDLE_ACCOUNT)? {
             // Never overwritten automatically: it holds the vault key.
-            Some(text) => serde_json::from_str(&text).map_err(|_| SecretError::Corrupt(BUNDLE_ACCOUNT)),
+            Some(text) => parse(&text),
             None => self.migrate(),
         }
     }
@@ -85,6 +108,11 @@ impl<R: RawStore> Bundle<R> {
         }
         Ok(map)
     }
+}
+
+fn parse(text: &str) -> Result<Map, SecretError> {
+    // The parse error is dropped on purpose: its text could quote part of a secret.
+    serde_json::from_str(text).map_err(|_| SecretError::Corrupt(BUNDLE_ACCOUNT))
 }
 
 fn encode(map: &Map) -> Result<String, SecretError> {
@@ -144,13 +172,14 @@ mod tests {
             assert_eq!(bundle.get(ACCOUNT_JWT).unwrap().as_deref(), Some("j"));
             assert_eq!(bundle.get(ACCOUNT_LOCAL_LOGIN).unwrap(), None);
         }
-        assert_eq!(raw.reads_of(BUNDLE_ACCOUNT), 1);
+        // One load, plus one re-read per set; the gets add none.
+        assert_eq!(raw.reads_of(BUNDLE_ACCOUNT), 3);
 
         // A new process: one read of the bundle item, no legacy reads.
         let next = Bundle::new(raw.clone());
         assert_eq!(next.get(ACCOUNT_VAULT).unwrap().as_deref(), Some("v"));
         assert_eq!(next.get(ACCOUNT_JWT).unwrap().as_deref(), Some("j"));
-        assert_eq!(raw.reads_of(BUNDLE_ACCOUNT), 2);
+        assert_eq!(raw.reads_of(BUNDLE_ACCOUNT), 4);
         assert_eq!(raw.reads_of(ACCOUNT_VAULT), 1, "legacy read only during the first migration");
     }
 
@@ -177,6 +206,43 @@ mod tests {
         assert!(raw.item(BUNDLE_ACCOUNT).is_none(), "no bundle without the vault key");
         assert!(bundle.get(ACCOUNT_JWT).is_err(), "retried, not cached");
         assert_eq!(raw.reads_of(BUNDLE_ACCOUNT), 2);
+    }
+
+    #[test]
+    fn set_keeps_what_another_instance_saved() {
+        let raw = Arc::new(Counting::default());
+        let first = Bundle::new(raw.clone());
+        let second = Bundle::new(raw.clone());
+        assert_eq!(first.get(ACCOUNT_JWT).unwrap(), None);
+        assert_eq!(second.get(ACCOUNT_JWT).unwrap(), None);
+        first.set(ACCOUNT_LOCAL_LOGIN, "login-a").unwrap();
+        second.set(ACCOUNT_HUB_SESSION, "hub-b").unwrap();
+        let fresh = Bundle::new(raw.clone());
+        assert_eq!(fresh.get(ACCOUNT_LOCAL_LOGIN).unwrap().as_deref(), Some("login-a"));
+        assert_eq!(fresh.get(ACCOUNT_HUB_SESSION).unwrap().as_deref(), Some("hub-b"));
+    }
+
+    #[test]
+    fn a_core_secret_another_instance_created_is_never_replaced() {
+        let raw = Arc::new(Counting::default());
+        let first = Bundle::new(raw.clone());
+        let second = Bundle::new(raw.clone());
+        assert_eq!(first.get(ACCOUNT_VAULT).unwrap(), None);
+        assert_eq!(second.get(ACCOUNT_VAULT).unwrap(), None);
+        first.set(ACCOUNT_VAULT, "va").unwrap();
+        assert!(second.set(ACCOUNT_VAULT, "vb").is_err());
+        assert_eq!(second.get(ACCOUNT_VAULT).unwrap().as_deref(), Some("va"), "retry reads the stored key");
+        assert_eq!(Bundle::new(raw.clone()).get(ACCOUNT_VAULT).unwrap().as_deref(), Some("va"));
+    }
+
+    #[test]
+    fn core_secrets_are_mirrored_to_legacy_items_for_downgrades() {
+        let raw = Arc::new(Counting::default());
+        let bundle = Bundle::new(raw.clone());
+        bundle.set(ACCOUNT_VAULT, "v").unwrap();
+        bundle.set(ACCOUNT_LOCAL_LOGIN, "l").unwrap();
+        assert_eq!(raw.item(ACCOUNT_VAULT).as_deref(), Some("v"));
+        assert_eq!(raw.item(ACCOUNT_LOCAL_LOGIN), None, "only the core secrets are mirrored");
     }
 
     #[test]
