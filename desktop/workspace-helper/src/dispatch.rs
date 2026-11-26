@@ -5,58 +5,22 @@
 use std::cell::RefCell;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use llmide_workspace_core::fs::{
-    copy, create, delete_with, list_dir, read_file, read_image, read_range, rename, write_file, CopyReq, CreateReq,
-    ListReq, ReadReq, RangeReq, RenameReq, WriteReq,
-};
-use llmide_workspace_core::git::{diff, git_binary, scm_root, show, stage, status, DiffReq, ScmRoot, ShowReq, StageReq};
+use llmide_workspace_core::commands::{self, is_confirmed_command, is_fs_command, is_git_command};
+use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::project::clone::CloneRequest;
-use llmide_workspace_core::scm::{
-    branch_delete, branches, checkout, commit, commit_amend, commit_diff, commit_files, create_branch, diff_hunks, discard_all_with,
-    discard_with, identity, log, merge, merge_abort, merge_mode, stage_all, stage_hunks, stash_apply, stash_drop, stash_list,
-    stash_pop, stash_push, tag_create, tags, AmendReq, CommitDiffReq, DiscardAllReq, HunksReq, LogReq, MergeOutcome, MergeReq,
-    StageHunksReq, StashPushReq,
-};
 use llmide_workspace_core::search::Searches;
-use llmide_workspace_core::trash::Trasher;
 use llmide_workspace_core::{err, FsError, R};
 use serde_json::Value;
 
 use crate::project_setup;
 use crate::protocol::{arg, arg_or_false, err_response, ok_response, Request};
-use crate::session::{to_value, Clones, Session};
+use crate::session::{Clones, Session};
 
 /// Set by the test-only `__two_questions` command when its action runs.
 #[cfg(test)]
 pub static TWO_QUESTIONS_RAN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 const INTERNAL_MESSAGE: &str = "the helper hit an internal error; the request was not completed";
-
-/// The fs commands that need an open folder. Each one is the body of its Tauri wrapper in `fs_ops.rs`.
-const FS_COMMANDS: [&str; 9] = [
-    "fs_list_dir",
-    "fs_read_file",
-    "fs_read_range",
-    "fs_read_image",
-    "fs_write_file",
-    "fs_create",
-    "fs_rename",
-    "fs_copy",
-    "fs_delete",
-];
-
-/// The git commands whose core function asks a native dialog. They run in two phases.
-const CONFIRMED_GIT: [&str; 9] = [
-    "git_discard",
-    "git_checkout",
-    "git_branch_delete",
-    "git_stash_pop",
-    "git_stash_drop",
-    "git_merge",
-    "git_merge_abort",
-    "git_commit_amend",
-    "git_discard_all",
-];
 
 /// Runs one request and returns its response line. Never panics: a panic in a handler is answered as `internal`.
 pub fn handle_request(session: &mut Session, req: &Request) -> Value {
@@ -137,187 +101,24 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
         "reveal_in_os" => err("unsupported", "showing a file in this computer's file manager is not available for a server folder"),
         #[cfg(test)]
         "__panic" => panic!("the test asked for a panic"),
-        _ if FS_COMMANDS.contains(&cmd) => fs_command(session, req),
-        _ if cmd.starts_with("git_") => git_command(session, req),
+        _ if is_fs_command(cmd) || is_git_command(cmd) => table_command(session, req),
         _ => err("unsupported", format!("the helper does not run `{cmd}`")),
     }
 }
 
-fn fs_command(session: &Session, req: &Request) -> R<Value> {
+/// The fs and git commands, run by the one table in the core that the desktop's local path calls too. The helper
+/// adds what only it can: the open-folder check, the missing-git answer the Changes panel shows, and the two-phase
+/// confirmation for the destructive git commands.
+fn table_command(session: &Session, req: &Request) -> R<Value> {
     let root = session.root()?;
-    let args = &req.args;
-    match req.cmd.as_str() {
-        "fs_list_dir" => to_value(&list_dir(&root, &arg::<ListReq>(args, "req")?)?),
-        "fs_read_file" => to_value(&read_file(&root, &arg::<ReadReq>(args, "req")?)?),
-        "fs_read_range" => to_value(&read_range(&root, &arg::<RangeReq>(args, "req")?)?),
-        "fs_read_image" => to_value(&read_image(&root, &arg::<String>(args, "path")?)?),
-        "fs_write_file" => to_value(&write_file(&root, &arg::<WriteReq>(args, "req")?)?),
-        "fs_create" => to_value(&create(&root, &arg::<CreateReq>(args, "req")?)?),
-        "fs_rename" => to_value(&rename(&root, &arg::<RenameReq>(args, "req")?)?),
-        "fs_copy" => to_value(&copy(&root, &arg::<CopyReq>(args, "req")?)?),
-        "fs_delete" => {
-            delete_with(&root, &arg::<String>(args, "path")?, session.trasher())?;
-            Ok(Value::Null)
-        }
-        other => err("unsupported", format!("the helper does not run `{other}`")),
-    }
-}
-
-/// Git runs in the repository the project resolves to (`scm_root`), exactly as the desktop's `blocking` and
-/// `blocking_scm` do. The helper refuses to run git when git is absent, with the message the Changes panel shows.
-fn git_command(session: &Session, req: &Request) -> R<Value> {
-    let root = session.root()?;
-    if git_binary().is_none() {
+    let cmd = req.cmd.as_str();
+    if is_git_command(cmd) && git_binary().is_none() {
         return err("git_missing", "git is not installed on this server.");
     }
-    let scm = scm_root(&root);
-    if CONFIRMED_GIT.contains(&req.cmd.as_str()) {
-        return git_confirmed(&scm, session.trasher(), req);
+    if is_confirmed_command(cmd) {
+        return confirmed(req, |ask| commands::run(&root, cmd, &req.args, &|_spec, question| ask(question), session.trasher()));
     }
-    match req.cmd.as_str() {
-        "git_status" | "git_diff" | "git_show" | "git_stage" | "git_diff_hunks" | "git_stage_hunks" | "git_stage_all" => {
-            git_working_tree(&scm, req)
-        }
-        _ => git_history(&scm, req),
-    }
-}
-
-/// Status, diff and stage: the commands that read or change the index and the working tree without asking.
-fn git_working_tree(scm: &ScmRoot, req: &Request) -> R<Value> {
-    let args = &req.args;
-    match req.cmd.as_str() {
-        "git_status" => {
-            let mut st = status(&scm.repo)?;
-            for entry in &mut st.entries {
-                entry.path = scm.to_project(&entry.path);
-                entry.orig_path = entry.orig_path.as_deref().map(|p| scm.to_project(p));
-            }
-            to_value(&st)
-        }
-        "git_diff" => {
-            let r = arg::<DiffReq>(args, "req")?;
-            to_value(&diff(&scm.repo, &scm.to_repo(&r.path)?, r.staged)?)
-        }
-        "git_show" => {
-            let r = arg::<ShowReq>(args, "req")?;
-            to_value(&show(&scm.repo, &scm.to_repo(&r.path)?, &r.rev)?)
-        }
-        "git_stage" => {
-            let r = arg::<StageReq>(args, "req")?;
-            stage(&scm.repo, &scm.to_repo_all(&r.paths)?, r.stage).map(|()| Value::Null)
-        }
-        "git_diff_hunks" => {
-            let r = arg::<HunksReq>(args, "req")?;
-            to_value(&diff_hunks(&scm.repo, &scm.to_repo(&r.path)?, r.staged)?)
-        }
-        "git_stage_hunks" => {
-            let r = arg::<StageHunksReq>(args, "req")?;
-            stage_hunks(&scm.repo, &scm.to_repo(&r.path)?, r.staged, &r.diff_id, &r.hunks).map(|()| Value::Null)
-        }
-        "git_stage_all" => stage_all(&scm.repo, arg::<bool>(args, "stage")?).map(|()| Value::Null),
-        other => err("unsupported", format!("the helper does not run `{other}`")),
-    }
-}
-
-/// Identity, commit, branches, tags, log, stash and merge-free history. None of these asks a dialog.
-fn git_history(scm: &ScmRoot, req: &Request) -> R<Value> {
-    let args = &req.args;
-    let repo = scm.repo.as_path();
-    match req.cmd.as_str() {
-        "git_identity" => to_value(&identity(repo, &None)?),
-        "git_commit" => to_value(&commit(repo, &arg::<String>(args, "message")?, &None)?),
-        "git_branches" => to_value(&branches(repo)?),
-        "git_create_branch" => create_branch(repo, &arg::<String>(args, "name")?).map(|()| Value::Null),
-        "git_tags" => to_value(&tags(repo)?),
-        "git_log" => {
-            let r = arg::<LogReq>(args, "req")?;
-            to_value(&log(repo, r.skip, r.limit)?)
-        }
-        "git_commit_files" => {
-            let mut detail = commit_files(repo, &arg::<String>(args, "hash")?)?;
-            for file in &mut detail.files {
-                file.path = scm.to_project(&file.path);
-            }
-            to_value(&detail)
-        }
-        "git_commit_diff" => {
-            let r = arg::<CommitDiffReq>(args, "req")?;
-            to_value(&commit_diff(repo, &r.hash, &scm.to_repo(&r.path)?)?)
-        }
-        "git_tag_create" => {
-            let name = arg::<String>(args, "name")?;
-            let message = arg::<Option<String>>(args, "message")?;
-            let target = arg::<Option<String>>(args, "target")?;
-            to_value(&tag_create(repo, &name, message.as_deref(), target.as_deref(), &None)?)
-        }
-        "git_stash_list" => to_value(&stash_list(repo)?),
-        "git_stash_push" => {
-            let r = arg::<StashPushReq>(args, "req")?;
-            stash_push(repo, &r.message, r.include_untracked, &None).map(|()| Value::Null)
-        }
-        "git_stash_apply" => {
-            let index = arg::<usize>(args, "index")?;
-            stash_apply(repo, index, &arg::<String>(args, "hash")?).map(|()| Value::Null)
-        }
-        other => err("unsupported", format!("the helper does not run `{other}`")),
-    }
-}
-
-/// The destructive git commands. Each core call takes a `confirm` closure, and `confirmed` supplies it.
-fn git_confirmed(scm: &ScmRoot, trasher: &dyn Trasher, req: &Request) -> R<Value> {
-    let args = &req.args;
-    let repo = scm.repo.as_path();
-    match req.cmd.as_str() {
-        "git_discard" => {
-            let paths = scm.to_repo_all(&arg::<Vec<String>>(args, "paths")?)?;
-            confirmed(req, |ask| to_value(&discard_with(repo, &paths, ask, trasher)?))
-        }
-        "git_checkout" => {
-            let name = arg::<String>(args, "name")?;
-            confirmed(req, |ask| checkout(repo, &name, ask).map(|()| Value::Null))
-        }
-        "git_branch_delete" => {
-            let name = arg::<String>(args, "name")?;
-            let force = arg_or_false(args, "force")?;
-            confirmed(req, |ask| to_value(&branch_delete(repo, &name, force, ask)?))
-        }
-        "git_stash_pop" => {
-            let index = arg::<usize>(args, "index")?;
-            let hash = arg::<String>(args, "hash")?;
-            confirmed(req, |ask| stash_pop(repo, index, &hash, ask).map(|()| Value::Null))
-        }
-        "git_stash_drop" => {
-            let index = arg::<usize>(args, "index")?;
-            let hash = arg::<String>(args, "hash")?;
-            confirmed(req, |ask| stash_drop(repo, index, &hash, ask).map(|()| Value::Null))
-        }
-        "git_merge_abort" => confirmed(req, |ask| merge_abort(repo, ask).map(|()| Value::Null)),
-        "git_merge" => git_merge(scm, req),
-        "git_commit_amend" => {
-            let r = arg::<AmendReq>(args, "req")?;
-            confirmed(req, |ask| to_value(&commit_amend(repo, r.message.as_deref(), r.force, &None, ask)?))
-        }
-        "git_discard_all" => {
-            let r = arg::<DiscardAllReq>(args, "req")?;
-            confirmed(req, |ask| to_value(&discard_all_with(repo, r.include_untracked, ask, trasher)?))
-        }
-        other => err("unsupported", format!("the helper does not run `{other}`")),
-    }
-}
-
-/// Merge, with the conflicting paths turned back into project-relative paths for the Changes panel.
-fn git_merge(scm: &ScmRoot, req: &Request) -> R<Value> {
-    let r = arg::<MergeReq>(&req.args, "req")?;
-    let mode = merge_mode(r.mode.as_deref())?;
-    confirmed(req, |ask| {
-        let mut outcome: MergeOutcome = merge(&scm.repo, &r.name, mode, &None, ask)?;
-        if let MergeOutcome::Conflicts { paths, .. } = &mut outcome {
-            for path in paths.iter_mut() {
-                *path = scm.to_project(path);
-            }
-        }
-        to_value(&outcome)
-    })
+    commands::run(&root, cmd, &req.args, &|_spec, _question| false, session.trasher())
 }
 
 /// Runs a destructive command in two phases, the way the desktop's native dialog does.
@@ -348,7 +149,7 @@ fn confirmed<T>(req: &Request, run: impl FnOnce(&dyn Fn(&str) -> bool) -> R<T>) 
     let result = run(&ask);
     let pending = if expected.is_some() { refused.into_inner() } else { first_question.into_inner() };
     match pending {
-        Some(question) => Err(FsError { code: "confirm_required", message: question }),
+        Some(question) => Err(FsError { code: llmide_workspace_core::wire::CONFIRM_REQUIRED_CODE, message: question }),
         None => result,
     }
 }

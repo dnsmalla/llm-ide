@@ -169,7 +169,7 @@ fn host_platform() -> &'static str {
 #[tauri::command]
 async fn read_graph_file(path: String) -> Result<String, workspace_backend::CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return Ok(workspace_backend::on_blocking(move || graph_file::ssh_read(workspace_backend::remote(), &workspace_backend::LinkConnector, &path)).await??);
+        return Ok(workspace_backend::on_remote(move |remote, connector| graph_file::ssh_read(remote, connector, &path)).await?);
     }
     let root = graph_file::project_root().ok_or_else(|| "no project root configured".to_string())?;
     Ok(graph_file::read_within(&root, &path)?)

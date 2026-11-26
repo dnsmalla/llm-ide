@@ -60,7 +60,7 @@ fn line(s: &str, max: usize) -> String {
 
 /// `git check-ref-format --branch`-equivalent for a short branch name, stricter where it is
 /// cheap: no leading dash, no control/invisible characters, at most 200 bytes.
-pub fn valid_branch_name(name: &str) -> R<()> {
+pub(crate) fn valid_branch_name(name: &str) -> R<()> {
     let bad = |why: &str| gerr("invalid_ref", format!("not a valid branch name: {why}"));
     if name.is_empty() || name.len() > 200 {
         return bad("1 to 200 bytes");
@@ -181,7 +181,7 @@ fn diff_args(staged: bool, p: &str) -> Vec<&str> {
     a
 }
 
-pub fn diff_hunks(root: &Path, path: &str, staged: bool) -> R<HunkDiff> {
+pub(crate) fn diff_hunks(root: &Path, path: &str, staged: bool) -> R<HunkDiff> {
     let p = rel_arg(path)?;
     let out = run_git(root, &diff_args(staged, &p), DIFF_CAP)?;
     if out.truncated {
@@ -219,7 +219,7 @@ pub fn diff_hunks(root: &Path, path: &str, staged: bool) -> R<HunkDiff> {
 }
 
 /// Stages (or, with `staged`, unstages) the hunks `indexes` of `path`.
-pub fn stage_hunks(root: &Path, path: &str, staged: bool, diff_id: &str, indexes: &[usize]) -> R<()> {
+pub(crate) fn stage_hunks(root: &Path, path: &str, staged: bool, diff_id: &str, indexes: &[usize]) -> R<()> {
     let p = rel_arg(path)?;
     if indexes.is_empty() {
         return gerr("invalid_path", "select at least one hunk");
@@ -260,7 +260,7 @@ pub fn stage_hunks(root: &Path, path: &str, staged: bool, diff_id: &str, indexes
 
 /// Stages every change, or unstages everything. Refuses while files are in conflict (a bulk
 /// `add` would mark them resolved with their markers still in them).
-pub fn stage_all(root: &Path, stage: bool) -> R<()> {
+pub(crate) fn stage_all(root: &Path, stage: bool) -> R<()> {
     let bulk = Opts { timeout: Some(std::time::Duration::from_secs(180)), ..Opts::default() };
     if stage {
         let st = status(root)?;
@@ -493,7 +493,7 @@ pub fn discard(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool) ->
 /// `discard` through an injectable trash. After the dialog the plan and every file's fingerprint are
 /// re-checked: anything that changed while the user was deciding aborts with `changed_since_confirm` and
 /// nothing is touched.
-pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash::Trasher) -> R<DiscardResult> {
+pub(crate) fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash::Trasher) -> R<DiscardResult> {
     let plan = plan_discard(root, paths)?;
     // Refused BEFORE the dialog: restoring a file runs the content filters, which an LFS repository needs and this
     // runner never starts. Asking first and refusing afterwards looked as if the discard had happened.
@@ -502,7 +502,7 @@ pub fn discard_with(root: &Path, paths: &[String], confirm: &dyn Fn(&str) -> boo
     }
     let before = fingerprints(root, &plan);
     if !confirm(&discard_prompt(&plan)) {
-        return gerr("cancelled", "discard cancelled");
+        return cancelled("git_discard");
     }
     let again = plan_discard(root, paths).map_err(|_| FsError { code: "changed_since_confirm", message: "the files changed while the dialog was open; nothing was discarded".into() })?;
     if again != plan || fingerprints(root, &again) != before {
@@ -586,7 +586,7 @@ pub fn identity(root: &Path, home: &Option<PathBuf>) -> R<Identity> {
 }
 
 /// Validated, sanitized commit message ending in one newline.
-pub fn validate_message(raw: &str) -> R<String> {
+pub(crate) fn validate_message(raw: &str) -> R<String> {
     if raw.len() > MAX_MESSAGE_BYTES * 2 {
         return gerr("too_large", format!("the commit message is longer than {MAX_MESSAGE_BYTES} bytes"));
     }
@@ -732,7 +732,7 @@ pub struct TagList {
 
 /// Local tags, newest first by creator date (the commit date for a lightweight tag). Read-only:
 /// creating, deleting or pushing tags is not in this host.
-pub fn tags(root: &Path) -> R<TagList> {
+pub(crate) fn tags(root: &Path) -> R<TagList> {
     let out = run_git(
         root,
         &[
@@ -790,14 +790,14 @@ pub fn checkout(root: &Path, name: &str, confirm: &dyn Fn(&str) -> bool) -> R<()
         if dirty > 0 { format!("\n{dirty} file(s) have uncommitted changes. Git will refuse the switch if they would be overwritten; nothing is forced.") } else { String::new() }
     );
     if !confirm(&prompt) {
-        return gerr("cancelled", "checkout cancelled");
+        return cancelled("git_checkout");
     }
     // `switch` only ever resolves a BRANCH: a tag or path with the same name cannot be picked instead
     // (`checkout <name>` is ambiguous), and `--no-guess` never creates a branch from a remote one.
     run_git(root, &["switch", "--no-guess", name], 64 * 1024).map(|_| ()).map_err(map_checkout_error)
 }
 
-pub fn create_branch(root: &Path, name: &str) -> R<()> {
+pub(crate) fn create_branch(root: &Path, name: &str) -> R<()> {
     valid_branch_name(name)?;
     if branch_exists(root, name) {
         return gerr("exists", format!("a branch named {} already exists", line(name, 80)));
@@ -903,7 +903,7 @@ fn resolve_commit(root: &Path, hash: &str) -> R<(String, Vec<String>)> {
     Ok((full, it.filter(|p| is_hex(p)).collect()))
 }
 
-pub fn commit_files(root: &Path, hash: &str) -> R<CommitDetail> {
+pub(crate) fn commit_files(root: &Path, hash: &str) -> R<CommitDetail> {
     let (full, parents) = resolve_commit(root, hash)?;
     let msg = run_git(root, &["log", "-1", "--no-show-signature", "--format=%B", &full, "--"], 64 * 1024)?;
     let message = sanitize_text(String::from_utf8_lossy(&msg.stdout).trim_end());
@@ -934,7 +934,7 @@ pub struct CommitDiff {
     pub truncated: bool,
 }
 
-pub fn commit_diff(root: &Path, hash: &str, path: &str) -> R<CommitDiff> {
+pub(crate) fn commit_diff(root: &Path, hash: &str, path: &str) -> R<CommitDiff> {
     let p = rel_arg(path)?;
     let (full, parents) = resolve_commit(root, hash)?;
     let flags = ["--no-ext-diff", "--no-textconv", "--no-color", "--no-renames"];
@@ -1014,7 +1014,7 @@ fn unique_commits(root: &Path, name: &str) -> R<usize> {
 /// Deletes a local branch. Refuses the current branch and anything that is not a local branch ref; a branch
 /// that is not merged is NOT deleted: the result says so (`NotMerged`) and the caller decides on a forced delete.
 /// Every actual deletion goes through `confirm` first (the host's native dialog in the app).
-pub fn branch_delete(root: &Path, name: &str, force: bool, confirm: &dyn Fn(&str) -> bool) -> R<BranchDelete> {
+pub(crate) fn branch_delete(root: &Path, name: &str, force: bool, confirm: &dyn Fn(&str) -> bool) -> R<BranchDelete> {
     valid_branch_name(name)?;
     if !branch_exists(root, name) {
         return gerr("not_found", format!("no local branch named {}", line(name, 80)));
@@ -1035,7 +1035,7 @@ pub fn branch_delete(root: &Path, name: &str, force: bool, confirm: &dyn Fn(&str
             return Ok(BranchDelete::NotMerged { tip, unique_commits: unique_commits(root, name)? });
         }
         if !confirm(&format!("Delete the local branch \u{201C}{shown}\u{201D}? It is fully merged, so no commits are lost. Remote branches are not touched.")) {
-            return gerr("cancelled", "branch delete cancelled");
+            return cancelled("git_branch_delete");
         }
         map_git_error(run_git(root, &["branch", "-d", name], 64 * 1024), "not_merged", "the branch is no longer fully merged (it changed while the confirmation was open). Nothing was deleted")?;
     } else {
@@ -1043,7 +1043,7 @@ pub fn branch_delete(root: &Path, name: &str, force: bool, confirm: &dyn Fn(&str
         let n = unique_commits(root, name)?;
         let prompt = format!("Delete the unmerged branch \u{201C}{shown}\u{201D} at {}? This loses {n} commit(s) that are not on any other local branch.", &tip[..7.min(tip.len())]);
         if !confirm(&prompt) {
-            return gerr("cancelled", "branch delete cancelled");
+            return cancelled("git_branch_delete");
         }
         // The dialog named this tip and count: a branch that moved meanwhile is not force-deleted.
         if tip_of().ok().as_deref() != Some(tip.as_str()) {
@@ -1091,7 +1091,7 @@ fn tag_target(root: &Path, target: Option<&str>) -> R<String> {
 
 /// Creates a tag and never moves an existing one (no `-f`). With a message it is annotated, with the
 /// user's own identity as tagger (never GPG-signed); without one it is lightweight and needs no identity. Nothing is pushed.
-pub fn tag_create(root: &Path, name: &str, message: Option<&str>, target: Option<&str>, home: &Option<PathBuf>) -> R<Tag> {
+pub(crate) fn tag_create(root: &Path, name: &str, message: Option<&str>, target: Option<&str>, home: &Option<PathBuf>) -> R<Tag> {
     valid_tag_name(root, name)?;
     if message.is_some_and(|m| m.len() > MAX_TAG_MESSAGE) {
         return gerr("too_large", format!("the tag message is longer than {MAX_TAG_MESSAGE} bytes"));
@@ -1120,7 +1120,7 @@ pub fn tag_create(root: &Path, name: &str, message: Option<&str>, target: Option
 }
 
 const MAX_TAG_MESSAGE: usize = 2048;
-pub const MAX_STASHES: usize = 100;
+pub(crate) const MAX_STASHES: usize = 100;
 const MAX_STASH_MESSAGE: usize = 2048;
 
 #[derive(Serialize, Debug, PartialEq)]
@@ -1141,7 +1141,7 @@ pub struct StashList {
 
 /// Stash entries, newest first, at most `MAX_STASHES`. Read-only. Records are NUL-separated, the hash and the
 /// subject unit-separated (neither can contain either byte).
-pub fn stash_list(root: &Path) -> R<StashList> {
+pub(crate) fn stash_list(root: &Path) -> R<StashList> {
     let out = run_git(root, &["stash", "list", "-z", "--format=%H%x1f%gs", &format!("--max-count={}", MAX_STASHES + 1)], 1024 * 1024)?;
     let text = String::from_utf8_lossy(&out.stdout);
     let mut all: Vec<(&str, &str)> = text.split('\0').filter_map(|s| s.split_once('\u{1f}')).filter(|(h, _)| is_hex(h)).collect();
@@ -1191,7 +1191,7 @@ fn map_stash_error(root: &Path, e: FsError) -> FsError {
 
 /// Stashes the working tree (tracked changes, and untracked files when asked), like the Mac's stash. Needs the
 /// user's identity because a stash is a commit. Refuses an unmerged tree and an empty change set.
-pub fn stash_push(root: &Path, message: &str, include_untracked: bool, home: &Option<PathBuf>) -> R<()> {
+pub(crate) fn stash_push(root: &Path, message: &str, include_untracked: bool, home: &Option<PathBuf>) -> R<()> {
     if message.len() > MAX_STASH_MESSAGE {
         return gerr("too_large", format!("the stash message is longer than {MAX_STASH_MESSAGE} bytes"));
     }
@@ -1234,30 +1234,30 @@ fn refuse_unmerged(root: &Path) -> R<()> {
     Ok(())
 }
 
-pub fn stash_apply(root: &Path, index: usize, hash: &str) -> R<()> {
+pub(crate) fn stash_apply(root: &Path, index: usize, hash: &str) -> R<()> {
     refuse_unmerged(root)?;
     let (spec, _) = stash_entry(root, index, hash)?;
     run_git(root, &["stash", "apply", &spec], 64 * 1024).map(|_| ()).map_err(|e| map_stash_error(root, e))
 }
 
-pub fn stash_pop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+pub(crate) fn stash_pop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
     refuse_unmerged(root)?;
     let (_, label) = stash_entry(root, index, hash)?;
     let prompt = format!(
         "Pop the stash \u{201C}{label}\u{201D}? Its changes go into your working tree and the stash is removed from the list. If they conflict with your files, Git stops and keeps the stash."
     );
     if !confirm(&prompt) {
-        return gerr("cancelled", "pop cancelled");
+        return cancelled("git_stash_pop");
     }
     // Checked again: the list can change while the dialog is open.
     let (spec, _) = stash_entry(root, index, hash)?;
     run_git(root, &["stash", "pop", &spec], 64 * 1024).map(|_| ()).map_err(|e| map_stash_error(root, e))
 }
 
-pub fn stash_drop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+pub(crate) fn stash_drop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) -> bool) -> R<()> {
     let (_, label) = stash_entry(root, index, hash)?;
     if !confirm(&format!("Drop the stash \u{201C}{label}\u{201D}? Its changes are removed from the list and cannot be recovered from LLM-IDE.")) {
-        return gerr("cancelled", "drop cancelled");
+        return cancelled("git_stash_drop");
     }
     let (spec, _) = stash_entry(root, index, hash)?;
     run_git(root, &["stash", "drop", &spec], 64 * 1024).map(|_| ())
@@ -1267,7 +1267,7 @@ pub fn stash_drop(root: &Path, index: usize, hash: &str, confirm: &dyn Fn(&str) 
 
 const MAX_AMEND_MESSAGE: usize = 64 * 1024;
 /// Untracked items one whole-tree discard may move to the Trash.
-pub const MAX_TRASH_ENTRIES: usize = 2_000;
+pub(crate) const MAX_TRASH_ENTRIES: usize = 2_000;
 const MAX_CONFLICT_PATHS: usize = 200;
 const BULK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
@@ -1331,7 +1331,7 @@ pub enum MergeMode {
 }
 
 /// Absent or `ff` fast-forwards when git can (the Mac's plain merge); `no_ff` always records a merge commit.
-pub fn merge_mode(raw: Option<&str>) -> R<MergeMode> {
+pub(crate) fn merge_mode(raw: Option<&str>) -> R<MergeMode> {
     match raw {
         None | Some("ff") => Ok(MergeMode::FastForward),
         Some("no_ff") => Ok(MergeMode::NoFastForward),
@@ -1392,7 +1392,7 @@ pub fn merge(root: &Path, name: &str, mode: MergeMode, home: &Option<PathBuf>, c
         format!("Merge \u{201C}{src}\u{201D} into \u{201C}{dst}\u{201D}? It creates a merge commit on \u{201C}{dst}\u{201D}. If both branches changed the same lines, Git stops with conflicts and keeps the merge in progress for you to resolve.")
     };
     if !confirm(&prompt) {
-        return gerr("cancelled", "merge cancelled");
+        return cancelled("git_merge");
     }
     // The dialog named these two tips and this branch: anything that moved meanwhile is not merged.
     if full_id(root, "HEAD")? != head || full_id(root, &target)? != tip || head_branch(root)?.as_deref() != Some(current.as_str()) {
@@ -1431,12 +1431,12 @@ fn map_merge_error(e: FsError) -> FsError {
 
 /// Runs `git merge --abort` when a merge is in progress (MERGE_HEAD exists). Asks first: the files the merge touched go
 /// back to how they were before it, so edits made to resolve conflicts are lost.
-pub fn merge_abort(root: &Path, confirm: &dyn Fn(&str) -> bool) -> R<()> {
+pub(crate) fn merge_abort(root: &Path, confirm: &dyn Fn(&str) -> bool) -> R<()> {
     if !git_says(run_git(root, &["rev-parse", "-q", "--verify", "MERGE_HEAD"], 256))? {
         return gerr("not_in_progress", "no merge is in progress");
     }
     if !confirm("Abort the merge? Git puts the files back to how they were before the merge. Edits you made to resolve conflicts are lost.") {
-        return gerr("cancelled", "abort cancelled");
+        return cancelled("git_merge_abort");
     }
     run_git(root, &["merge", "--abort"], 64 * 1024).map(|_| ())
 }
@@ -1495,7 +1495,7 @@ fn head_summary(root: &Path) -> R<String> {
 
 /// Amends the last commit with the staged changes and an optional new message. The author is kept; the committer is
 /// the user. A published commit is refused (`already_pushed`) unless `force` is set, and then the dialog says so.
-pub fn commit_amend(root: &Path, message: Option<&str>, force: bool, home: &Option<PathBuf>, confirm: &dyn Fn(&str) -> bool) -> R<CommitResult> {
+pub(crate) fn commit_amend(root: &Path, message: Option<&str>, force: bool, home: &Option<PathBuf>, confirm: &dyn Fn(&str) -> bool) -> R<CommitResult> {
     let msg = amend_message(message)?;
     if !has_head(root)? {
         return gerr("no_commits", "there is no commit to amend yet. Make the first commit instead");
@@ -1530,7 +1530,7 @@ pub fn commit_amend(root: &Path, message: Option<&str>, force: bool, home: &Opti
         prompt.push_str(" This commit already exists on a remote. Amending it changes its id, so a later push will need a force push.");
     }
     if !confirm(&prompt) {
-        return gerr("cancelled", "amend cancelled");
+        return cancelled("git_commit_amend");
     }
     let after = status(root)?;
     if full_id(root, "HEAD")? != head || staged_of(&after) != staged {
@@ -1714,7 +1714,7 @@ fn discard_all_prompt(plan: &AllPlan, include_untracked: bool) -> String {
 /// Restores every tracked change to HEAD (index and worktree) and moves untracked items to the Trash when asked.
 /// Never `git clean`, never a permanent delete, never an ignored file. Asks first; the plan and the file contents are
 /// checked again after the dialog and anything that changed meanwhile aborts with `changed_since_confirm`.
-pub fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash::Trasher) -> R<DiscardAllResult> {
+pub(crate) fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) -> bool, trasher: &dyn crate::trash::Trasher) -> R<DiscardAllResult> {
     let plan = plan_discard_all(root, include_untracked)?;
     if plan.restore.is_empty() && plan.trash.is_empty() {
         return gerr("nothing_to_discard", "there are no changes to discard");
@@ -1728,7 +1728,7 @@ pub fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&
     let fingerprints_of = |p: &AllPlan| -> Vec<String> { p.restore.iter().chain(p.trash.iter()).map(|rel| fingerprint(root, rel)).collect() };
     let before = fingerprints_of(&plan);
     if !confirm(&discard_all_prompt(&plan, include_untracked)) {
-        return gerr("cancelled", "discard cancelled");
+        return cancelled("git_discard_all");
     }
     let again = plan_discard_all(root, include_untracked)?;
     if again != plan || fingerprints_of(&again) != before {
@@ -1751,10 +1751,6 @@ pub fn discard_all_with(root: &Path, include_untracked: bool, confirm: &dyn Fn(&
         }
     }
     Ok(DiscardAllResult { restored: plan.restore.len() as u32, trashed, skipped })
-}
-
-pub fn discard_all(root: &Path, include_untracked: bool, confirm: &dyn Fn(&str) -> bool) -> R<DiscardAllResult> {
-    discard_all_with(root, include_untracked, confirm, &crate::trash::OsTrash)
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1805,32 +1801,53 @@ pub struct MergeReq {
     pub mode: Option<String>,
 }
 
-/// The title and accept label of the native dialog for each destructive command. Every front end reads them from
-/// here, so the same action shows the same words everywhere and the wording cannot drift between copies.
+/// The native dialog and the refusal text of each destructive command, keyed by the wire command name. Every front
+/// end reads them from here: the desktop's native dialog, the remote two-phase confirmation and the core's own
+/// cancel result, so the same action shows the same words everywhere and the wording cannot drift between copies.
 ///
-/// NOTE: `force` only changes `branch_delete`: an unmerged branch gets its own, louder wording. A name that is not
-/// listed has no dialog, and the caller must refuse the action rather than show a dialog with no title.
+/// NOTE: `force` only changes `git_branch_delete`: an unmerged branch gets its own, louder wording. A name that is
+/// not listed has no dialog, and the caller must refuse the action rather than show a dialog with no title.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConfirmSpec {
     pub title: &'static str,
     pub accept: &'static str,
+    /// The message of the `cancelled` error returned when the user answers no.
+    pub cancelled: &'static str,
 }
 
+/// The commands that ask a native dialog first. The helper runs exactly these in two phases.
+pub(crate) const CONFIRMED_COMMANDS: [&str; 9] = [
+    "git_discard",
+    "git_discard_all",
+    "git_checkout",
+    "git_branch_delete",
+    "git_stash_pop",
+    "git_stash_drop",
+    "git_merge",
+    "git_merge_abort",
+    "git_commit_amend",
+];
+
 pub fn confirm_spec(command: &str, force: bool) -> Option<ConfirmSpec> {
-    let (title, accept) = match (command, force) {
-        ("discard", _) => ("Discard changes?", "Discard"),
-        ("checkout", _) => ("Switch branch?", "Switch"),
-        ("branch_delete", false) => ("Delete branch?", "Delete"),
-        ("branch_delete", true) => ("Delete unmerged branch?", "Delete anyway"),
-        ("stash_pop", _) => ("Pop stash?", "Pop"),
-        ("stash_drop", _) => ("Drop stash?", "Drop"),
-        ("merge", _) => ("Merge branch?", "Merge"),
-        ("merge_abort", _) => ("Abort merge?", "Abort merge"),
-        ("amend", _) => ("Amend last commit?", "Amend"),
-        ("discard_all", _) => ("Discard all changes?", "Discard all"),
+    let (title, accept, cancelled) = match (command, force) {
+        ("git_discard", _) => ("Discard changes?", "Discard", "discard cancelled"),
+        ("git_discard_all", _) => ("Discard all changes?", "Discard all", "discard cancelled"),
+        ("git_checkout", _) => ("Switch branch?", "Switch", "checkout cancelled"),
+        ("git_branch_delete", false) => ("Delete branch?", "Delete", "branch delete cancelled"),
+        ("git_branch_delete", true) => ("Delete unmerged branch?", "Delete anyway", "branch delete cancelled"),
+        ("git_stash_pop", _) => ("Pop stash?", "Pop", "pop cancelled"),
+        ("git_stash_drop", _) => ("Drop stash?", "Drop", "drop cancelled"),
+        ("git_merge", _) => ("Merge branch?", "Merge", "merge cancelled"),
+        ("git_merge_abort", _) => ("Abort merge?", "Abort merge", "abort cancelled"),
+        ("git_commit_amend", _) => ("Amend last commit?", "Amend", "amend cancelled"),
         _ => return None,
     };
-    Some(ConfirmSpec { title, accept })
+    Some(ConfirmSpec { title, accept, cancelled })
+}
+
+/// The `cancelled` error for a command whose confirmation was refused. A command with no entry gets the plain text.
+pub fn cancelled<T>(command: &str) -> R<T> {
+    gerr("cancelled", confirm_spec(command, false).map_or("cancelled", |spec| spec.cancelled))
 }
 
 #[cfg(test)]
@@ -4218,22 +4235,26 @@ mod confirm_spec_tests {
 
     #[test]
     fn confirm_spec_matches_dialogs() {
-        // Every pair the destructive dialogs showed before the table existed. A change to one side must fail here.
+        // Every triple the destructive commands showed before the table existed. A change to one side must fail here.
         let cases = [
-            ("discard", false, "Discard changes?", "Discard"),
-            ("checkout", false, "Switch branch?", "Switch"),
-            ("branch_delete", false, "Delete branch?", "Delete"),
-            ("branch_delete", true, "Delete unmerged branch?", "Delete anyway"),
-            ("stash_pop", false, "Pop stash?", "Pop"),
-            ("stash_drop", false, "Drop stash?", "Drop"),
-            ("merge", false, "Merge branch?", "Merge"),
-            ("merge_abort", false, "Abort merge?", "Abort merge"),
-            ("amend", false, "Amend last commit?", "Amend"),
-            ("discard_all", false, "Discard all changes?", "Discard all"),
+            ("git_discard", false, "Discard changes?", "Discard", "discard cancelled"),
+            ("git_discard_all", false, "Discard all changes?", "Discard all", "discard cancelled"),
+            ("git_checkout", false, "Switch branch?", "Switch", "checkout cancelled"),
+            ("git_branch_delete", false, "Delete branch?", "Delete", "branch delete cancelled"),
+            ("git_branch_delete", true, "Delete unmerged branch?", "Delete anyway", "branch delete cancelled"),
+            ("git_stash_pop", false, "Pop stash?", "Pop", "pop cancelled"),
+            ("git_stash_drop", false, "Drop stash?", "Drop", "drop cancelled"),
+            ("git_merge", false, "Merge branch?", "Merge", "merge cancelled"),
+            ("git_merge_abort", false, "Abort merge?", "Abort merge", "abort cancelled"),
+            ("git_commit_amend", false, "Amend last commit?", "Amend", "amend cancelled"),
         ];
-        for (command, force, title, accept) in cases {
-            assert_eq!(confirm_spec(command, force), Some(ConfirmSpec { title, accept }), "{command} force={force}");
+        for (command, force, title, accept, cancelled) in cases {
+            assert_eq!(confirm_spec(command, force), Some(ConfirmSpec { title, accept, cancelled }), "{command} force={force}");
         }
         assert_eq!(confirm_spec("no_such_command", false), None, "an unknown command has no dialog");
+        for command in CONFIRMED_COMMANDS {
+            assert!(confirm_spec(command, false).is_some(), "{command} must have a dialog");
+        }
+        assert_eq!(cancelled::<()>("git_merge").unwrap_err().message, "merge cancelled");
     }
 }

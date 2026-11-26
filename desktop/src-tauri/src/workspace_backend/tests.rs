@@ -183,7 +183,7 @@ fn confirm_required_round_trip() {
     };
     let err = remote.call(&connector, "git_discard", json!({"paths": ["a.txt"]}), &ask_no).unwrap_err();
     assert_eq!((err.code, err.message.as_str()), ("cancelled", "discard cancelled"));
-    assert_eq!(asked.lock().unwrap().as_slice(), &[("discard".to_string(), false, "Discard changes to a.txt?".to_string())]);
+    assert_eq!(asked.lock().unwrap().as_slice(), &[("git_discard".to_string(), false, "Discard changes to a.txt?".to_string())]);
     let discards: Vec<Recorded> = connector.channel(0).calls().into_iter().filter(|(cmd, _, _)| cmd == "git_discard").collect();
     assert_eq!(discards.len(), 1, "a cancelled confirmation sends nothing more");
 
@@ -366,7 +366,7 @@ fn ssh_mode_dispatch_without_folder_is_no_project() {
     let _mode = crate::core_host::process_mode_guard();
     crate::core_host::set_process_mode(2);
     remote().set_folder_for_test(None);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({"req": {"path": ""}}), |_root, ()| Ok(0u8)));
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({"req": {"path": ""}})));
     crate::core_host::set_process_mode(0);
     assert_eq!(result.unwrap_err().code, "no_project");
 }
@@ -376,7 +376,7 @@ fn local_mode_without_a_project_is_no_project() {
     // The local branch is unchanged: it still asks for the active project root, and never the server.
     let _mode = crate::core_host::process_mode_guard();
     crate::core_host::set_process_mode(0);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, (), |_| json!({}), |_root, ()| Ok(0u8)));
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({})));
     if let Err(e) = &result {
         assert_eq!(e.code, "no_project");
     }

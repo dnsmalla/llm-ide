@@ -9,13 +9,15 @@
 //! open folder is opened again and watching is re-registered. `reset` closes it; Disconnect, Stop server, Uninstall
 //! and app exit reach it through the link's detach.
 
-use std::path::PathBuf;
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
-use llmide_workspace_core::scm::confirm_spec;
+use llmide_workspace_core::commands::{self, is_confirmed_command};
+use llmide_workspace_core::scm::{confirm_spec, ConfirmSpec};
+use llmide_workspace_core::trash::OsTrash;
 use llmide_workspace_core::search::aborted_done;
+use llmide_workspace_core::wire::{CloneEvent, CloneStarted, Opened, BUSY_CODE, CONFIRM_REQUIRED_CODE};
 use llmide_workspace_core::{FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -26,16 +28,14 @@ use crate::ssh_link::HelperSpawn;
 use crate::ssh_workspace::{decode_error, lost, EventKind, EventSink, WorkspaceClient};
 
 /// The reply the helper gives when a destructive command needs the user's answer first. Its message is the question.
-const CONFIRM_REQUIRED: &str = "confirm_required";
+const CONFIRM_REQUIRED: &str = CONFIRM_REQUIRED_CODE;
 /// The helper's code and the app's fixed text for an open folder that was deleted or renamed on the server.
-pub const ROOT_MISSING_CODE: &str = "root_missing";
-pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server.";
+pub use llmide_workspace_core::wire::{ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE};
 const CHANGED_MESSAGE: &str = "the files changed while the dialog was open; nothing was changed";
 /// The codes that mean the channel itself failed, so the folder stays open and the next call reconnects.
 const LOST_CODE: &str = "lost_connection";
 const TIMEOUT_CODE: &str = "SSH_TIMEOUT";
 /// A clone is already running on this channel. The helper allows one at a time too; this refuses before sending.
-const BUSY_CODE: &str = "busy";
 const BUSY_MESSAGE: &str = "A repository is already being cloned.";
 /// A clone that runs past its cap. Its own code, so it is not read as a failed channel (`SSH_TIMEOUT`).
 const CLONE_TIMEOUT_CODE: &str = "clone_timeout";
@@ -213,10 +213,11 @@ fn route_clone(routes: &Mutex<Routes>, data: Value) {
 
 /// The result of a clone from its `clone` event: `{path, name}` on success, the helper's error otherwise.
 fn clone_outcome(data: &Value) -> R<Value> {
-    if data.get("ok").and_then(Value::as_bool) != Some(true) {
+    let event = serde_json::from_value::<CloneEvent>(data.clone()).ok().filter(|event| event.ok);
+    let Some(event) = event else {
         return Err(decode_error(data));
-    }
-    match (data.get("path").and_then(Value::as_str), data.get("name").and_then(Value::as_str)) {
+    };
+    match (event.path, event.name) {
         (Some(path), Some(name)) => Ok(json!({"path": path, "name": name})),
         _ => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
     }
@@ -250,38 +251,8 @@ fn route_watch(routes: &Mutex<Routes>, data: Value) {
     }
 }
 
-fn dialog_for(cmd: &str, args: &Value) -> Option<(&'static str, bool)> {
-    match cmd {
-        "git_discard" => Some(("discard", false)),
-        "git_discard_all" => Some(("discard_all", false)),
-        "git_checkout" => Some(("checkout", false)),
-        "git_branch_delete" => Some(("branch_delete", args.get("force").and_then(Value::as_bool).unwrap_or(false))),
-        "git_stash_pop" => Some(("stash_pop", false)),
-        "git_stash_drop" => Some(("stash_drop", false)),
-        "git_merge" => Some(("merge", false)),
-        "git_merge_abort" => Some(("merge_abort", false)),
-        "git_commit_amend" => Some(("amend", false)),
-        _ => None,
-    }
-}
-
-/// The text a refused confirmation carries. Each matches the local command's own cancel message.
-fn cancel_message(cmd: &str) -> &'static str {
-    match cmd {
-        "git_discard" | "git_discard_all" => "discard cancelled",
-        "git_checkout" => "checkout cancelled",
-        "git_branch_delete" => "branch delete cancelled",
-        "git_stash_pop" => "pop cancelled",
-        "git_stash_drop" => "drop cancelled",
-        "git_merge" => "merge cancelled",
-        "git_merge_abort" => "abort cancelled",
-        "git_commit_amend" => "amend cancelled",
-        _ => "cancelled",
-    }
-}
-
 fn cancelled(cmd: &str) -> FsError {
-    FsError { code: "cancelled", message: cancel_message(cmd).into() }
+    llmide_workspace_core::scm::cancelled::<()>(cmd).unwrap_err()
 }
 
 /// One request, with the two-phase confirmation the native dialog needs. Without `confirm` the helper answers
@@ -292,10 +263,9 @@ fn call_confirmed(client: &dyn WorkspaceApi, cmd: &str, args: Value, ask: Ask<'_
         Err(e) if e.code == CONFIRM_REQUIRED => e.message,
         other => return other,
     };
-    let Some((key, force)) = dialog_for(cmd, &args) else {
-        return Err(cancelled(cmd));
-    };
-    if !ask(key, force, &question)? {
+    // Only the branch delete's wording depends on an argument: `force` names an unmerged branch.
+    let force = cmd == "git_branch_delete" && args.get("force").and_then(Value::as_bool).unwrap_or(false);
+    if !ask(cmd, force, &question)? {
         return Err(cancelled(cmd));
     }
     match client.call(cmd, args, Some(&question)) {
@@ -499,11 +469,11 @@ impl Remote {
     pub fn project_create(&self, connector: &dyn Connector, parent: &str, name: &str) -> R<ProjectInfo> {
         let client = self.ensure(connector)?;
         let answer = client.call("project_create", json!({"parent": parent, "name": name}), None)?;
-        let root = answer.get("root").and_then(Value::as_str).unwrap_or_default();
+        let root = serde_json::from_value::<Opened>(answer).unwrap_or_default().root;
         if root.is_empty() {
             return Err(FsError { code: "invalid_path", message: "The server did not return a usable folder.".into() });
         }
-        self.open(connector, root)
+        self.open(connector, &root)
     }
 
     /// Runs a clone on the server and waits for its `clone` event, up to `cap`. The helper answers the start with
@@ -526,8 +496,8 @@ impl Remote {
         // closes. The route is cleared on every path below. `settle` applies to a clone too, so a folder that is gone
         // returns the app to the server home.
         let outcome = match client.call("repo_clone", json!({"req": req}), None) {
-            Ok(started) => match started.get("id").and_then(Value::as_u64) {
-                Some(id) => wait_for_clone(&*client, &events, id, cap),
+            Ok(started) => match serde_json::from_value::<CloneStarted>(started).ok() {
+                Some(started) => wait_for_clone(&*client, &events, started.id, cap),
                 None => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
             },
             Err(e) => Err(e),
@@ -542,10 +512,8 @@ impl Remote {
         let _opening = locked(&self.opening);
         let client = self.ensure(connector)?;
         let answer = client.call("open", json!({"root": path}), None)?;
-        let info = ProjectInfo {
-            name: answer.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
-            root: answer.get("root").and_then(Value::as_str).unwrap_or_default().to_string(),
-        };
+        let opened = serde_json::from_value::<Opened>(answer).unwrap_or_default();
+        let info = ProjectInfo { name: opened.name, root: opened.root };
         if info.name.is_empty() || info.root.is_empty() {
             // The helper now sits on a folder this app cannot name, so neither side keeps it: the channel ends and
             // the next call starts a helper with no folder.
@@ -742,38 +710,47 @@ pub(crate) fn project_call_with(remote: &Remote, connector: &dyn Connector, cmd:
     remote.call(connector, cmd, args, &native_dialog)
 }
 
+/// Runs a call against the SSH-mode state and the real link on a blocking thread, which SSH calls need so the UI
+/// thread never waits on the server. Every command that goes to the helper without a local twin uses this, so the
+/// remote/connector pair is named in one place.
+pub(crate) async fn on_remote<T: Send + 'static>(call: impl FnOnce(&Remote, &dyn Connector) -> R<T> + Send + 'static) -> R<T> {
+    tauri::async_runtime::spawn_blocking(move || call(remote(), &LinkConnector))
+        .await
+        .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+}
+
 /// Runs `f` on a blocking thread, which SSH calls need so the UI thread never waits on the server.
 pub async fn on_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f).await.map_err(|e| format!("task failed: {e}"))
 }
 
-/// Runs an Explorer command. In SSH mode it goes to the server: `args` builds the UI's argument object from the
-/// request, and only on this branch. Otherwise `local` runs with the active project root, exactly as before. The
-/// request is moved into whichever branch runs. `needs_local_mode` keeps the file commands' hub-mode refusal; the git,
-/// search and watch commands never had it, so they pass `false`.
-pub async fn dispatch<Q, T>(
-    cmd: &'static str,
-    needs_local_mode: bool,
-    req: Q,
-    args: impl FnOnce(&Q) -> Value + Send + 'static,
-    local: impl FnOnce(PathBuf, Q) -> R<T> + Send + 'static,
-) -> R<Value>
-where
-    Q: Send + 'static,
-    T: Serialize,
-{
+/// Runs an Explorer command. In SSH mode it goes to the server; otherwise the core's command table runs it on the
+/// active project, with the SAME JSON `args` the SSH path sends, so the two paths cannot read an argument differently.
+/// `needs_local_mode` keeps the file commands' hub-mode refusal; the git, search and watch commands never had it, so
+/// they pass `false`.
+pub async fn dispatch(cmd: &'static str, needs_local_mode: bool, args: Value) -> R<Value> {
     tauri::async_runtime::spawn_blocking(move || {
         if is_ssh_mode() {
-            return remote().call(&LinkConnector, cmd, args(&req), &native_dialog);
+            return project_call_with(remote(), &LinkConnector, cmd, args);
         }
         if needs_local_mode {
             crate::core_host::require_local_mode()?;
         }
         let root = crate::fs_ops::active_root()?;
-        to_json(&local(root, req)?)
+        run_local(&root, cmd, &args)
     })
     .await
     .map_err(|e| FsError { code: "io", message: format!("task failed: {e}") })?
+}
+
+/// Runs one command from the core's table on this computer. The native dialog and the OS trash are the host's part;
+/// a destructive command also goes through the rate limit that remote confirmations share.
+fn run_local(root: &std::path::Path, cmd: &str, args: &Value) -> R<Value> {
+    let ask = |spec: &ConfirmSpec, question: &str| crate::confirm::ask(spec.title, question, spec.accept, true);
+    if is_confirmed_command(cmd) {
+        return DESTRUCTIVE_DIALOGS.run(|| commands::run(root, cmd, args, &ask, &OsTrash));
+    }
+    commands::run(root, cmd, args, &ask, &OsTrash)
 }
 
 #[cfg(test)]

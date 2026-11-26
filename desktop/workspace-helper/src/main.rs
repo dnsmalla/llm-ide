@@ -72,8 +72,8 @@ fn read_requests<R: BufRead>(mut reader: R, out: &Out, searches: &Searches, clon
                 let reply = err_response(0, "bad_request", "the request line is longer than 64 MB");
                 let _ = tx.send(Job::Refused(reply));
             }
-            Ok(Line::Text(bytes)) if bytes.iter().all(u8::is_ascii_whitespace) => {}
-            Ok(Line::Text(bytes)) => route(out, searches, clones, tx, &bytes),
+            Ok(Line::Text(bytes) | Line::Unterminated(bytes)) if bytes.iter().all(u8::is_ascii_whitespace) => {}
+            Ok(Line::Text(bytes) | Line::Unterminated(bytes)) => route(out, searches, clones, tx, &bytes),
         }
     }
 }

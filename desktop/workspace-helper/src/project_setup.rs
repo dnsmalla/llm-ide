@@ -7,10 +7,10 @@ use std::path::Path;
 use llmide_workspace_core::project::graph::{read_within_max, GRAPH_TOO_LARGE};
 use llmide_workspace_core::project::{layout, scaffold};
 use llmide_workspace_core::{err, FsError, R};
-use serde::Serialize;
 use serde_json::Value;
 
 use crate::protocol::MAX_LINE_BYTES;
+use llmide_workspace_core::wire::ProjectCreated;
 use crate::session::{home_path, home_root, to_value, Session};
 
 /// The largest graph file the helper reads. A real graph is about 1 MB, so this only refuses a file that could not
@@ -23,14 +23,6 @@ const ANSWER_ENVELOPE_BYTES: usize = 4096;
 /// The text the desktop shows for a folder without `system/project.json`. Fixed, because the app matches the code.
 pub const NOT_A_PROJECT_MESSAGE: &str = "This folder is not an LLM-IDE project.";
 
-/// The reply to `project_create`: the new project's canonical root and its marker identity.
-#[derive(Serialize)]
-struct Created {
-    root: String,
-    id: String,
-    name: String,
-}
-
 /// Creates `<parent>/<name>` and scaffolds it. The parent must be inside the server home, and the home itself is a
 /// valid parent (`~/name` is a project, as it is locally). The core still refuses a target that is too broad.
 /// Needs no open folder and opens none.
@@ -39,7 +31,7 @@ pub fn create(parent_raw: &str, name_raw: &str) -> R<Value> {
     let home = home_root()?;
     let parent = home_path(parent_raw)?;
     let (root, project) = scaffold::create_project(&parent, &name, &home).map_err(scaffold_error)?;
-    to_value(&Created { root: root.to_string_lossy().into_owned(), id: project.id, name: project.display_name })
+    to_value(&ProjectCreated { root: root.to_string_lossy().into_owned(), id: project.id, name: project.display_name })
 }
 
 /// The Paths card for the open folder. A folder without the project marker is still answered, with `isProject`

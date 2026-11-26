@@ -9,13 +9,12 @@
 //!   relative globs / relative file names; every path returned is relative.
 //! - One search at a time: starting one cancels the previous; `project_search_cancel` stops it.
 
-use std::sync::atomic::Ordering;
-
 use std::sync::Arc;
 
 use tauri::ipc::Channel;
 
-pub use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, SearchEvent, Searches, Started};
+use llmide_workspace_core::search::{self, Searches, SearchEvent, Started};
+pub use llmide_workspace_core::search::Query;
 use llmide_workspace_core::{FsError, R};
 
 use crate::fs_ops::active_root;
@@ -32,28 +31,11 @@ pub async fn project_search_start(req: Query, on_event: Channel<serde_json::Valu
         return remote_search_start(req, on_event).await;
     }
     let root = active_root()?;
-    validate(&req)?;
-    let (id, cancel) = SEARCHES.begin();
-    tauri::async_runtime::spawn_blocking(move || {
-        let _running = SEARCHES.run_lock();
-        // A newer search may have cancelled this one while it waited for the lock.
-        if cancel.load(Ordering::Relaxed) {
-            let _ = on_event.send(serde_json::to_value(aborted_done(id)).unwrap_or(serde_json::Value::Null));
-            SEARCHES.finish(id);
-            return;
-        }
-        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            // The page gets the same JSON the helper sends, so the channel carries a value, not the enum.
-        let mut sink = |ev: SearchEvent| on_event.send(serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null)).is_ok();
-            run_search(&root, &req, id, &cancel, &mut sink)
-        }));
-        // `Done` is always sent: on a late error (a path went away) and on a panic too.
-        if !matches!(ran, Ok(Ok(()))) {
-            let _ = on_event.send(serde_json::to_value(aborted_done(id)).unwrap_or(serde_json::Value::Null));
-        }
-        SEARCHES.finish(id);
-    });
-    Ok(Started { id })
+    // The page gets the same JSON the helper sends, so the channel carries a value, not the enum.
+    let send = move |ev: SearchEvent| on_event.send(serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null)).is_ok();
+    search::spawn(&SEARCHES, root, req, send, |job| {
+        tauri::async_runtime::spawn_blocking(job);
+    })
 }
 
 /// SSH mode: the search runs on the server. Its events reach the page's channel as the helper sends them.

@@ -33,15 +33,15 @@ use sha2::{Digest, Sha256};
 
 use crate::{err, io_err, FsError, R};
 
-pub const MAX_PATH_LEN: usize = 4096;
-pub const LIST_DEFAULT_LIMIT: usize = 1000;
-pub const LIST_MAX_LIMIT: usize = 5000;
+pub(crate) const MAX_PATH_LEN: usize = 4096;
+pub(crate) const LIST_DEFAULT_LIMIT: usize = 1000;
+pub(crate) const LIST_MAX_LIMIT: usize = 5000;
 /// A directory with more entries than this is refused (listing it would pin memory).
-pub const LIST_SCAN_CAP: usize = 1_000_000;
-pub const READ_DEFAULT_MAX: u64 = 5 * 1024 * 1024;
-pub const READ_HARD_MAX: u64 = 32 * 1024 * 1024;
-pub const RANGE_MAX: u64 = 1024 * 1024;
-pub const WRITE_MAX: usize = 64 * 1024 * 1024;
+pub(crate) const LIST_SCAN_CAP: usize = 1_000_000;
+pub(crate) const READ_DEFAULT_MAX: u64 = 5 * 1024 * 1024;
+pub(crate) const READ_HARD_MAX: u64 = 32 * 1024 * 1024;
+pub(crate) const RANGE_MAX: u64 = 1024 * 1024;
+pub(crate) const WRITE_MAX: usize = 64 * 1024 * 1024;
 const BINARY_SNIFF: usize = 8192;
 
 // ---- root + path resolution ------------------------------------------------------------
@@ -131,7 +131,7 @@ fn resolve_new(root: &Path, rel: &str) -> R<(PathBuf, String)> {
     Ok((parent, (*name).to_string()))
 }
 
-pub fn rel_of(root: &Path, abs: &Path) -> String {
+pub(crate) fn rel_of(root: &Path, abs: &Path) -> String {
     let rel = abs.strip_prefix(root).unwrap_or(abs);
     let mut out = String::new();
     for c in rel.components() {
@@ -147,7 +147,7 @@ pub fn rel_of(root: &Path, abs: &Path) -> String {
 
 /// True for a path component git treats as its metadata folder: `.git` in any case, with
 /// NTFS trailing dots/spaces, the `GIT~1` short name, and HFS+/APFS ignorable code points.
-pub fn is_git_component(name: &str) -> bool {
+pub(crate) fn is_git_component(name: &str) -> bool {
     let cleaned: String = name
         .chars()
         .filter(|c| !matches!(*c, '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'))
@@ -415,7 +415,7 @@ fn build_raws(
     Ok((std::sync::Arc::new(raws), skipped))
 }
 
-pub fn list_dir(root: &Path, req: &ListReq) -> R<ListResult> {
+pub(crate) fn list_dir(root: &Path, req: &ListReq) -> R<ListResult> {
     let dir = resolve_existing(root, &req.path)?;
     if !dir.is_dir() {
         return err("not_a_directory", "not a folder");
@@ -580,7 +580,7 @@ pub fn decode(bytes: &[u8]) -> (Option<String>, &'static str, bool, bool) {
     }
 }
 
-pub fn read_file(root: &Path, req: &ReadReq) -> R<ReadResult> {
+pub(crate) fn read_file(root: &Path, req: &ReadReq) -> R<ReadResult> {
     let canonical = resolve_existing(root, &req.path)?;
     let (f, meta) = open_verified(root, &canonical)?;
     let max = req.max_bytes.unwrap_or(READ_DEFAULT_MAX).min(READ_HARD_MAX);
@@ -637,7 +637,7 @@ pub struct RangeResult {
 }
 
 /// "Open anyway" for a refused large file: a bounded byte range, never the whole file.
-pub fn read_range(root: &Path, req: &RangeReq) -> R<RangeResult> {
+pub(crate) fn read_range(root: &Path, req: &RangeReq) -> R<RangeResult> {
     use std::io::{Seek, SeekFrom};
     let canonical = resolve_existing(root, &req.path)?;
     let (mut f, meta) = open_verified(root, &canonical)?;
@@ -1086,7 +1086,7 @@ pub fn delete(root: &Path, rel: &str) -> R<()> {
 
 /// `delete` through an injectable trash. There is no permanent-delete fallback: a refusing trash leaves the
 /// entry untouched and the error is `trash_unavailable`.
-pub fn delete_with(root: &Path, rel: &str, trasher: &dyn crate::trash::Trasher) -> R<()> {
+pub(crate) fn delete_with(root: &Path, rel: &str, trasher: &dyn crate::trash::Trasher) -> R<()> {
     let target = resolve_entry(root, rel)?;
     trasher.trash(&target).map_err(|e| FsError { code: e.code, message: e.message })
 }
@@ -1101,7 +1101,7 @@ pub struct ImageResult {
 
 /// An image as a data URL for the Explorer's image preview. Root-confined, extension allowlist, 25 MB cap; no
 /// SVG (it can carry script) and no PDF (the webview cannot render it inline under the CSP).
-pub fn read_image(root: &Path, path: &str) -> R<ImageResult> {
+pub(crate) fn read_image(root: &Path, path: &str) -> R<ImageResult> {
     const MAX: u64 = 25 * 1024 * 1024;
     let canonical = resolve_existing(root, path)?;
     let ext = canonical.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).unwrap_or_default();

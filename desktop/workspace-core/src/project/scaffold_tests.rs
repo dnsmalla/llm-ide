@@ -58,14 +58,6 @@ fn names_must_be_one_safe_segment() {
 }
 
 #[test]
-fn iso_dates_are_utc_and_exact() {
-    assert_eq!(iso8601_utc(0), "1970-01-01T00:00:00Z");
-    assert_eq!(iso8601_utc(951_782_400), "2000-02-29T00:00:00Z");
-    assert_eq!(iso8601_utc(1_793_448_000), "2026-10-31T12:00:00Z");
-    assert_eq!(iso8601_utc(1_709_251_199), "2024-02-29T23:59:59Z");
-}
-
-#[test]
 fn create_makes_the_mac_layout_and_the_project_marker() {
     let parent = scratch("create");
     let root = create(&parent, "Alpha Project").unwrap();

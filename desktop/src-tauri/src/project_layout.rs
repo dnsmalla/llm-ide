@@ -15,7 +15,7 @@ use llmide_workspace_core::R;
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::workspace_backend::{self, CommandError, Connector, LinkConnector, Remote};
+use crate::workspace_backend::{self, CommandError, Connector, Remote};
 
 fn active_root() -> Result<PathBuf, String> {
     crate::project::active_root().ok_or_else(|| "no project is open".to_string())
@@ -47,7 +47,7 @@ fn to_json<T: Serialize>(value: &T) -> Result<Value, String> {
 #[tauri::command]
 pub async fn project_paths() -> Result<Value, CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return Ok(workspace_backend::on_blocking(|| ssh_paths(workspace_backend::remote(), &LinkConnector)).await??);
+        return Ok(workspace_backend::on_remote(ssh_paths).await?);
     }
     let root = active_root()?;
     Ok(to_json(&blocking(move || layout::paths(&root)).await?)?)
@@ -56,7 +56,7 @@ pub async fn project_paths() -> Result<Value, CommandError> {
 #[tauri::command]
 pub async fn project_memory() -> Result<Value, CommandError> {
     if workspace_backend::is_ssh_mode() {
-        return Ok(workspace_backend::on_blocking(|| ssh_memory(workspace_backend::remote(), &LinkConnector)).await??);
+        return Ok(workspace_backend::on_remote(ssh_memory).await?);
     }
     let root = active_root()?;
     Ok(to_json(&blocking(move || layout::memory(&root)).await?)?)
@@ -68,7 +68,7 @@ pub async fn project_memory() -> Result<Value, CommandError> {
 #[tauri::command]
 pub async fn project_rebuild_folders() -> Result<(), CommandError> {
     if workspace_backend::is_ssh_mode() {
-        workspace_backend::on_blocking(|| ssh_rebuild(workspace_backend::remote(), &LinkConnector)).await??;
+        workspace_backend::on_remote(ssh_rebuild).await?;
         return Ok(());
     }
     let root = active_root()?;

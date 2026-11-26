@@ -5,6 +5,7 @@
 //! the desktop's own modules. The host keeps what is specific to it: the active project root and the command
 //! wrappers.
 //!
+//! - `commands`: the one table of Explorer commands (`run`) that the desktop and the helper both call.
 //! - `fs`: list, read, write, create, rename, copy and delete inside one root (see that module's docs).
 //! - `paths`: root validation, the "too broad" rule, the real-path check of an open descriptor and the Windows
 //!   verbatim-prefix rule that git and cmd.exe need.
@@ -12,19 +13,24 @@
 //!   graph-file read of a project root.
 //! - `git`, `git_config`: the hardened git runner, status, diff and stage; `scm`: the Changes actions (discard, commit,
 //!   branches, stash, merge, amend) and `confirm_spec`, the one table of their native dialog wording.
+//! - `proc`: the capped wait for a child (pipes drained, process tree killed) that git, clone and credentials share.
 //! - `text`: single-line sanitising for text the user reads.
+//! - `wire`: the host/helper line protocol, its constants and typed replies, defined once.
 //! - `trash`: the only removal path. It moves to the OS trash and never deletes permanently.
 
+pub mod commands;
 pub mod fs;
 pub mod git;
 pub mod git_config;
 pub mod scm;
 pub mod paths;
+pub mod proc;
 pub mod project;
 pub mod search;
 pub mod text;
 pub mod trash;
 pub mod watch;
+pub mod wire;
 
 use std::sync::Mutex;
 

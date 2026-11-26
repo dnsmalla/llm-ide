@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
 use llmide_workspace_core::project::layout;
-use llmide_workspace_core::project::clone::{self, CloneRequest, Token};
-use llmide_workspace_core::search::{aborted_done, run_search, validate, Query, Searches, Started};
+use llmide_workspace_core::project::clone::{self, CloneRequest, Credential, Token};
+use llmide_workspace_core::search::{self, Query, Searches};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
-use llmide_workspace_core::watch::{Watch, WatchBatch, WatchStarted};
+use llmide_workspace_core::watch::{WatchBatch, WatchSlot};
 use llmide_workspace_core::{err, io_err, FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -26,10 +26,10 @@ use serde_json::{json, Value};
 use crate::clone_credential::{self, RedeemError, RedeemFiles};
 use crate::project_setup;
 use crate::protocol::{event, Out, PROTOCOL};
+use llmide_workspace_core::wire::{CloneEvent, CloneStarted, MadeDir, Hello, Opened, BUSY_CODE};
 
 /// The code and text for a folder that was open but is gone. The desktop matches the code, so both are fixed.
-pub const ROOT_MISSING_CODE: &str = "root_missing";
-pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server.";
+pub use llmide_workspace_core::wire::{ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE};
 
 /// The text the desktop shows when the server has no git. Fixed, because the app shows it as is.
 pub const GIT_MISSING_MESSAGE: &str = "git is not installed on the server.";
@@ -147,7 +147,7 @@ pub struct Session {
     pub(crate) git_lookup: Box<dyn Fn() -> Option<PathBuf>>,
     trasher: Box<dyn Trasher>,
     root: Option<PathBuf>,
-    watch: Option<Watch>,
+    watch: WatchSlot,
 }
 
 /// Encodes an event payload. The core's event types always encode, so the fallback is only a guard against a panic.
@@ -167,7 +167,7 @@ impl Session {
 
     /// The trash is injected so tests never move anything into a real Trash.
     pub fn with_trasher(out: Arc<Out>, searches: Arc<Searches>, clones: Arc<Clones>, trasher: Box<dyn Trasher>) -> Self {
-        Self { out, searches, clones, git_lookup: Box::new(git_binary), trasher, root: None, watch: None }
+        Self { out, searches, clones, git_lookup: Box::new(git_binary), trasher, root: None, watch: WatchSlot::new() }
     }
 
     pub fn trasher(&self) -> &dyn Trasher {
@@ -195,11 +195,7 @@ impl Session {
     }
 
     pub fn hello(&self) -> Value {
-        json!({
-            "version": env!("CARGO_PKG_VERSION"),
-            "protocol": PROTOCOL,
-            "git": git_runs(),
-        })
+        encode(&Hello { git: git_runs(), protocol: PROTOCOL, version: env!("CARGO_PKG_VERSION").into() })
     }
 
     /// Opens a folder. Replaces the open one, and stops its watcher and any running search, which belong to it.
@@ -207,8 +203,9 @@ impl Session {
         let real = home_path(raw)?;
         let root = confined(checked_root(&real)?)?;
         self.stop_folder_work();
-        let name = root.file_name().map_or_else(|| root.to_string_lossy().into_owned(), |n| n.to_string_lossy().into_owned());
-        let reply = json!({"name": name, "root": root.to_string_lossy()});
+        // The same display name the desktop shows for a local folder (control characters removed, capped).
+        let name = llmide_workspace_core::text::folder_display_name(&root);
+        let reply = encode(&Opened { name, root: root.to_string_lossy().into_owned() });
         self.root = Some(root);
         Ok(reply)
     }
@@ -254,29 +251,25 @@ impl Session {
         }
         let made = parent.join(name);
         fs::create_dir(&made).map_err(|e| io_err("cannot create the folder", e))?;
-        Ok(json!({"path": made.to_string_lossy()}))
+        Ok(encode(&MadeDir { path: made.to_string_lossy().into_owned() }))
     }
 
     /// Starts watching the open folder. Batches are pushed as `watch` events; a second start replaces the first.
     pub fn watch_start(&mut self) -> R<Value> {
         let root = self.root()?;
         let out = Arc::clone(&self.out);
-        let (watch, mode) = Watch::start(&root, false, Box::new(move |batch: WatchBatch| {
+        let started = self.watch.start(&root, false, Box::new(move |batch: WatchBatch| {
             out.send(&event("watch", encode(&batch)));
         }))?;
-        self.watch = Some(watch);
-        to_value(&WatchStarted { mode })
+        to_value(&started)
     }
 
     pub fn watch_set(&mut self, dirs: &[String]) -> R<Value> {
-        match self.watch.as_mut() {
-            Some(watch) => watch.set_dirs(dirs).map(|()| Value::Null),
-            None => err("no_watch", "the file watcher is not running"),
-        }
+        self.watch.set_dirs(dirs).map(|()| Value::Null)
     }
 
     pub fn watch_stop(&mut self) -> Value {
-        self.watch = None;
+        self.watch.stop();
         Value::Null
     }
 
@@ -284,27 +277,17 @@ impl Session {
     /// `search` events, and the last one is always `done` for this id, even after a late error or a panic.
     pub fn search_start(&mut self, query: Query) -> R<Value> {
         let root = self.root()?;
-        validate(&query)?;
-        let (id, cancel) = self.searches.begin();
         let out = Arc::clone(&self.out);
-        let searches = Arc::clone(&self.searches);
-        std::thread::spawn(move || {
-            let _running = searches.run_lock();
-            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                out.send(&event("search", encode(&aborted_done(id))));
-                searches.finish(id);
-                return;
-            }
-            let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let mut sink = |ev: llmide_workspace_core::search::SearchEvent| out.send(&event("search", encode(&ev)));
-                run_search(&root, &query, id, &cancel, &mut sink)
-            }));
-            if !matches!(ran, Ok(Ok(()))) {
-                out.send(&event("search", encode(&aborted_done(id))));
-            }
-            searches.finish(id);
-        });
-        to_value(&Started { id })
+        search::spawn(
+            Arc::clone(&self.searches),
+            root,
+            query,
+            move |ev| out.send(&event("search", encode(&ev))),
+            |job| {
+                std::thread::spawn(job);
+            },
+        )
+        .and_then(|started| to_value(&started))
     }
 
     /// Starts a clone into the open project's `code/` folder on its own thread and returns at once. The outcome
@@ -320,10 +303,9 @@ impl Session {
         };
         let plan = clone::plan(&root, &req).map_err(|message| FsError { code: "clone_refused", message })?;
         let Some((id, cancel)) = self.clones.begin() else {
-            return err("busy", "a clone is already running on the server");
+            return err(BUSY_CODE, "a clone is already running on the server");
         };
-        let typed = req.token.clone();
-        let grant = req.grant.clone();
+        let credential = req.credential();
         let files = default_redeem_files();
         let out = Arc::clone(&self.out);
         let clones = Arc::clone(&self.clones);
@@ -332,13 +314,13 @@ impl Session {
             // The redeem runs here, not before the reply, so the started answer is not held up by it. It is inside
             // the same guard as the clone, so a panic in either still sends the event and frees the slot.
             let ran = catch_unwind(AssertUnwindSafe(|| {
-                let (token, redeem_failed) = resolve_token(typed, grant, files.as_ref());
+                let (token, redeem_failed) = resolve_token(credential, files.as_ref());
                 clone::run(&plan, token.as_ref(), &cancel, &git).map_err(|message| refused_message(message, redeem_failed))
             }));
             let data = match ran {
-                Ok(Ok(done)) => json!({"id": id, "ok": true, "path": done.path, "name": done.name}),
+                Ok(Ok(done)) => encode(&CloneEvent::done(id, done.path, done.name)),
                 Ok(Err(message)) => clone_failure(id, &message),
-                Err(_) => json!({"id": id, "ok": false, "code": "internal", "message": CLONE_INTERNAL_MESSAGE}),
+                Err(_) => encode(&CloneEvent::failed(id, "internal", CLONE_INTERNAL_MESSAGE)),
             };
             clones.end(id, || {
                 out.send(&event("clone", data));
@@ -349,7 +331,7 @@ impl Session {
             release.end(id, || {});
             return err("internal", "the helper could not start the clone");
         }
-        Ok(json!({"started": true, "id": id}))
+        Ok(encode(&CloneStarted { id, started: true }))
     }
 
     /// Stops the watcher, any running clone and any running search, and waits for them to wind down. Used at end of
@@ -363,25 +345,26 @@ impl Session {
     }
 
     fn stop_folder_work(&mut self) {
-        self.watch = None;
+        self.watch.stop();
         // A new id cancels the search that belongs to the previous folder.
         let _ = self.searches.begin();
     }
 }
 
-/// The token a clone runs with, and whether a grant was given but could not be redeemed. A usable typed token always
-/// wins and no grant is redeemed then. A blank or unusable typed token does not count as one, so the grant is used.
-/// Without a usable typed token, the grant is redeemed on the server core over loopback.
-fn resolve_token(typed: Option<Token>, grant: Option<Token>, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
+/// The token a clone runs with, and whether a grant was given but could not be redeemed. Which credential counts is
+/// the core's rule (`CloneRequest::credential`): a usable typed token wins and no grant is redeemed. A grant is
+/// redeemed on the server core over loopback.
+fn resolve_token(credential: Credential, files: Option<&RedeemFiles>) -> (Option<Token>, bool) {
     // Test seam: a grant with this text makes the redeem panic, to prove the clone guard still reports and frees.
     #[cfg(test)]
-    if grant.as_ref().is_some_and(|g| g.expose() == PANIC_GRANT_FOR_TEST) {
+    if matches!(&credential, Credential::Grant(g) if g.expose() == PANIC_GRANT_FOR_TEST) {
         panic!("injected panic in resolve_token");
     }
-    if typed.as_ref().is_some_and(Token::is_usable) {
-        return (typed, false);
-    }
-    let Some(grant) = grant else { return (None, false) };
+    let grant = match credential {
+        Credential::Token(token) => return (Some(token), false),
+        Credential::Anonymous => return (None, false),
+        Credential::Grant(grant) => grant,
+    };
     let redeemed = files.ok_or(RedeemError::State).and_then(|files| clone_credential::redeem(files, &grant));
     match redeemed {
         Ok(token) => (Some(token), false),
@@ -407,7 +390,7 @@ fn refused_message(message: String, redeem_failed: bool) -> String {
 /// the person asked for from a failure. Git's text is the only external text here, and it never carries the token.
 fn clone_failure(id: u64, message: &str) -> Value {
     let code = if message == clone::CANCELLED { "cancelled" } else { "clone_failed" };
-    json!({"id": id, "ok": false, "code": code, "message": message})
+    encode(&CloneEvent::failed(id, code, message))
 }
 
 /// Whether `git --version` runs. The core's git lookup only finds the binary, and the desktop wants to know that

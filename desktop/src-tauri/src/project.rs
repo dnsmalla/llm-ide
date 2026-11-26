@@ -24,8 +24,6 @@ use serde::Serialize;
 pub const MAX_RECENT: usize = 10;
 /// A recent-projects file larger than this is ignored.
 const RECENT_FILE_MAX_BYTES: u64 = 64 * 1024;
-/// Display names are capped (tray label, UI).
-const NAME_MAX_CHARS: usize = 60;
 
 static ACTIVE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -60,8 +58,7 @@ pub fn validate_root(chosen: &Path) -> Result<PathBuf, String> {
 }
 
 fn display_name(root: &Path) -> String {
-    let n = root.file_name().and_then(|n| n.to_str()).unwrap_or("project");
-    n.chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect()
+    llmide_workspace_core::text::folder_display_name(root)
 }
 
 fn info(root: &Path) -> ProjectInfo {
@@ -77,15 +74,6 @@ fn info(root: &Path) -> ProjectInfo {
 pub struct RecentRecord {
     pub root: String,
     pub opened_at: Option<String>,
-}
-
-/// Puts `new` first, drops duplicates, keeps at most `max`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn push_recent(list: &[String], new: &str, max: usize) -> Vec<String> {
-    let mut out = vec![new.to_string()];
-    out.extend(list.iter().filter(|p| p.as_str() != new).cloned());
-    out.truncate(max);
-    out
 }
 
 /// Puts `new` first, drops any earlier entry for the same root, keeps at most `max`.
@@ -116,17 +104,13 @@ pub fn parse_recent_records(json: &str, max: usize) -> Vec<RecentRecord> {
         .collect()
 }
 
-/// Root strings only, in stored order (see `parse_recent_records`).
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn parse_recent(json: &str, max: usize) -> Vec<String> {
-    parse_recent_records(json, max).into_iter().map(|r| r.root).collect()
-}
-
 /// Current time as RFC 3339 UTC, whole seconds (`2026-11-02T10:00:00Z`).
 pub fn now_rfc3339() -> String {
     let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
     format_rfc3339_utc(secs)
 }
+
+pub use llmide_workspace_core::text::format_rfc3339_utc;
 
 fn days_in_month(year: i64, month: i64) -> i64 {
     match month {
@@ -135,23 +119,6 @@ fn days_in_month(year: i64, month: i64) -> i64 {
         4 | 6 | 9 | 11 => 30,
         _ => 31,
     }
-}
-
-/// `secs` since the epoch as `YYYY-MM-DDTHH:MM:SSZ` (proleptic Gregorian, UTC).
-pub fn format_rfc3339_utc(secs: i64) -> String {
-    let days = secs.div_euclid(86_400);
-    let rem = secs.rem_euclid(86_400);
-    // Howard Hinnant's civil-from-days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + if m <= 2 { 1 } else { 0 };
-    format!("{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", rem / 3600, (rem % 3600) / 60, rem % 60)
 }
 
 /// Strict RFC 3339 UTC: `YYYY-MM-DDTHH:MM:SS`, optional fraction (1 to 9 digits), then `Z`. No offsets.
@@ -411,7 +378,7 @@ pub fn recent_with_status(dir: &Path) -> RecentList {
                     } else {
                         ("missing", "This is no longer a folder.".to_string())
                     };
-                    let name: String = path.file_name().and_then(|n| n.to_str()).unwrap_or("project").chars().filter(|c| !c.is_control()).take(NAME_MAX_CHARS).collect();
+                    let name = display_name(path);
                     RecentEntry { name, root: p.chars().filter(|c| !c.is_control()).collect(), status, reason: Some(reason), open_index: None, stored_index, opened_at }
                 }
             }
@@ -534,26 +501,35 @@ mod tests {
         TempDirGuard(fs::canonicalize(&d).unwrap())
     }
 
+    fn record(root: &str) -> RecentRecord {
+        RecentRecord { root: root.to_string(), opened_at: None }
+    }
+
+    /// The stored roots, in order (the part of a parsed list these tests compare).
+    fn roots(json: &str, max: usize) -> Vec<String> {
+        parse_recent_records(json, max).into_iter().map(|r| r.root).collect()
+    }
+
     #[test]
     fn recent_list_is_bounded_deduped_and_most_recent_first() {
-        let mut l: Vec<String> = Vec::new();
+        let mut l: Vec<RecentRecord> = Vec::new();
         for i in 0..25 {
-            l = push_recent(&l, &format!("/p/{i}"), MAX_RECENT);
+            l = push_record(&l, record(&format!("/p/{i}")), MAX_RECENT);
         }
         assert_eq!(l.len(), MAX_RECENT);
-        assert_eq!(l[0], "/p/24");
-        l = push_recent(&l, "/p/20", MAX_RECENT);
-        assert_eq!(l[0], "/p/20");
-        assert_eq!(l.iter().filter(|p| *p == "/p/20").count(), 1);
+        assert_eq!(l[0].root, "/p/24");
+        l = push_record(&l, record("/p/20"), MAX_RECENT);
+        assert_eq!(l[0].root, "/p/20");
+        assert_eq!(l.iter().filter(|r| r.root == "/p/20").count(), 1);
         assert_eq!(l.len(), MAX_RECENT);
     }
 
     #[test]
     fn parse_recent_ignores_garbage_and_caps() {
-        assert!(parse_recent("not json", 10).is_empty());
-        assert_eq!(parse_recent("[1,\"/a\",null,\"/b\"]", 10), vec!["/a", "/b"]);
+        assert!(roots("not json", 10).is_empty());
+        assert_eq!(roots("[1,\"/a\",null,\"/b\"]", 10), vec!["/a", "/b"]);
         let many = serde_json::to_string(&(0..50).map(|i| format!("/p/{i}")).collect::<Vec<_>>()).unwrap();
-        assert_eq!(parse_recent(&many, MAX_RECENT).len(), MAX_RECENT);
+        assert_eq!(roots(&many, MAX_RECENT).len(), MAX_RECENT);
     }
 
 
@@ -599,7 +575,7 @@ mod tests {
     #[test]
     fn display_name_is_capped_and_clean() {
         let long = format!("/x/{}", "a".repeat(200));
-        assert_eq!(display_name(Path::new(&long)).chars().count(), NAME_MAX_CHARS);
+        assert_eq!(display_name(Path::new(&long)).chars().count(), llmide_workspace_core::text::FOLDER_NAME_MAX_CHARS);
     }
 
     #[test]
@@ -820,7 +796,8 @@ mod recent_time_tests {
                 rec("/offset", None),
             ]
         );
-        assert_eq!(parse_recent(json, 50), vec!["/old", "/new", "/bad-time", "/offset"]);
+        let parsed: Vec<String> = parse_recent_records(json, 50).into_iter().map(|r| r.root).collect();
+        assert_eq!(parsed, vec!["/old", "/new", "/bad-time", "/offset"]);
     }
 
     #[test]

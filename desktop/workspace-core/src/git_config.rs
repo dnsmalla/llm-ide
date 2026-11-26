@@ -10,7 +10,7 @@
 //! `gpg.*`, `extensions.*`, `core.worktree`, ...) is simply not in the table.
 
 /// Largest config file we will look at.
-pub const MAX_CONFIG_BYTES: usize = 256 * 1024;
+pub(crate) const MAX_CONFIG_BYTES: usize = 256 * 1024;
 
 /// (section, subsection allowed, accepted keys). Keys and sections are compared lower-case.
 const ALLOWED: &[(&str, bool, &[&str])] = &[
@@ -147,7 +147,7 @@ fn check_key_line(section: &(String, bool), line: &str, allow_worktree: bool) ->
 /// caller that works in LFS repositories. Only the exact standard commands are dropped: they run the user's own
 /// `git-lfs`, as a global install would. The `[filter "lfs"]` header becomes `[lfs]`, so any other line under it
 /// (a different program) is still judged, and refused, by `check_config_ex`.
-pub fn without_standard_lfs(bytes: &[u8]) -> Vec<u8> {
+pub(crate) fn without_standard_lfs(bytes: &[u8]) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
     let mut out = String::with_capacity(text.len());
     let mut section: Option<(String, Option<String>)> = None;
@@ -186,15 +186,9 @@ pub fn without_standard_lfs(bytes: &[u8]) -> Vec<u8> {
     out.into_bytes()
 }
 
-/// `Ok(())` only when `bytes` is a config made solely of allowed, plain-data settings.
-#[allow(dead_code)] // the unit tests and external callers use the strict form without a worktree allowance
-pub fn check_config(bytes: &[u8]) -> Result<(), String> {
-    check_config_ex(bytes, false).map(|_| ())
-}
-
-/// Like `check_config`; with `allow_worktree` a `core.worktree` value is tolerated and returned
+/// `Ok(_)` only when `bytes` is a config made solely of allowed, plain-data settings. With `allow_worktree` a `core.worktree` value is tolerated and returned
 /// (the caller must verify it points at the project; a submodule's git dir carries one).
-pub fn check_config_ex(bytes: &[u8], allow_worktree: bool) -> Result<Option<String>, String> {
+pub(crate) fn check_config_ex(bytes: &[u8], allow_worktree: bool) -> Result<Option<String>, String> {
     if bytes.len() > MAX_CONFIG_BYTES {
         return Err("git config is unusually large".into());
     }
@@ -248,6 +242,11 @@ pub fn check_config_ex(bytes: &[u8], allow_worktree: bool) -> Result<Option<Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The strict form, without a worktree allowance: what most cases below check.
+    fn check_config(bytes: &[u8]) -> Result<(), String> {
+        check_config_ex(bytes, false).map(|_| ())
+    }
 
     #[test]
     fn accepts_plain_configs() {

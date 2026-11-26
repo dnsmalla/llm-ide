@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::fs::{rel_of, resolve_existing};
 use crate::{FsError, R};
 
-pub const MAX_DIRS: usize = 512;
+pub(crate) const MAX_DIRS: usize = 512;
 pub const MAX_PATHS: usize = 2000;
 const QUEUE: usize = 4096;
 const QUIET_MS: u64 = 150;
@@ -50,7 +50,7 @@ pub struct WatchBatch {
 }
 
 /// True for paths the UI must not be told about.
-pub fn is_noise(rel: &str) -> bool {
+pub(crate) fn is_noise(rel: &str) -> bool {
     let segs: Vec<&str> = rel.split('/').collect();
     if let Some(i) = segs.iter().position(|s| *s == ".git") {
         let tail = &segs[i + 1..];
@@ -72,7 +72,7 @@ pub struct Coalescer {
 }
 
 impl Coalescer {
-    pub fn push_rel(&mut self, rel: &str) {
+    pub(crate) fn push_rel(&mut self, rel: &str) {
         if rel.is_empty() || is_noise(rel) {
             return;
         }
@@ -84,7 +84,7 @@ impl Coalescer {
         self.dirs.insert(parent.to_string());
         self.files.insert(rel.to_string());
     }
-    pub fn mark_overflow(&mut self) {
+    pub(crate) fn mark_overflow(&mut self) {
         self.overflow = true;
     }
     pub fn is_empty(&self) -> bool {
@@ -228,6 +228,52 @@ impl Watch {
 impl Drop for Watch {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+/// The one watcher of a process (the desktop keeps a `static`, the helper one per connection). Starting a new one
+/// drops the old, which stops its thread.
+pub struct WatchSlot {
+    current: std::sync::Mutex<Option<Watch>>,
+}
+
+impl WatchSlot {
+    /// `const` so the desktop can keep one instance in a `static`.
+    pub const fn new() -> Self {
+        Self { current: std::sync::Mutex::new(None) }
+    }
+
+    fn guard(&self) -> std::sync::MutexGuard<'_, Option<Watch>> {
+        self.current.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Starts watching `root` (nothing yet; call `set_dirs`), replacing the previous watcher. `force_poll` is for tests.
+    pub fn start(&self, root: &Path, force_poll: bool, sink: Box<dyn Fn(WatchBatch) + Send>) -> R<WatchStarted> {
+        let (watch, mode) = Watch::start(root, force_poll, sink)?;
+        *self.guard() = Some(watch);
+        Ok(WatchStarted { mode })
+    }
+
+    /// Replaces the watched folder set. Fails with `no_watch` when no watcher is running.
+    pub fn set_dirs(&self, dirs: &[String]) -> R<()> {
+        match self.guard().as_mut() {
+            Some(watch) => watch.set_dirs(dirs),
+            None => Err(FsError { code: "no_watch", message: "the file watcher is not running".into() }),
+        }
+    }
+
+    pub fn stop(&self) {
+        *self.guard() = None;
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.guard().is_some()
+    }
+}
+
+impl Default for WatchSlot {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

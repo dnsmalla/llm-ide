@@ -7,7 +7,7 @@
 //! reuses an answered grant.
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Read, Write};
+use std::io::{BufRead, Write};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -15,7 +15,11 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Map, Value};
+use serde_json::{json, Value};
+
+use llmide_workspace_core::wire::{
+    read_bounded_line, Answer, Hello, Line, Request, CMD_HELLO, EVENT_CLONE, EVENT_SEARCH, EVENT_WATCH, MAX_LINE_BYTES, PROTOCOL,
+};
 
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
@@ -23,16 +27,8 @@ use crate::ssh_askpass::AskpassGrant;
 use crate::ssh_server_scripts::WORKSPACE;
 use crate::ssh_transport::{exec_args, SshEndpoint, SshExec, StdioChild};
 
-/// The protocol the helper must report in `hello`. Bumped together with the helper's `PROTOCOL`. The helper's
-/// build version is not checked: the bundle's sha check already pins the helper to this app's release.
-const PROTOCOL: u64 = 2;
-
 /// How long a call waits for its answer. A silent helper must not leave the Explorer spinning forever.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// The longest answer line accepted: the same 64 MB cap the helper puts on its requests. A large file read
-/// is the biggest legitimate answer.
-const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
 
 /// The longest request body (the line without its newline) this client sends. It is the helper's own cap, so a
 /// larger request would only be answered by the helper with an id-0 error that nothing waits for.
@@ -43,7 +39,6 @@ const TOO_LARGE_MESSAGE: &str = "This change is too large to send to the server.
 /// How long `close` waits for the reader thread once the child is killed.
 const READER_WAIT: Duration = Duration::from_secs(1);
 
-const HELLO: &str = "hello";
 const LOST_CODE: &str = "lost_connection";
 const LOST_MESSAGE: &str = "The connection to the server was lost.";
 const TIMEOUT_CODE: &str = "SSH_TIMEOUT";
@@ -77,9 +72,9 @@ pub enum EventKind {
 impl EventKind {
     fn from_name(name: &str) -> Option<Self> {
         match name {
-            "search" => Some(Self::Search),
-            "watch" => Some(Self::Watch),
-            "clone" => Some(Self::Clone),
+            EVENT_SEARCH => Some(Self::Search),
+            EVENT_WATCH => Some(Self::Watch),
+            EVENT_CLONE => Some(Self::Clone),
             _ => None,
         }
     }
@@ -194,7 +189,7 @@ impl WorkspaceClient {
             .map_err(|_| herr(CHANNEL_CODE, CHANNEL_MESSAGE))?;
         let mut client = Self::start(child);
         let git = client
-            .call_with_timeout(HELLO, json!({}), None, CALL_TIMEOUT)
+            .call_with_timeout(CMD_HELLO, json!({}), None, CALL_TIMEOUT)
             .map_err(refused_hello)
             .and_then(|value| check_hello(&value));
         drop(grant);
@@ -322,13 +317,14 @@ impl Drop for WorkspaceClient {
 /// gets a broken pipe instead of blocking on a full one.
 fn read_loop(mut stdout: Box<dyn BufRead + Send>, shared: &Shared, child: &Mutex<Box<dyn StdioChild>>) {
     loop {
-        match read_capped_line(&mut *stdout, MAX_LINE_BYTES) {
+        match read_bounded_line(&mut *stdout, MAX_LINE_BYTES) {
             Ok(Line::Text(bytes)) if bytes.is_empty() => {}
             Ok(Line::Text(bytes)) => match serde_json::from_slice::<Value>(&bytes) {
                 Ok(value) => shared.route(value),
                 Err(_) => break,
             },
-            Ok(Line::Eof | Line::TooLong) | Err(_) => break,
+            // A partial last line is not a message, and an over-long one ends the channel (see above).
+            Ok(Line::Eof | Line::Unterminated(_) | Line::TooLong) | Err(_) => break,
         }
     }
     drop(stdout);
@@ -361,35 +357,25 @@ fn write_loop(
 
 /// One request as a single JSON line. `confirm` is sent only when the user answered a dialog.
 fn request_line(id: u64, cmd: &str, args: Value, confirm: Option<&str>) -> String {
-    let mut request = Map::new();
-    request.insert("id".to_string(), json!(id));
-    request.insert("cmd".to_string(), json!(cmd));
-    request.insert("args".to_string(), args);
-    if let Some(answer) = confirm {
-        request.insert("confirm".to_string(), json!(answer));
-    }
-    format!("{}\n", Value::Object(request))
+    Request { args, cmd: cmd.to_string(), confirm: confirm.map(|answer| json!(answer)), id }.to_line()
 }
 
 /// Reads the answer to `hello`: the protocol must match this build, and `git` is optional. The helper's `version`
 /// is left out of the check on purpose; it is kept in the reply for logs.
 fn check_hello(value: &Value) -> Result<bool, FsError> {
-    let protocol = value.get("protocol").and_then(Value::as_u64);
-    if protocol != Some(PROTOCOL) {
-        return Err(herr(VERSION_CODE, VERSION_MESSAGE));
+    match serde_json::from_value::<Hello>(value.clone()) {
+        Ok(hello) if hello.protocol == PROTOCOL => Ok(hello.git),
+        _ => Err(herr(VERSION_CODE, VERSION_MESSAGE)),
     }
-    Ok(value.get("git").and_then(Value::as_bool).unwrap_or(false))
 }
 
 /// Turns one helper answer into the call's result: `ok` is the value, `err` is the helper's error.
 fn parse_answer(value: &Value) -> Result<Value, FsError> {
-    if let Some(ok) = value.get("ok") {
-        return Ok(ok.clone());
+    match Answer::parse(value) {
+        Answer::Ok(ok) => Ok(ok),
+        Answer::Err(err) => Err(decode_error(&err)),
+        Answer::Unknown => Err(herr(BAD_ANSWER_CODE, BAD_ANSWER_MESSAGE)),
     }
-    if let Some(err) = value.get("err") {
-        return Err(decode_error(err));
-    }
-    Err(herr(BAD_ANSWER_CODE, BAD_ANSWER_MESSAGE))
 }
 
 /// Rebuilds the helper's `{code, message}` as an [`FsError`] through the shared crate's deserializer, which
@@ -427,29 +413,6 @@ pub(crate) fn lost() -> FsError {
     herr(LOST_CODE, LOST_MESSAGE)
 }
 
-/// One line read from the helper.
-#[derive(Debug, PartialEq, Eq)]
-enum Line {
-    /// The stream ended, or ended in the middle of a line.
-    Eof,
-    /// A whole line, without its newline.
-    Text(Vec<u8>),
-    /// The line is longer than the cap. Its remainder is not read: the caller closes the channel.
-    TooLong,
-}
-
-/// Reads one newline-terminated line of at most `max` bytes. At most `max + 1` bytes are buffered, so a
-/// hostile line cannot grow the buffer without limit.
-fn read_capped_line(reader: &mut dyn BufRead, max: usize) -> io::Result<Line> {
-    let mut buf = Vec::new();
-    (&mut *reader).take(max as u64 + 1).read_until(b'\n', &mut buf)?;
-    if buf.last() != Some(&b'\n') {
-        return Ok(if buf.len() > max { Line::TooLong } else { Line::Eof });
-    }
-    buf.pop();
-    Ok(Line::Text(buf))
-}
-
 /// Waits briefly for a finished reader thread and joins it. A reader still busy after the wait is left to end on
 /// its own: it exits as soon as its pipe closes, and nothing waits for it.
 fn join_briefly(handle: JoinHandle<()>) {
@@ -475,7 +438,7 @@ mod tests {
     use crate::ssh_transport::{prepare_endpoint, ForwardChild, SshAuth};
     use crate::remote::RawOutput;
     use std::collections::VecDeque;
-    use std::io::{BufReader, Cursor, Write};
+    use std::io::{self, BufReader, Write};
     use std::net::Shutdown;
     use std::os::unix::net::UnixStream;
     use std::sync::atomic::AtomicUsize;
@@ -1044,14 +1007,5 @@ mod tests {
         let started = Instant::now();
         client.close();
         assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn capped_line_reads_lines_and_flags_long_ones() {
-        let mut reader = BufReader::new(Cursor::new(b"abc\nxxxxxxxx\nz".to_vec()));
-        assert!(matches!(read_capped_line(&mut reader, 4).unwrap(), Line::Text(text) if text == b"abc"));
-        assert!(matches!(read_capped_line(&mut reader, 4).unwrap(), Line::TooLong));
-        let mut partial = BufReader::new(Cursor::new(b"z".to_vec()));
-        assert!(matches!(read_capped_line(&mut partial, 4).unwrap(), Line::Eof), "a partial last line is not a message");
     }
 }
