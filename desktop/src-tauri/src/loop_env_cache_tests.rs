@@ -594,3 +594,12 @@ fn only_an_environment_this_host_prepared_goes_on_path_when_it_is_already_there(
     assert_ne!(crate::loop_runner::run_command_keyed(&a, "envtool", Some(30), "k").unwrap().exit_code, Some(0), "a stale registration is dropped");
     let _ = std::fs::remove_dir_all(project);
 }
+
+#[test]
+fn loop_env_prepare_refuses_in_ssh_mode() {
+    let _mode = crate::core_host::process_mode_guard();
+    crate::core_host::set_process_mode(2);
+    let out = tauri::async_runtime::block_on(loop_env_prepare("l".into(), "run-1".into(), None, None));
+    crate::core_host::set_process_mode(0);
+    assert!(out.unwrap_err().contains("SSH server mode"));
+}

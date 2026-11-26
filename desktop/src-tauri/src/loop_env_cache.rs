@@ -745,6 +745,7 @@ fn prepare_inner(root: &Path, worktree: &Path, run_id: &str, loop_id: &str, time
 /// only the loop and carries the approval token minted for it.
 #[tauri::command]
 pub async fn loop_env_prepare(loop_id: String, run_id: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<EnvPrepare, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     if !crate::loop_worktree::valid_run_id(&run_id) {
         return Err("invalid run id".into());
     }

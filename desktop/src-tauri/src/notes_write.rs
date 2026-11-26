@@ -357,6 +357,8 @@ where
     T: Send + 'static,
     F: FnOnce(PathBuf) -> Result<T, String> + Send + 'static,
 {
+    // Every write command funnels through here; in SSH mode `current_root` would resolve a local folder.
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     tauri::async_runtime::spawn_blocking(move || {
         let root = notes_fs::canonical_root(&notes_fs::current_root()?)?;
         f(root)
@@ -394,6 +396,19 @@ pub async fn notes_delete_many(rels: Vec<String>) -> Result<Vec<DeleteOutcome>, 
 mod tests {
     use super::*;
     use std::cell::RefCell;
+
+    #[test]
+    fn write_commands_refuse_in_ssh_mode() {
+        let _mode = crate::core_host::process_mode_guard();
+        crate::core_host::set_process_mode(2);
+        let open = tauri::async_runtime::block_on(note_open("a.md".into()));
+        let rename = tauri::async_runtime::block_on(note_rename("a.md".into(), "b.md".into()));
+        let delete = tauri::async_runtime::block_on(notes_delete_many(vec!["a.md".into()]));
+        crate::core_host::set_process_mode(0);
+        assert!(open.unwrap_err().contains("SSH server mode"));
+        assert!(rename.unwrap_err().contains("SSH server mode"));
+        assert!(delete.unwrap_err().contains("SSH server mode"));
+    }
     use std::fs;
 
     /// Owns a temp folder (or marker file) and removes it on drop, so a failing test leaves nothing behind.

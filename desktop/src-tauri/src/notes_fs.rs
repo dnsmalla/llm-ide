@@ -509,6 +509,8 @@ where
 /// The configured notes folder, if any (re-validated).
 #[tauri::command]
 pub fn notes_root_get() -> Option<NotesRootInfo> {
+    // In SSH mode there is no local notes folder; `current_root` would read the local project or settings.
+    crate::workspace_backend::refuse_in_ssh_mode().ok()?;
     current_root().ok().map(|r| info(&r, crate::project::active_root().is_some()))
 }
 
@@ -579,6 +581,15 @@ mod tests {
         let list = tauri::async_runtime::block_on(notes_list(None, None));
         crate::core_host::set_process_mode(0);
         assert!(list.unwrap_err().contains("SSH server mode"));
+    }
+
+    #[test]
+    fn notes_root_get_is_none_in_ssh_mode() {
+        let _mode = crate::core_host::process_mode_guard();
+        crate::core_host::set_process_mode(2);
+        let root = notes_root_get();
+        crate::core_host::set_process_mode(0);
+        assert!(root.is_none());
     }
 
     /// Owns the scratch root and removes it on drop; the tests work in its `notes` folder, which derefs to.
