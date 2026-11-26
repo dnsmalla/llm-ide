@@ -96,7 +96,7 @@ pub(crate) fn clone_request(
     grant: Option<String>,
 ) -> Value {
     let req = CloneRequest { provider, url, token: token.map(Token::from), folder, grant: grant.map(Token::from) };
-    serde_json::to_value(&req).unwrap_or(Value::Null)
+    req.to_wire()
 }
 
 /// SSH mode: the helper clones into the open server folder and the result is the local command's `{path, name}`.

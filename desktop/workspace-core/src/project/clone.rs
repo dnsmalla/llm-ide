@@ -2,8 +2,8 @@
 //! pasted into Settings. Tauri-free: the desktop host and the SSH workspace helper run the same code.
 //!
 //! The token lives only in git's child environment (the `GIT_CONFIG_*` pair), never in argv, `.git/config`, an
-//! error or a log. `Token` redacts itself in `Debug` and `Display` and has no `Serialize`, so it cannot leave by
-//! accident. The destination is chosen by the caller's root and is always `<root>/code/<name>`.
+//! error or a log. `Token` redacts itself in `Debug` and `Display` and has no `Serialize`, and neither has `CloneRequest`:
+//! the one way out is `CloneRequest::to_wire`, which builds the helper's request line. The destination is chosen by the caller's root and is always `<root>/code/<name>`.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -97,30 +97,31 @@ impl CloneRequest {
     }
 }
 
-/// The request as the desktop sends it to the helper: the credential rule applied, `folder` as `null` when absent.
-/// This is the ONLY place a token or grant is serialised, and only into the helper's stdin request.
-impl Serialize for CloneRequest {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeStruct;
-        let (token, grant) = match self.credential() {
-            Credential::Token(token) => (Some(token), None),
-            Credential::Grant(grant) => (None, Some(grant)),
+/// The helper's clone request line, and nothing else. A private type, so `CloneRequest` itself stays unserialisable.
+/// Fields are in sorted order, the order the wire has always had.
+#[derive(Serialize)]
+struct WireRequest<'a> {
+    folder: &'a Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    grant: Option<&'a str>,
+    provider: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    token: Option<&'a str>,
+    url: &'a str,
+}
+
+impl CloneRequest {
+    /// The request as the desktop sends it to the helper: the credential rule applied, `folder` as `null` when absent.
+    /// This is the ONLY place a token or grant is serialised, and only into the helper's stdin request.
+    pub fn to_wire(&self) -> serde_json::Value {
+        let credential = self.credential();
+        let (token, grant) = match &credential {
+            Credential::Token(token) => (Some(token.expose()), None),
+            Credential::Grant(grant) => (None, Some(grant.expose())),
             Credential::Anonymous => (None, None),
         };
-        // Keys in sorted order, the order the wire has always had.
-        let mut out = serializer.serialize_struct("CloneRequest", 5)?;
-        out.serialize_field("folder", &self.folder)?;
-        match &grant {
-            Some(grant) => out.serialize_field("grant", grant.expose())?,
-            None => out.skip_field("grant")?,
-        }
-        out.serialize_field("provider", &self.provider)?;
-        match &token {
-            Some(token) => out.serialize_field("token", token.expose())?,
-            None => out.skip_field("token")?,
-        }
-        out.serialize_field("url", &self.url)?;
-        out.end()
+        let wire = WireRequest { folder: &self.folder, grant, provider: &self.provider, token, url: &self.url };
+        serde_json::to_value(wire).unwrap_or(serde_json::Value::Null)
     }
 }
 
@@ -827,7 +828,7 @@ mod request_wire_tests {
 
     #[test]
     fn the_request_bytes_match_the_historic_wire() {
-        let wire = |req: &CloneRequest| serde_json::to_string(req).unwrap();
+        let wire = |req: &CloneRequest| req.to_wire().to_string();
         assert_eq!(wire(&request(None, None, None)), r#"{"folder":null,"provider":"github","url":"o/r"}"#);
         assert_eq!(wire(&request(Some("ghp_x"), None, Some("sub"))), r#"{"folder":"sub","provider":"github","token":"ghp_x","url":"o/r"}"#);
         assert_eq!(wire(&request(None, Some("ab12"), None)), r#"{"folder":null,"grant":"ab12","provider":"github","url":"o/r"}"#);
@@ -838,7 +839,7 @@ mod request_wire_tests {
         assert!(matches!(request(Some("ghp_x"), Some("ab12"), None).credential(), Credential::Token(_)));
         assert!(matches!(request(Some("   "), Some("ab12"), None).credential(), Credential::Grant(_)));
         assert!(matches!(request(Some("   "), None, None).credential(), Credential::Anonymous));
-        let both = serde_json::to_string(&request(Some("ghp_x"), Some("ab12"), None)).unwrap();
+        let both = request(Some("ghp_x"), Some("ab12"), None).to_wire().to_string();
         assert!(!both.contains("grant"), "the helper never sees both: {both}");
     }
 
