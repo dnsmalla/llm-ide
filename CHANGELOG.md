@@ -5,6 +5,11 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Desktop: clone and git credential environment
+
+- Repository clones and git credential runs now ignore `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_PARAMETERS`, `GIT_ASKPASS` and `GIT_DIR` from the inherited environment. Proxy or CA settings supplied that way no longer reach clones; put them in the repository or user gitconfig file instead.
+- The SSH helper now reports a sanitised folder display name (control characters removed, capped, `project` when nothing is left), the same one the desktop shows for a local folder.
+
 ### Loop: Refactoring area roadmap
 
 - Pointed at a whole repository, the Refactoring loop keeps an area roadmap (`REFACTOR-AREAS.md`), plans batches for one area at a time and re-plans into the next area within the same run; "Steps per run" (1–50) now applies to the Refactoring and Test loops. Guide: [Loop Engineering](docs/explanation/loop-engineering.md#the-refactoring-area-roadmap).
