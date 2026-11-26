@@ -18,7 +18,7 @@ import { followsRegistry, registrySource, stagePromptText } from "./default-stag
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
 import { INPUT_PATH_SKILLS, pathInside } from "./input-path.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
-import { isTestFileName } from "./protected.ts";
+import { isTestFileName, protectedPaths, revertPlan } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { noteUnresolvedStep, readRunFile, reviewStepOnce, takeStepSnapshot } from "./step-review-exec.ts";
@@ -254,6 +254,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   // Only Intake also reads the project's llm-doc/ (a split layout keeps it outside the run's worktree).
   const llmDocExists = s.skillId === FACTORY_INTAKE_SKILL && ctx.projectRoot ? await ctx.fs.list("llm-doc").then(() => true, () => false) : false;
   const timeoutMs = (s.timeoutSeconds ?? 1800) * 1000;
+  let skippedProtected: string[] = [];
   const g = await guardedAgentCall<AgentRunReply>({
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
@@ -280,7 +281,22 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
           ctx.log(`could not revert existing test file(s) ${skipped.join(", ")}: ${e instanceof Error ? e.message : String(e)}; the guard will judge them`);
         }
       }
-      const judged = skipped.length ? paths.filter((p) => !skipped.includes(p) || notReverted.includes(p)) : paths;
+      // An advisory stage must not stop the run: protected files it touched are reverted and skipped. A failed or
+      // refused revert leaves them to the guard, which halts (fail closed).
+      const advisoryHits = s.severity === "advisory" && target.config.protectedPathPolicy === "revert"
+        ? protectedPaths(guardedPaths(target, s, paths, created), target.config.extraProtectedGlobs).filter((p) => !skipped.includes(p))
+        : [];
+      const plan = advisoryHits.length ? revertPlan(advisoryHits, b, created) : null;
+      if (plan?.revert) {
+        try {
+          await ctx.host("loop_revert_paths", { paths: plan.paths, created: plan.created, ...changedPathArgs(ctx.runId, ctx.projectRoot) });
+          skippedProtected = plan.paths;
+          ctx.log(`skipped protected file(s) in ${s.name}: ${plan.paths.join(", ")} (reverted)`);
+        } catch (e) {
+          ctx.log(`could not revert protected file(s) ${plan.paths.join(", ")}: ${e instanceof Error ? e.message : String(e)}; the guard will judge them`);
+        }
+      }
+      const judged = paths.filter((p) => (!skipped.includes(p) || notReverted.includes(p)) && !skippedProtected.includes(p));
       return guardProtected(ctx, guardedPaths(target, s, judged, created, await importOnlyTests(ctx, target, s, judged, created, plannedFiles)), target, b, created);
     },
   });
@@ -292,6 +308,8 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
   }
   const result = skillResult(g.result);
   if (!result.ok) return result;
+  // The stage keeps its own agent verdict; the skip is only reported in its output (and the run log).
+  if (skippedProtected.length) result.output += `\nskipped protected file(s) (reverted): ${skippedProtected.join(", ")}`;
   const reply = g.result.reply ?? "";
   const written = [...(g.result.changedPaths ?? []), ...(g.result.createdPaths ?? [])];
   const outside = inputPath !== "" && REFACTOR_MOVE_SKILLS.has(s.skillId) ? await outsideInputPath(ctx, inputPath, written, plannedFiles) : undefined;

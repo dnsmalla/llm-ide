@@ -452,6 +452,39 @@ test("F6: a non-factory test-writing stage keeps its own test files, but a repai
   assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths"), ["loop_revert_paths", { paths: ["tests/test_tax.py"], created: ["tests/test_tax.py"], runId: "r1" }]);
 });
 
+const advisoryRun = (severity, hostAnswers = {}) => {
+  const { host, calls } = fakeHost(hostAnswers);
+  const { core } = fakeCore({ reply: "updated docs", resultSubtype: "success", changedPaths: ["src/test_data_generator.py", "src/ok.py"], createdPaths: [] });
+  const { ctx, log } = ctxOf({ host, core });
+  const doc = stage({ id: "d1", name: "Doc review", kind: "skill", command: null, skillId: "skills/doc-writer", severity });
+  const deps = createStageDeps(ctx, loopOf([doc]));
+  return { deps, doc, calls, log };
+};
+
+test("an advisory skill stage that touches a protected path has it reverted and skipped, the run goes on", async () => {
+  const { deps, doc, calls, log } = advisoryRun("advisory");
+  const r = await deps.runStage(doc, []);
+  assert.equal(r.ok, true);
+  assert.equal(deps.halt(), null);
+  assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths"), ["loop_revert_paths", { paths: ["src/test_data_generator.py"], created: [], runId: "r1" }]);
+  assert.ok(log.includes("skipped protected file(s) in Doc review: src/test_data_generator.py (reverted)"));
+  assert.match(r.output, /skipped protected file\(s\) \(reverted\): src\/test_data_generator\.py/);
+});
+
+test("a blocking skill stage that touches the same protected path still halts the run", async () => {
+  const { deps, doc } = advisoryRun("blocking");
+  const r = await deps.runStage(doc, []);
+  assert.equal(r.ok, false);
+  assert.match(deps.halt(), /protected path.*reverted.*; the run stopped$/);
+});
+
+test("an advisory stage whose revert fails halts the run (fail closed)", async () => {
+  const { deps, doc } = advisoryRun("advisory", { loop_revert_paths: () => { throw new Error("git busy"); } });
+  const r = await deps.runStage(doc, []);
+  assert.equal(r.ok, false);
+  assert.match(deps.halt(), /revert failed.*; the run stopped$/);
+});
+
 test("F6: a test-writing stage may not touch CI files or the Loop's own data", async () => {
   const { host, calls } = fakeHost();
   const { core } = fakeCore({ reply: "edited", resultSubtype: "success", changedPaths: [".github/workflows/ci.yml", "system/loop.json"], createdPaths: [] });
