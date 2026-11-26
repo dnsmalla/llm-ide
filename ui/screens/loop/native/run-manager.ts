@@ -607,7 +607,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     }
     emit();
   };
-  const outcome = await d.runLoop(config, { ...d.createStageDeps(ctx, loop), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
+  // A reused worktree carries the earlier run's code, which may be red on purpose (send-back, rework): a baseline
+  // check there would stop the run before Implement can fix it. Only a fresh worktree has a baseline worth judging.
+  const { baselineCheck, ...stageDeps } = d.createStageDeps(ctx, loop);
+  const outcome = await d.runLoop(config, { ...stageDeps, ...(run.reuse ? {} : { baselineCheck }), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
   // Human review mode: a finished run that would auto-ship waits for a person instead. runStatusCode reads the flag.
   const held = holdsForHuman(config, { mode: run.live.mode, statusCode: runStatusCode(outcome), needsDecision: needsDecisionSummary(outcome) !== null, failedRole: outcome.failedStage ? factoryRole(outcome.failedStage) : null });

@@ -301,6 +301,24 @@ test("a sendBack run with a runId reuses the existing worktree and never prepare
   assert.deepEqual(world.copies, [], "sendBack does not re-copy the readiness report");
 });
 
+test("a reused worktree gets no baseline check; a fresh one does", async () => {
+  const seen = [];
+  const baselineCheck = async () => null;
+  setup({
+    createStageDeps: (ctx) => ({ __runId: ctx.runId, async runStage() { return { ok: true, output: "" }; }, async repair() { return { ok: true, output: "" }; }, halt: () => null, haltIsError: () => false, baselineCheck }),
+    runLoop: (config, deps) => { seen.push(deps.baselineCheck); const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  world.list = [{ runId: "r-old", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/r-old", branch: "factory/r-old", baseCommit: "abc" }];
+  rm.startRun("/p", item(1), "sendBack", { runId: "r-old" });
+  await settle();
+  assert.equal(seen[0], undefined, "the earlier run's red code must not stop a send-back before Implement");
+  const fresh = rm.startRun("/p", item(2), "full");
+  await settle();
+  assert.equal(seen[1], baselineCheck);
+  await finish("r-old");
+  await finish(fresh);
+});
+
 test("projectGuardedFs refuses every call while another project is open", async () => {
   let active = "/p";
   const inner = { async read(p) { return { status: "ok", text: p, hash: "h" }; } };

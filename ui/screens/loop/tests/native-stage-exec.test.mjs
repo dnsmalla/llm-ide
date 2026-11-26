@@ -1343,11 +1343,16 @@ test("Factory deps expose gateLoopback: only the Review gate, reading REVIEW.md 
   const stages = FACTORY_BUILT_IN_STAGES.map((s, i) => ({ ...stage(), ...s, order: i, enabled: true }));
   const gateStage = stages.find((s) => s.id === "factory/review-gate");
   const implement = stages.find((s) => s.skillId === "skills/test-driven-development");
-  const { fs } = fakeFs({ "system/loop-worktrees/r1/.factory/REVIEW.md": "Verdict: changes\n- add the test" });
+  const { fs } = fakeFs({ "system/loop-worktrees/r1/.factory/REVIEW.md": "- add the test\nVerdict: changes" });
   const { ctx } = ctxOf({ fs });
   const deps = createStageDeps(ctx, loopOf(stages));
-  assert.deepEqual(await deps.gateLoopback(gateStage), { codeStageId: implement.id, findings: "Verdict: changes\n- add the test" });
+  assert.deepEqual(await deps.gateLoopback(gateStage), { codeStageId: implement.id, findings: "- add the test\nVerdict: changes" });
   assert.equal(await deps.gateLoopback(implement), null);
+  // Approve, a missing verdict, a repeated verdict line and a verdict quoted mid-report never loop back.
+  for (const text of ["Verdict: approve", "- looks fine, no verdict", "Verdict: changes\n- x\nVerdict: changes", "Verdict: changes\n- x\nthanks", ""]) {
+    const { fs: other } = fakeFs({ "system/loop-worktrees/r1/.factory/REVIEW.md": text });
+    assert.equal(await createStageDeps(ctxOf({ fs: other }).ctx, loopOf(stages)).gateLoopback(gateStage), null, JSON.stringify(text));
+  }
   assert.equal(await createStageDeps(ctxOf().ctx, loopOf(stages)).gateLoopback(gateStage), null);
   assert.equal(createStageDeps(ctx, { ...loopOf(stages), defaultKey: "tests" }).gateLoopback, undefined);
 });

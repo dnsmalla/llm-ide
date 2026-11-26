@@ -621,7 +621,10 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
         if (factoryRole(s) !== "reviewGate") return null;
         const implement = loop.config.stages.find((c) => c.enabled && factoryRole(c) === "implement");
         const review = await readRunFile(ctx, REVIEW_PATH);
-        return implement && review?.trim() ? { codeStageId: implement.id, findings: review } : null;
+        // Only a review that asks for changes loops back; a missing or approving verdict falls through to the normal gate repair.
+        const lines = (review ?? "").split("\n").map((l) => l.trim()).filter((l) => l !== "");
+        const asksForChanges = lines.filter((l) => l.startsWith("Verdict:")).length === 1 && lines[lines.length - 1] === "Verdict: changes";
+        return implement && review && asksForChanges ? { codeStageId: implement.id, findings: review } : null;
       },
       baselineCheck: async (verifyStages: LoopStage[]) => {
         for (const stage of verifyStages) {

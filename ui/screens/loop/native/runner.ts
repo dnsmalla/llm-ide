@@ -348,6 +348,11 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
         const haltAfterBaseline = haltedOutcome();
         if (haltAfterBaseline) return haltAfterBaseline;
         if (deps.isCancelled?.()) return cancelledOutcome();
+        // The baseline runs the whole Verify set, so it can outlast a pause or the wall-clock budget like any stage.
+        const heldAfterBaseline = await heldOutcome();
+        if (heldAfterBaseline) return heldAfterBaseline;
+        if (deps.isCancelled?.()) return cancelledOutcome();
+        if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
         if (base && !base.ok) {
           const summary = baselineSummary();
           deps.log(summary);
