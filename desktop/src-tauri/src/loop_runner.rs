@@ -725,6 +725,7 @@ fn run_command_at_gated(work: &Path, command: &str, timeout_secs: Option<u64>, s
 /// stage must carry the host-minted approval token for its exact command.
 #[tauri::command]
 pub async fn loop_run_stage(app: tauri::AppHandle, stage_id: String, loop_id: Option<String>, approval_token: Option<String>, timeout_secs: Option<u64>, run_id: Option<String>) -> Result<StageRun, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     clear_cancel(run_id.as_deref().unwrap_or(""));
     tauri::async_runtime::spawn_blocking(move || {
         // Live output for the screen ("loop-stage-output"), tagged with the run so two runs never mix their logs.
@@ -755,6 +756,7 @@ pub fn loop_cancel(run_id: Option<String>) {
 
 #[tauri::command]
 pub fn loop_work_root() -> Result<String, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
     crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
     Ok(work_root(&root).to_string_lossy().into_owned())
@@ -864,6 +866,7 @@ pub(crate) fn revert_paths_for(run_id: Option<&str>, expected_root: Option<&str>
 
 #[tauri::command]
 pub async fn loop_revert_paths(paths: Vec<String>, created: Option<Vec<String>>, run_id: Option<String>, expected_root: Option<String>) -> Result<(), String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     tauri::async_runtime::spawn_blocking(move || revert_paths_for(run_id.as_deref(), expected_root.as_deref(), &paths, &created.unwrap_or_default()))
         .await.map_err(|e| format!("revert task failed: {e}"))?
 }
@@ -924,6 +927,7 @@ pub(crate) fn run_changes_for(run_id: Option<&str>, expected_root: Option<&str>,
 
 #[tauri::command]
 pub async fn loop_changed_paths(run_id: Option<String>, expected_root: Option<String>, since_base: Option<bool>) -> Result<Vec<String>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     tauri::async_runtime::spawn_blocking(move || run_changes_for(run_id.as_deref(), expected_root.as_deref(), since_base.unwrap_or(false)))
         .await.map_err(|e| format!("changed paths task failed: {e}"))?
 }
@@ -931,6 +935,7 @@ pub async fn loop_changed_paths(run_id: Option<String>, expected_root: Option<St
 
 #[tauri::command]
 pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
         crate::fs_ops::checked_root(&root).map_err(|e| e.message)?;
@@ -944,6 +949,7 @@ pub async fn loop_environment_check() -> Result<EnvironmentStatus, String> {
 
 #[tauri::command]
 pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, timeout_secs: Option<u64>) -> Result<StageRun, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     clear_cancel("");
     tauri::async_runtime::spawn_blocking(move || {
         let root = crate::project::active_root().ok_or_else(|| "open a project first".to_string())?;
@@ -955,6 +961,17 @@ pub async fn loop_run_fault_verify(rel: String, approval_token: Option<String>, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_commands_refuse_in_ssh_mode_before_reading_the_local_project() {
+        let _mode = crate::core_host::process_mode_guard();
+        crate::core_host::set_process_mode(2);
+        let work_root = loop_work_root();
+        let env_check = tauri::async_runtime::block_on(loop_environment_check());
+        crate::core_host::set_process_mode(0);
+        assert!(work_root.unwrap_err().contains("SSH server mode"));
+        assert!(env_check.unwrap_err().contains("SSH server mode"));
+    }
 
     // The user's PATH must win: a login `sh` on macOS would put /usr/bin first again (path_helper).
     #[cfg(not(windows))]

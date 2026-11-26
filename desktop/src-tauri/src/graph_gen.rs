@@ -283,7 +283,8 @@ pub fn start_auto(app: tauri::AppHandle) {
             let enabled = launch.features.is_empty() || launch.features.iter().any(|f| f == "code_graph_3d");
             let minutes = crate::prefs::stored().graph_auto_update_minutes;
             if minutes != last_minutes { last_minutes = minutes; last_run = Instant::now(); }
-            if minutes == 0 || !enabled { last_root = None; continue; }
+            // The project is a server folder in SSH mode; the local active root is not the one to scan.
+            if minutes == 0 || !enabled || crate::workspace_backend::is_ssh_mode() { last_root = None; continue; }
             let root = crate::project::active_root().map(|p| p.to_string_lossy().into_owned());
             let changed = root != last_root;
             if changed { last_root = root.clone(); last_run = Instant::now(); }
@@ -303,6 +304,7 @@ pub fn start_auto(app: tauri::AppHandle) {
 
 #[tauri::command]
 pub async fn graph_generate(app: tauri::AppHandle, mode: Option<String>, target: Option<String>, out: Option<String>) -> Result<GraphGenerated, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let mode = mode.unwrap_or_else(|| "code".into());
     let result = tauri::async_runtime::spawn_blocking(move || {
         // A manual/loop request waits for an in-flight auto run instead of failing the caller. The wait is

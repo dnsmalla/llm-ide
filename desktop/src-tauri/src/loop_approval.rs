@@ -437,6 +437,7 @@ fn in_dialog<T>(f: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
 /// `verify:` command. Reuses a still-valid grant for exactly the same commands/folder without re-prompting.
 #[tauri::command]
 pub async fn loop_approve_loop(loop_id: String) -> Result<Option<LoopApproval>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = approval_root()?;
     tauri::async_runtime::spawn_blocking(move || {
         in_dialog(|| {
@@ -453,6 +454,7 @@ pub async fn loop_approve_loop(loop_id: String) -> Result<Option<LoopApproval>, 
 /// Native approval for one stage: its shell command, or a Regression stage's fault verify commands.
 #[tauri::command]
 pub async fn loop_approve_stage(stage_id: String, loop_id: Option<String>) -> Result<Option<LoopApproval>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = approval_root()?;
     tauri::async_runtime::spawn_blocking(move || {
         in_dialog(|| {
@@ -469,6 +471,7 @@ pub async fn loop_approve_stage(stage_id: String, loop_id: Option<String>) -> Re
 /// Whether a valid approval already covers the loop's exact current commands. Never shows a dialog.
 #[tauri::command]
 pub fn loop_approval_status(loop_id: String) -> Result<LoopApprovalStatus, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = approval_root()?;
     status_with(store(), &root, &loop_id, now_ms())
 }
@@ -482,6 +485,17 @@ pub fn loop_revoke_approvals() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn approval_commands_refuse_in_ssh_mode() {
+        let _mode = crate::core_host::process_mode_guard();
+        crate::core_host::set_process_mode(2);
+        let status = loop_approval_status("any".into());
+        let approve = tauri::async_runtime::block_on(loop_approve_loop("any".into()));
+        crate::core_host::set_process_mode(0);
+        assert!(status.unwrap_err().contains("SSH server mode"));
+        assert!(approve.unwrap_err().contains("SSH server mode"));
+    }
 
     fn project(name: &str, command: &str, extra_stage: &str) -> PathBuf {
         let root = std::env::temp_dir().join(format!("llmide-loop-approval-{name}-{}", std::process::id()));

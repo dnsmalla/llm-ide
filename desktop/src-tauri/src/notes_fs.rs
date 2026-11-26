@@ -515,6 +515,7 @@ pub fn notes_root_get() -> Option<NotesRootInfo> {
 /// Opens the native folder dialog and stores the choice; `None` when cancelled.
 #[tauri::command]
 pub async fn notes_root_choose() -> Result<Option<NotesRootInfo>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let picked = rfd::AsyncFileDialog::new().set_title("Choose notes folder").pick_folder().await;
     let Some(handle) = picked else { return Ok(None) };
     let root = validate_notes_root(handle.path())?;
@@ -547,18 +548,21 @@ pub async fn notes_root_clear() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn notes_list(cursor: Option<String>, limit: Option<usize>) -> Result<ListPage, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = current_root()?;
     blocking(move || list_page(&root, cursor.as_deref(), limit.unwrap_or(MAX_PAGE))).await
 }
 
 #[tauri::command]
 pub async fn notes_read(rel: String, offset: Option<u64>, max_bytes: Option<usize>) -> Result<ReadChunk, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = current_root()?;
     blocking(move || read_chunk(&root, &rel, offset.unwrap_or(0), max_bytes.unwrap_or(READ_DEFAULT_BYTES))).await
 }
 
 #[tauri::command]
 pub async fn notes_heads(rels: Vec<String>, max_bytes: Option<usize>) -> Result<Vec<NoteHead>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     let root = current_root()?;
     blocking(move || read_heads(&root, &rels, max_bytes.unwrap_or(2048))).await
 }
@@ -567,6 +571,15 @@ pub async fn notes_heads(rels: Vec<String>, max_bytes: Option<usize>) -> Result<
 mod tests {
     use super::*;
     use std::fs;
+
+    #[test]
+    fn notes_reads_refuse_in_ssh_mode() {
+        let _mode = crate::core_host::process_mode_guard();
+        crate::core_host::set_process_mode(2);
+        let list = tauri::async_runtime::block_on(notes_list(None, None));
+        crate::core_host::set_process_mode(0);
+        assert!(list.unwrap_err().contains("SSH server mode"));
+    }
 
     /// Owns the scratch root and removes it on drop; the tests work in its `notes` folder, which derefs to.
     struct TempDirGuard {

@@ -760,6 +760,7 @@ pub(crate) fn clear_factory_output_for(run_id: Option<&str>, rel: &str) -> Resul
 
 #[tauri::command]
 pub async fn loop_clear_factory_output(path: String, run_id: Option<String>) -> Result<(), String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || clear_factory_output_for(run_id.as_deref(), &path)).await
 }
 
@@ -824,16 +825,19 @@ pub fn status_in(info: &RunInfo) -> Result<WorktreeStatus, String> {
 
 #[tauri::command]
 pub async fn loop_worktree_status(run_id: String) -> Result<WorktreeStatus, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || status_in(&resolve(&run_id)?)).await
 }
 
 #[tauri::command]
 pub async fn loop_worktree_checkpoint(run_id: String) -> Result<String, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || checkpoint_in(&resolve(&run_id)?)).await
 }
 
 #[tauri::command]
 pub async fn loop_worktree_restore(run_id: String, tree: String) -> Result<(), String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || restore_in(&resolve(&run_id)?, &tree)).await
 }
 
@@ -848,6 +852,7 @@ pub fn repo_branch_in(info: &RunInfo) -> Option<String> {
 
 #[tauri::command]
 pub async fn loop_repo_branch(run_id: String) -> Result<Option<String>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || Ok(repo_branch_in(&resolve(&run_id)?))).await
 }
 
@@ -1073,6 +1078,7 @@ fn active_project() -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub async fn loop_worktree_prepare(repo_rel: String, run_id: String, base: Option<String>, task: String, loop_slug: Option<String>, fresh: Option<bool>) -> Result<RunInfo, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || {
         let project = active_project()?;
         let repo = crate::fs_ops::resolve_existing(&project, &repo_rel).map_err(|e| e.message)?;
@@ -1090,6 +1096,7 @@ pub async fn loop_worktree_prepare(repo_rel: String, run_id: String, base: Optio
 /// `since` absent is the whole run diff; present is the diff against that checkpoint tree (one step's change).
 #[tauri::command]
 pub async fn loop_worktree_diff(run_id: String, since: Option<String>) -> Result<WorktreeDiff, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || {
         let info = resolve(&run_id)?;
         match since {
@@ -1102,18 +1109,21 @@ pub async fn loop_worktree_diff(run_id: String, since: Option<String>) -> Result
 
 #[tauri::command]
 pub async fn loop_worktree_remove(run_id: String) -> Result<(), String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || remove_in(&resolve(&run_id)?)).await
 }
 
 /// True when the worktree and branch were removed because the branch holds no commit beyond its base.
 #[tauri::command]
 pub async fn loop_worktree_remove_if_empty(run_id: String) -> Result<bool, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || remove_if_empty_in(&resolve(&run_id)?)).await
 }
 
 /// `direction`: "in" copies the Loop's saved state into the worktree, "out" copies it back to the main tree.
 #[tauri::command]
 pub async fn loop_worktree_state_sync(run_id: String, direction: String) -> Result<usize, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(move || {
         let to_worktree = match direction.as_str() {
             "in" => true,
@@ -1127,6 +1137,7 @@ pub async fn loop_worktree_state_sync(run_id: String, direction: String) -> Resu
 
 #[tauri::command]
 pub async fn loop_worktree_list() -> Result<Vec<RunInfo>, String> {
+    crate::workspace_backend::refuse_in_ssh_mode().map_err(|e| e.message)?;
     blocking(|| list_in(&active_project()?)).await
 }
 
