@@ -280,6 +280,9 @@ pub async fn remote_ssh_server_forget(host: String, port: u16, user: String) -> 
 /// Forget: the stored password goes first, and only when the list says one is stored (no keychain access otherwise).
 /// If the keychain refuses, the entry stays, so the user can try again and no password is left behind unseen.
 fn forget_server(host: &str, port: u16, user: &str) -> Result<(), FsError> {
+    // One lock for the Keychain delete and the list removal: a Connect that remembers a password in between would leave
+    // a secret with no list entry pointing at it.
+    let _operation = ssh_service::operation();
     if prefs::ssh_password_saved(host, port, user) {
         let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
         ssh_saved_password::forget(backend.as_ref(), host, port, user)?;
@@ -673,11 +676,36 @@ mod tests {
             let outcome = run_connect(&deps, &host, &password_target(), Some("typed"), PasswordFlags::default(), false, &|| store.open());
             let _ = done_tx.send(outcome.is_ok());
         });
-        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err(), "the connect must wait for the lock");
+        let waited = done_rx.recv_timeout(Duration::from_millis(100)).is_err();
         drop(held);
         // The fake server answers nothing, so the connect itself fails; only that it ran after the release matters.
-        assert!(done_rx.recv_timeout(Duration::from_secs(10)).is_ok(), "the connect runs once the lock is free");
+        let finished = done_rx.recv_timeout(Duration::from_secs(10)).is_ok();
+        // Joined before any assert, so a failure cannot leave the worker writing prefs after the Fixture is gone.
         worker.join().unwrap();
+        assert!(waited, "the connect must wait for the lock");
+        assert!(finished, "the connect runs once the lock is free");
+    }
+
+    #[test]
+    fn a_forget_waits_for_the_operation_lock() {
+        use crate::ssh_service::tests::{Fixture, HOST};
+        let _fx = Fixture::new("cmds-forget-serialized");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let held = ssh_service::operation();
+        let worker = std::thread::spawn(move || {
+            let outcome = forget_server(HOST, 22, "alice");
+            let _ = done_tx.send(outcome.is_ok());
+        });
+        let waited = done_rx.recv_timeout(Duration::from_millis(100)).is_err();
+        let still_listed = prefs::stored().remote_server.ssh_recent_servers.iter().any(|s| s.user == "alice");
+        drop(held);
+        let finished = done_rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false);
+        worker.join().unwrap();
+        assert!(waited, "the forget must wait for the lock");
+        assert!(still_listed, "nothing is removed while the lock is held");
+        assert!(finished, "the forget finishes once the lock is free");
+        assert!(!prefs::stored().remote_server.ssh_recent_servers.iter().any(|s| s.user == "alice"));
     }
 
     const COMMANDS: [&str; 11] = [

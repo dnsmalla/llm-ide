@@ -1866,12 +1866,17 @@ pub(crate) mod tests {
                 let _ = done_tx.send(result.is_ok());
             })
         };
-        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err(), "the write section must wait for the lock");
-        assert_eq!(fx.asks.load(Ordering::SeqCst), 1, "the dialog ran before the lock was needed");
-        assert!(pin_for(&endpoint_shape(&login).unwrap()).is_none(), "nothing is pinned while the lock is held");
+        let waited = done_rx.recv_timeout(Duration::from_millis(100)).is_err();
+        let asked = fx.asks.load(Ordering::SeqCst);
+        let pinned_early = pin_for(&endpoint_shape(&login).unwrap()).is_some();
         drop(held);
-        assert!(done_rx.recv_timeout(Duration::from_secs(10)).unwrap(), "the confirm finishes once the lock is free");
+        let finished = done_rx.recv_timeout(Duration::from_secs(10)).unwrap_or(false);
+        // Joined before any assert, so a failure cannot leave the worker writing prefs after the Fixture is gone.
         worker.join().unwrap();
+        assert!(waited, "the write section must wait for the lock");
+        assert_eq!(asked, 1, "the dialog ran before the lock was needed");
+        assert!(!pinned_early, "nothing is pinned while the lock is held");
+        assert!(finished, "the confirm finishes once the lock is free");
         assert!(pin_for(&endpoint_shape(&login).unwrap()).is_some());
     }
 
