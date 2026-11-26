@@ -27,7 +27,7 @@ export interface NotifyPrefs { approvals: boolean; tasks: boolean; sync: boolean
 export const DEFAULT_NOTIFY_PREFS: NotifyPrefs = Object.freeze({ approvals: true, tasks: true, sync: true, updates: true, core: true });
 /** Defensive decode: anything but an explicit `false` reads as on (the host default). */
 export function decodeNotifyPrefs(raw: unknown): NotifyPrefs {
-  const r = typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  const r = isRecord(raw) ? raw : {};
   return { approvals: r.approvals !== false, tasks: r.tasks !== false, sync: r.sync !== false, updates: r.updates !== false, core: r.core !== false };
 }
 /** Settings → Server & Backend → Remote server (desktop prefs::RemoteServerPrefs). */

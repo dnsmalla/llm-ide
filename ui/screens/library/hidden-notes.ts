@@ -2,6 +2,7 @@
 // note file; the desktop keeps the same promise with a per-project hidden set of note paths in browser
 // storage (a per-viewer convenience, like the Library's other prefs). Hiding never deletes anything: the
 // file stays, and "Show hidden" / "Unhide" bring a note back.
+import { isRecord } from "../../kit/src/decode.ts";
 
 export const HIDDEN_KEY = "llmide.library.hidden";
 /** Per project folder. Past this, further hides are refused and counted, never dropped silently. */
@@ -46,7 +47,7 @@ export function loadHidden(storage: KeyValue | null, root: string): Set<string> 
   const out = new Set<string>();
   try {
     const all = JSON.parse(storage?.getItem(HIDDEN_KEY) ?? "{}") as unknown;
-    const list = typeof all === "object" && all !== null && !Array.isArray(all) ? (all as Record<string, unknown>)[root] : undefined;
+    const list = isRecord(all) ? all[root] : undefined;
     if (!Array.isArray(list)) return out;
     for (const v of list) {
       if (typeof v !== "string" || v === "" || v.length > MAX_REL || /[\u0000-\u001f]/.test(v)) continue;
@@ -63,7 +64,7 @@ export function loadHidden(storage: KeyValue | null, root: string): Set<string> 
 export function saveHidden(storage: KeyValue | null, root: string, hidden: ReadonlySet<string>): void {
   try {
     const all = JSON.parse(storage?.getItem(HIDDEN_KEY) ?? "{}") as Record<string, unknown>;
-    const base = typeof all === "object" && all !== null && !Array.isArray(all) ? all : {};
+    const base = isRecord(all) ? all : {};
     base[root] = [...hidden].slice(0, HIDDEN_LIMIT);
     storage?.setItem(HIDDEN_KEY, JSON.stringify(base));
   } catch {

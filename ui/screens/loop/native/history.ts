@@ -127,7 +127,7 @@ export async function loadRunRecord(fs: Pick<FsApi, "read">, id: string, started
     const r = await fs.read(runRecordPath(id, startedAt), 4_000_000);
     if (r.status !== "ok" || !r.text) return null;
     const v = JSON.parse(r.text) as unknown;
-    return typeof v === "object" && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : null;
+    return isRecord(v) ? v : null;
   } catch { return null; }
 }
 

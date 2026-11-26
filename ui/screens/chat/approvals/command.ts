@@ -35,12 +35,13 @@ export function normalizeCommand(raw: string): NormalizedCommand {
 
 const WRAPPERS = new Set(["sudo", "doas", "env", "command", "builtin", "nohup", "time", "exec", "nice", "ionice", "xargs", "stdbuf", "timeout", "then", "do", "else", "!", "if", "while", "until", "{", "(", "caffeinate"]);
 const INTERPRETERS = new Set(["sh", "bash", "zsh", "fish", "dash", "ksh", "csh", "tcsh", "python", "python2", "python3", "perl", "ruby", "node", "deno", "bun", "php", "lua", "osascript", "pwsh", "powershell", "awk", "gawk", "npx", "tsx", "ts-node", "source", "."]);
+import { baseName } from "../../../kit/src/paths.ts";
+
 const NETWORK = new Set(["curl", "wget", "nc", "ncat", "netcat", "socat", "telnet", "scp", "sftp", "ftp", "rsync", "ssh", "ssh-copy-id", "aria2c", "http", "https"]);
 const KILLERS = new Set(["kill", "killall", "pkill"]);
 const DELETERS = new Set(["rm", "rmdir", "unlink", "srm", "shred", "truncate"]);
 const DISK = new Set(["dd", "mkfs", "fdisk", "diskutil", "parted", "wipefs", "format"]);
 
-const base = (p: string): string => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p);
 const isAssign = (t: string) => /^[a-z_][a-z0-9_]*\+?=/.test(t);
 const SHORT = (flags: string[], chars: string): boolean => flags.some((f) => /^-[a-z]+$/.test(f) && [...chars].some((c) => f.includes(c)));
 
@@ -58,14 +59,14 @@ function programOf(tokens: string[]): { program: string; args: string[]; wrapper
   while (i < tokens.length) {
     const t = tokens[i];
     if (isAssign(t)) { assigned = true; i++; continue; }
-    if (WRAPPERS.has(base(t))) {
-      wrappers.push(base(t)); i++;
+    if (WRAPPERS.has(baseName(t))) {
+      wrappers.push(baseName(t)); i++;
       while (i < tokens.length && (tokens[i].startsWith("-") || isAssign(tokens[i]))) { if (isAssign(tokens[i])) assigned = true; i++; }
       continue;
     }
     break;
   }
-  return { program: base(tokens[i] ?? ""), args: tokens.slice(i + 1), wrappers, assigned };
+  return { program: baseName(tokens[i] ?? ""), args: tokens.slice(i + 1), wrappers, assigned };
 }
 
 const GIT_GLOBAL_WITH_VALUE = new Set(["--git-dir", "--work-tree", "--namespace", "--exec-path", "--super-prefix", "--config-env"]);

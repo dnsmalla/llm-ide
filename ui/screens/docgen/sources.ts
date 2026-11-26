@@ -3,6 +3,7 @@
 // capped to what the core would keep, and reading stops as soon as the core's source budget is certain to be full.
 // Everything is cancellable.
 import { MAX_BODY_CHARS, MAX_SELECTED_SOURCES, MAX_SOURCE_CONTENT, MAX_TOTAL_SOURCE_CHARS, MIN_SOURCE_CONTENT, type SourcePayload } from "./model.ts";
+import { baseName } from "../../kit/src/paths.ts";
 
 export type SourceKind = "paste" | "note" | "file";
 
@@ -39,11 +40,6 @@ const KIND_RANK: Record<SourceKind, number> = { paste: 0, note: 1, file: 2 };
 /** Deterministic send order (the core drops from the END when over budget, so the order decides what survives). */
 export function sendOrder(items: Iterable<SourceItem>): SourceItem[] {
   return [...items].sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0) || (a.key < b.key ? -1 : 1));
-}
-
-export function fileName(rel: string): string {
-  const i = rel.lastIndexOf("/");
-  return i < 0 ? rel : rel.slice(i + 1);
 }
 
 export interface Totals {
@@ -108,11 +104,11 @@ export class SourceSelection {
 }
 
 export function fileItem(rel: string, bytes: number): SourceItem {
-  return { key: `file:${rel}`, kind: "file", rel, name: fileName(rel), bytes };
+  return { key: `file:${rel}`, kind: "file", rel, name: baseName(rel), bytes };
 }
 
 export function noteItem(rel: string, bytes: number, title?: string): SourceItem {
-  return { key: `note:${rel}`, kind: "note", rel, name: (title && title.trim()) || fileName(rel), bytes };
+  return { key: `note:${rel}`, kind: "note", rel, name: (title && title.trim()) || baseName(rel), bytes };
 }
 
 /** Rough UTF-16 character count from a byte size, for the pre-run estimate (UTF-8 text averages ~1.2 bytes/char). */

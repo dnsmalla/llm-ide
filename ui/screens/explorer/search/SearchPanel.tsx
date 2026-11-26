@@ -2,6 +2,7 @@
 // file in a virtualised listbox (only the visible window is rendered), keyboard navigation.
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type KeyboardEvent } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { baseName, parentOf } from "../../../kit/src/paths.ts";
 import type { SearchController } from "./controller";
 import { skippedNotice, summaryText, scrollToReveal, truncationNotice, visibleFiles, windowRows, type FileHits, type Hit, type Row, type SearchOptions } from "./model";
 import { listedTargets, type ReplaceAllSummary, type ReplaceTarget } from "./replace";
@@ -65,14 +66,6 @@ export function replaceAllRequest(snap: { files: readonly FileHits[]; dismissed:
     ? `Replace all matches in ${paths.length.toLocaleString()} file${paths.length === 1 ? "" : "s"}?`
     : `Replace all matches except the ${n.toLocaleString()} you dismissed?`;
   return { paths, targets, dismissed: snap.dismissed, prompt };
-}
-
-function baseOf(p: string): string {
-  return p.slice(p.lastIndexOf("/") + 1);
-}
-function dirOf(p: string): string {
-  const i = p.lastIndexOf("/");
-  return i < 0 ? "" : p.slice(0, i);
 }
 
 export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEFAULT_VIEWPORT, initialReplacement = "", onReplaceAll, onReplaceOne }: SearchPanelProps) {
@@ -225,23 +218,23 @@ export function SearchPanel({ controller, focusSignal = 0, initialViewport = DEF
       return (
         <div key={`f:${r.path}`} {...common} aria-expanded={!r.collapsed} aria-label={`${r.path}, ${r.count} result${r.count === 1 ? "" : "s"}${r.more ? " or more" : ""}`} className="sx-row sx-file" data-selected={snap.selected === i} title={r.path} onClick={() => controller.activate(i)}>
           <span className="sx-chevron" aria-hidden="true">{r.collapsed ? "▸" : "▾"}</span>
-          <span className="sx-fname">{baseOf(r.path)}</span>
-          <span className="sx-fdir">{dirOf(r.path)}</span>
+          <span className="sx-fname">{baseName(r.path)}</span>
+          <span className="sx-fdir">{parentOf(r.path)}</span>
           <span className="sx-count">{r.count}{r.more ? "+" : ""}</span>
           {canReplaceFile ? (
-            <button type="button" className="sx-toggle" aria-label={`Replace all in ${baseOf(r.path)}`} title="Replace all matches in this file" onClick={(e) => { e.stopPropagation(); runReplace(listedTargets(snap.files.filter((f) => f.path === r.path), snap.dismissed)); }}>⇄</button>
+            <button type="button" className="sx-toggle" aria-label={`Replace all in ${baseName(r.path)}`} title="Replace all matches in this file" onClick={(e) => { e.stopPropagation(); runReplace(listedTargets(snap.files.filter((f) => f.path === r.path), snap.dismissed)); }}>⇄</button>
           ) : null}
         </div>
       );
     }
     return (
-      <div key={r.key} {...common} aria-label={`Line ${r.hit.line} in ${baseOf(r.path)}: ${r.hit.preview.slice(0, 120)}`} className="sx-row sx-hit" data-selected={snap.selected === i} title={`${r.path}:${r.hit.line}`} onClick={() => controller.activate(i)}>
+      <div key={r.key} {...common} aria-label={`Line ${r.hit.line} in ${baseName(r.path)}: ${r.hit.preview.slice(0, 120)}`} className="sx-row sx-hit" data-selected={snap.selected === i} title={`${r.path}:${r.hit.line}`} onClick={() => controller.activate(i)}>
         <span className="sx-line">{r.hit.line}</span>
         <span className="sx-preview"><HitText hit={r.hit} /></span>
         {canReplaceHit ? (
-          <button type="button" className="sx-toggle" aria-label={`Replace match at line ${r.hit.line} in ${baseOf(r.path)}`} title="Replace this match" onClick={(e) => { e.stopPropagation(); runReplaceHit(r.path, r.hit); }}>⇄</button>
+          <button type="button" className="sx-toggle" aria-label={`Replace match at line ${r.hit.line} in ${baseName(r.path)}`} title="Replace this match" onClick={(e) => { e.stopPropagation(); runReplaceHit(r.path, r.hit); }}>⇄</button>
         ) : null}
-        <button type="button" className="sx-toggle" aria-label={`Dismiss match at line ${r.hit.line} in ${baseOf(r.path)}`} title="Dismiss this match" onClick={(e) => { e.stopPropagation(); controller.dismiss(r.path, r.hit); }}>×</button>
+        <button type="button" className="sx-toggle" aria-label={`Dismiss match at line ${r.hit.line} in ${baseName(r.path)}`} title="Dismiss this match" onClick={(e) => { e.stopPropagation(); controller.dismiss(r.path, r.hit); }}>×</button>
       </div>
     );
   };

@@ -13,6 +13,7 @@ import { EditorPane } from "./EditorPane";
 import type { EditorHost } from "./editor-types";
 import { FileTree } from "./FileTree";
 import { copyAbsolutePaths, deleteQuestion, findEntry, treeMenuItems } from "./menus";
+import { entryNameProblem } from "../../kit/src/entry-name.ts";
 import { createHostFs, baseName, nativeBaseName, parentOf, toFsError, type Encoding, type FsApi, type WatchBatch } from "./fs";
 import { defaultKv, type KV } from "./session";
 import { ChatDockSlot } from "../shell/chat-dock";
@@ -75,8 +76,8 @@ const copy = (text: string) => {
   }
 };
 
-/** Line breaks cannot be in a name (the Mac refuses them too: a wrapped line pasted into a name is invisible). */
-const LINE_BREAK = /[\r\n\v\f\u0085\u2028\u2029]/;
+/** The sentence for each reason `entryNameProblem` can give (the rule itself lives in the kit). */
+const NAME_PROBLEM_TEXT = { empty: "Enter a name.", line_break: "Names can't contain line breaks.", separator: "A name cannot contain slashes.", null: "A name cannot contain slashes.", dot: "That name is not allowed." } as const;
 
 export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, deps }: SectionProps & { deps?: ExplorerDeps; onOpenServerFolder?: () => void }) {
   // SSH mode: the project is a folder on the server. Actions that open this computer's file manager, viewer or folder dialogs are left out.
@@ -557,7 +558,7 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
           label={dialog.kind === "new-dir" ? "Folder name" : dialog.kind === "new-file" ? "File name" : "New name"}
           initial={dialog.kind === "rename" ? baseName(dialog.path) : ""}
           confirmLabel={dialog.kind === "rename" ? "Rename" : "Create"}
-          validate={(v) => (v.trim() === "" ? "Enter a name." : LINE_BREAK.test(v) ? "Names can't contain line breaks." : /[\\/\0]/.test(v) ? "A name cannot contain slashes." : v.trim() === "." || v.trim() === ".." ? "That name is not allowed." : null)}
+          validate={(v) => { const problem = entryNameProblem(v, { refuseBackslash: true }); return problem === null ? null : NAME_PROBLEM_TEXT[problem]; }}
           onCancel={() => setDialog(null)}
           onSubmit={(v) => {
             const d = dialog;

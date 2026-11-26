@@ -3,6 +3,7 @@ import type { ApprovalSuggestion } from "../events";
 import type { Risk } from "./risk";
 import { commandWords } from "./command";
 import { hasHidden, sanitizeText } from "./sanitize";
+import { baseName } from "../../../kit/src/paths.ts";
 
 const EDIT_RULE_TOOLS: ReadonlySet<string> = new Set(["Edit", "MultiEdit", "NotebookEdit", "Write", "update-file"]);
 
@@ -48,8 +49,6 @@ const NEVER_IN_PREFIX = new Set([
 
 export type RuleCheck = { ok: true; view: RuleView } | { ok: false; reason: string };
 
-const base = (p: string) => (p.includes("/") ? p.slice(p.lastIndexOf("/") + 1) : p);
-
 /**
  * Whether to offer "always allow" and how to word it. `projectRoot` is the root THE TURN was sent with (what the core
  * scopes the rule to), not the project currently open. `command` is the Bash command being approved right now.
@@ -78,14 +77,14 @@ export function describeRule(sug: ApprovalSuggestion | null | undefined, risk: R
   if (hasHidden(sug.pattern)) return { ok: false, reason: "The offered rule contains hidden characters and was refused." };
   const pat = commandWords(sug.pattern);
   if (pat.compound || pat.opaque || pat.words.length === 0) return { ok: false, reason: "The offered rule is not a single plain command prefix and was refused." };
-  const words = pat.words.map(base);
+  const words = pat.words.map(baseName);
   const match = SAFE_RULE_PREFIXES.find((e) => e.words.every((w, i) => words[i] === w) && (!e.exact || words.length === e.words.length));
   if (!match) return { ok: false, reason: "Only a short list of read-only commands (git status/diff/log/show, ls, which) can be saved as a rule." };
   if (!match.exact && words.length < 2) return { ok: false, reason: "The offered rule has no argument and was refused." };
   if (!match.exact && words.slice(0, 2).some((w) => NEVER_IN_PREFIX.has(w))) return { ok: false, reason: "The offered rule is too broad to save." };
   if (command !== undefined && command !== null) {
     const cur = commandWords(command);
-    if (cur.compound || cur.opaque || !words.every((w, i) => base(cur.words[i] ?? "") === w)) return { ok: false, reason: "The offered rule does not match this exact command, so it is not saved." };
+    if (cur.compound || cur.opaque || !words.every((w, i) => baseName(cur.words[i] ?? "") === w)) return { ok: false, reason: "The offered rule does not match this exact command, so it is not saved." };
   }
   const p = sanitizeText(sug.pattern.trim(), 200).text;
   return { ok: true, view: {
