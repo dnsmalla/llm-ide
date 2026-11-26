@@ -170,8 +170,20 @@ pub enum Line {
     TooLong,
 }
 
-/// Reads one line without ever holding more than `max` bytes of it.
+/// Reads one line without ever holding more than `max` bytes of it. An over-long line is read through to its newline
+/// and reported as `TooLong`, so the reader is at the next line (the helper answers it and carries on).
 pub fn read_bounded_line<R: BufRead + ?Sized>(reader: &mut R, max: usize) -> io::Result<Line> {
+    read_line(reader, max, true)
+}
+
+/// Like `read_bounded_line`, but stops at the first byte past `max` and reports `TooLong` at once, leaving the rest of
+/// the line unread. For a peer whose over-long line ends the channel (the host), so it reads at most `max + 1` bytes
+/// of a line a misbehaving server never ends.
+pub fn read_line_stopping_at_cap<R: BufRead + ?Sized>(reader: &mut R, max: usize) -> io::Result<Line> {
+    read_line(reader, max, false)
+}
+
+fn read_line<R: BufRead + ?Sized>(reader: &mut R, max: usize, skip_rest: bool) -> io::Result<Line> {
     let mut buf = Vec::new();
     let mut too_long = false;
     loop {
@@ -187,6 +199,9 @@ pub fn read_bounded_line<R: BufRead + ?Sized>(reader: &mut R, max: usize) -> io:
         if !too_long {
             let chunk = &available[..newline.unwrap_or(available.len())];
             if buf.len() + chunk.len() > max {
+                if !skip_rest {
+                    return Ok(Line::TooLong);
+                }
                 too_long = true;
                 buf = Vec::new();
             } else {
@@ -258,6 +273,18 @@ mod tests {
         assert_eq!(read_bounded_line(&mut reader, 10).unwrap(), Line::TooLong);
         assert_eq!(read_bounded_line(&mut reader, 10).unwrap(), Line::Text(b"abc".to_vec()));
         assert_eq!(read_bounded_line(&mut reader, 10).unwrap(), Line::Eof);
+    }
+
+    #[test]
+    fn the_stopping_reader_gives_up_at_the_cap_without_reading_to_the_newline() {
+        let mut bytes = vec![b'x'; 5000];
+        bytes.extend_from_slice(b"\nabc\n");
+        let mut reader = io::BufReader::with_capacity(8, io::Cursor::new(bytes));
+        assert_eq!(read_line_stopping_at_cap(&mut reader, 10).unwrap(), Line::TooLong);
+        assert!(reader.get_ref().position() < 100, "stopped near the cap, not at the newline");
+        let mut ok = io::Cursor::new(b"abc\nz".to_vec());
+        assert_eq!(read_line_stopping_at_cap(&mut ok, 4).unwrap(), Line::Text(b"abc".to_vec()));
+        assert_eq!(read_line_stopping_at_cap(&mut ok, 4).unwrap(), Line::Unterminated(b"z".to_vec()));
     }
 
     #[test]

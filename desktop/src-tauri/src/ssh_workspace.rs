@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 use llmide_workspace_core::wire::{
-    read_bounded_line, Answer, Hello, Line, Request, CMD_HELLO, EVENT_CLONE, EVENT_SEARCH, EVENT_WATCH, MAX_LINE_BYTES, PROTOCOL,
+    read_line_stopping_at_cap, Answer, Hello, Line, Request, CMD_HELLO, EVENT_CLONE, EVENT_SEARCH, EVENT_WATCH, MAX_LINE_BYTES, PROTOCOL,
 };
 
 use crate::confirm::herr;
@@ -317,7 +317,7 @@ impl Drop for WorkspaceClient {
 /// gets a broken pipe instead of blocking on a full one.
 fn read_loop(mut stdout: Box<dyn BufRead + Send>, shared: &Shared, child: &Mutex<Box<dyn StdioChild>>) {
     loop {
-        match read_bounded_line(&mut *stdout, MAX_LINE_BYTES) {
+        match read_line_stopping_at_cap(&mut *stdout, MAX_LINE_BYTES) {
             Ok(Line::Text(bytes)) if bytes.is_empty() => {}
             Ok(Line::Text(bytes)) => match serde_json::from_slice::<Value>(&bytes) {
                 Ok(value) => shared.route(value),
@@ -831,6 +831,29 @@ mod tests {
         assert!(client.is_closed());
         client.close();
         assert_eq!(remote.kills(), 1, "the broken helper is killed once");
+    }
+
+    /// A stdout that never ends its line: every read returns more bytes and counts them.
+    struct EndlessLine(Arc<AtomicUsize>);
+
+    impl io::Read for EndlessLine {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let served = self.0.fetch_add(buf.len(), Ordering::SeqCst);
+            // A runaway reader would loop forever; give up loudly instead of hanging the test run.
+            assert!(served < 64 * MAX_LINE_BYTES, "the reader kept reading an endless line");
+            buf.fill(b'x');
+            Ok(buf.len())
+        }
+    }
+
+    #[test]
+    fn an_endless_line_ends_the_reader_at_the_cap_not_at_a_newline() {
+        let served = Arc::new(AtomicUsize::new(0));
+        let shared = Shared { pending: Mutex::new(PendingState::default()), subscribers: Mutex::new(Vec::new()) };
+        let (fake, _remote) = FakeStdio::new(echo());
+        let child: Mutex<Box<dyn StdioChild>> = Mutex::new(Box::new(fake));
+        read_loop(Box::new(BufReader::new(EndlessLine(Arc::clone(&served)))), &shared, &child);
+        assert!(served.load(Ordering::SeqCst) <= MAX_LINE_BYTES + 2 * 8192, "read {} bytes", served.load(Ordering::SeqCst));
     }
 
     #[test]
