@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
 # Builds LLM-IDE.app (the Tauri desktop app) for THIS Mac, verifies it, and prints how to open it.
 #
-#   scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke] [--verbose]
+#   scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke] [--verbose] [--rebuild]
 #
 #   --dmg          also make LLM-IDE-<version>-<arch>.dmg next to the .app (hdiutil, no Finder scripting)
 #   --skip-checks  skip `npm run check:security` before the build
 #   --no-smoke     skip the core smoke test and the shell e2e suite against the core inside the built app
+#   --rebuild      always run the frontend + Rust build, even when nothing it reads changed since the last good
+#                  build (also LLMIDE_FORCE_REBUILD=1); by default that ~2 min step is skipped and the .app reused
 #   --verbose      stream every tool's output (also LLMIDE_BUILD_VERBOSE=1); by default each step prints one line
 #                  and the full output goes to desktop/src-tauri/target/build-desktop.log
 #
-# Idempotent: every run restages the core from scratch and rebuilds; nothing outside desktop/ is touched.
+# Idempotent: every run restages the core from scratch and re-signs/verifies/smoke-tests; only the tauri build
+# is skipped when desktop/scripts/app-build-key.mjs reports the same input key as the last successful build.
+# Nothing outside desktop/ is touched.
 # Needs network on the first run (pinned official Node download, npm ci, cargo crates). Nothing here launches
 # the app and nothing calls a model. Output: desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app
 #
@@ -28,13 +32,14 @@ set -euo pipefail
 RUST_SYSROOT="$(rustc --print sysroot)"
 RUST_LIB="${RUST_SYSROOT}/lib"
 
-DMG=0; CHECKS=1; SMOKE=1; VERBOSE="${LLMIDE_BUILD_VERBOSE:-0}"
+DMG=0; CHECKS=1; SMOKE=1; VERBOSE="${LLMIDE_BUILD_VERBOSE:-0}"; FORCE="${LLMIDE_FORCE_REBUILD:-0}"
 for a in "$@"; do
   case "$a" in
     --dmg) DMG=1 ;;
     --skip-checks) CHECKS=0 ;;
     --no-smoke) SMOKE=0 ;;
     --verbose) VERBOSE=1 ;;
+    --rebuild) FORCE=1 ;;
     -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
@@ -144,9 +149,22 @@ tauri_build() {
   DYLD_LIBRARY_PATH="${RUST_LIB}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" CARGO_TARGET_DIR="$TARGET_DIR" \
     node node_modules/@tauri-apps/cli/tauri.js build --bundles app
 }
-run "Build the app (frontend + release Rust binary)" tauri_build
-
 APP="$TARGET_DIR/release/bundle/macos/LLM-IDE.app"
+BUILD_LABEL="Build the app (frontend + release Rust binary)"
+# The stamp is written only after the whole build passed, so a build that failed later (sign, smoke) is redone.
+BUILD_KEY="$(node "$DESKTOP/scripts/app-build-key.mjs")"
+STAMP="$TARGET_DIR/.app-build-key"
+if [ "$FORCE" != 1 ] && [ -d "$APP" ] && [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$BUILD_KEY" ]; then
+  printf '==> %s: unchanged since the last build, reused\n' "$BUILD_LABEL" >>"$LOG_FILE"
+  if [ "$VERBOSE" = 1 ]; then
+    printf '\n==> %s: unchanged since the last build, reused\n' "$BUILD_LABEL"
+  else
+    printf '  %-56s %s\n' "$BUILD_LABEL" "unchanged, reused"
+  fi
+else
+  rm -f "$STAMP"
+  run "$BUILD_LABEL" tauri_build
+fi
 [ -d "$APP" ] || { echo "build finished but $APP is missing" >&2; exit 1; }
 
 # A local build records its source checkout so Settings > Build can rebuild itself; a distributed release omits it
@@ -215,6 +233,8 @@ if [ "$DMG" = 1 ]; then
   }
   run "Make the .dmg" make_dmg
 fi
+
+printf '%s\n' "$BUILD_KEY" >"$STAMP"
 
 ELAPSED=$((SECONDS - BUILD_START))
 echo
