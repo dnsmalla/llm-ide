@@ -12,11 +12,33 @@ export const TIERS: readonly { id: string; label: string; hint: string }[] = [
   { id: "cheap", label: "Cheap", hint: "Background and bulk work. Optional." },
 ];
 
-/** Roles that start on Standard in the draft while no tier is saved for them (Decision is never preselected). */
-const PRESELECT_ROLES: readonly string[] = ["subagents", "internal", "loop", "plan", "autoTasks"];
+/**
+ * Roles that start on Standard in the draft while no tier is saved for them (Decision is never preselected).
+ * NOTE: `plan` is deliberately absent. An unset plan role follows the Loop role on the core; writing Standard
+ * explicitly on save would defeat that fallback (and an older core would drop it as unknown_feature on every save).
+ */
+const PRESELECT_ROLES: readonly string[] = ["subagents", "internal", "loop", "autoTasks"];
+
+/**
+ * Roles an older core does not know. A core below API 160 drops `features.plan` as unknown_feature on every save, so
+ * a choice there could never be kept. Newer cores always report such a role in `featureStatus`, so its presence is the
+ * signal (no extra /health call).
+ */
+const NEWER_ROLES: readonly string[] = ["plan"];
+
+/** Whether the loaded routing data says the core knows `role`. */
+export function coreKnowsRole(l: { featureStatus?: Record<string, unknown> }, role: string): boolean {
+  return !NEWER_ROLES.includes(role) || (l.featureStatus !== undefined && role in l.featureStatus);
+}
+
+/** The roles to list for `l`; a role the core does not know is hidden, since choosing it could never be saved. */
+export function visibleRoles(l: { featureStatus?: Record<string, unknown> } | null): readonly { id: string; label: string }[] {
+  return l ? ROLES.filter((role) => coreKnowsRole(l, role.id)) : ROLES;
+}
 
 /** The text of a role's empty option. */
 export function roleEmptyOptionLabel(role: string): string {
+  if (role === "plan") return "Follows Loop and Factory";
   return PRESELECT_ROLES.includes(role) ? "Default (built-in)" : "Default";
 }
 

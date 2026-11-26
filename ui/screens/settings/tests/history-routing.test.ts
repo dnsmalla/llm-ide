@@ -271,13 +271,12 @@ test("routing: Default for the last preselected role leaves the table unchanged,
   await m.load();
   assert.equal(m.getState().pendingDecision, false);
   m.setRole("autoTasks", null);
-  m.setRole("plan", null);
   const s = m.getState();
   assert.equal(isDirty(s.loaded, s.draft), false, "the table equals what is saved");
   assert.equal(s.pendingDecision, true, "the choice is not saved yet");
   await m.save();
   assert.equal(m.getState().pendingDecision, false);
-  assert.deepEqual(JSON.parse(store.getItem("llmide.routing.declinedPreselect")!), ["autoTasks", "plan"]);
+  assert.deepEqual(JSON.parse(store.getItem("llmide.routing.declinedPreselect")!), ["autoTasks"]);
   const restarted = new RoutingModel(client, store);
   await restarted.load();
   assert.equal(restarted.getState().draft!.features.autoTasks, undefined, "still Default after a restart");

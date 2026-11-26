@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { RoutingModel, dropReasonText, modelIdProblem, roleFallbackWarning, roleFallbacks, roleStatusText, roleEmptyOptionLabel, draftFromLoaded, preselectedRoles, isDirty, validateDraft } from "../routing-model.ts";
+import { RoutingModel, dropReasonText, modelIdProblem, roleFallbackWarning, roleFallbacks, roleStatusText, roleEmptyOptionLabel, draftFromLoaded, preselectedRoles, visibleRoles, isDirty, validateDraft } from "../routing-model.ts";
 import { ModelListsModel, decodeBuiltinModels, pickerView, OTHER_MODEL } from "../routing-models.ts";
 import { fakeClient, reply } from "./helpers.ts";
 
@@ -228,7 +228,8 @@ test("validateDraft: a role on an unset tier is named with labels and the way ou
 });
 
 test("roles: the empty option says Default (built-in), Decision keeps Default", () => {
-  for (const role of ["subagents", "internal", "loop", "plan", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
+  for (const role of ["subagents", "internal", "loop", "autoTasks"]) assert.equal(roleEmptyOptionLabel(role), "Default (built-in)");
+  assert.equal(roleEmptyOptionLabel("plan"), "Follows Loop and Factory");
   assert.equal(roleEmptyOptionLabel("decisions"), "Default");
 });
 
@@ -241,11 +242,11 @@ test("roles: unset Sub-agents/Internal say no tier is saved; Decision says it us
 });
 
 const STD = { provider: "anthropic", model: "x" };
-const loadedOf = (tiers: Record<string, typeof STD>, features: Record<string, string>) => ({ tiers, features, status: {}, featureStatus: {} }) as never;
+const loadedOf = (tiers: Record<string, typeof STD>, features: Record<string, string>) => ({ tiers, features, status: {}, featureStatus: { plan: { usable: true } } }) as never;
 
 test("draft: with Standard set, roles without a saved tier start on Standard; Decision never does", () => {
-  const d = draftFromLoaded({ tiers: { standard: STD }, features: { loop: "standard", subagents: "standard" } });
-  assert.deepEqual(d.features, { subagents: "standard", internal: "standard", loop: "standard", plan: "standard", autoTasks: "standard" });
+  const d = draftFromLoaded({ tiers: { standard: STD }, features: { loop: "standard", subagents: "standard" }});
+  assert.deepEqual(d.features, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
   const kept = draftFromLoaded({ tiers: { standard: STD, cheap: STD }, features: { internal: "cheap" } });
   assert.equal(kept.features.internal, "cheap");
   assert.equal(kept.features.decisions, undefined);
@@ -259,18 +260,38 @@ test("draft: preselecting makes the section dirty (with the roles named); nothin
   const loaded = loadedOf({ standard: STD }, { loop: "standard" });
   const draft = draftFromLoaded(loaded);
   assert.equal(isDirty(loaded, draft), true);
-  assert.deepEqual(preselectedRoles(loaded, draft), ["subagents", "internal", "plan", "autoTasks"]);
-  const full = loadedOf({ standard: STD }, { subagents: "standard", internal: "standard", loop: "standard", plan: "standard", autoTasks: "standard" });
+  assert.deepEqual(preselectedRoles(loaded, draft), ["subagents", "internal", "autoTasks"]);
+  const full = loadedOf({ standard: STD }, { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" });
   assert.equal(isDirty(full, draftFromLoaded(full)), false);
   assert.deepEqual(preselectedRoles(full, draftFromLoaded(full)), []);
 });
 
 test("draft: RoutingModel.load puts Standard on unsaved roles and Save sends it explicitly", async () => {
   const client = fakeClient({
-    "GET /kb/routing-tiers": () => ({ status: 200, body: { tiers: { standard: STD }, features: {}, status: {}, featureStatus: {} } }),
+    "GET /kb/routing-tiers": () => ({ status: 200, body: { tiers: { standard: STD }, features: {}, status: {}, featureStatus: { plan: { usable: true } } } }),
   });
   const m = new RoutingModel(client);
   await m.load();
   assert.equal(m.getState().draft!.features.subagents, "standard");
   assert.equal(isDirty(m.getState().loaded, m.getState().draft), true);
+});
+
+test("old core (no featureStatus.plan): Plan is not preselected or listed, and a save-reload cycle stays clean", async () => {
+  const oldBody = { tiers: { standard: STD }, features: { subagents: "standard", internal: "standard", loop: "standard", autoTasks: "standard" }, status: {}, featureStatus: { loop: { usable: true }, autoTasks: { usable: true } } };
+  const client = fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body: oldBody }) });
+  const m = new RoutingModel(client);
+  await m.load();
+  const s = m.getState();
+  assert.equal("plan" in s.draft!.features, false);
+  assert.equal(isDirty(s.loaded, s.draft), false);
+  assert.deepEqual(preselectedRoles(s.loaded, s.draft), []);
+  assert.equal(visibleRoles(s.loaded).some((r) => r.id === "plan"), false);
+});
+
+test("new core (featureStatus.plan present): Plan is listed but never preselected (unset follows Loop)", async () => {
+  const body = { tiers: { standard: STD }, features: {}, status: {}, featureStatus: { plan: { usable: true } } };
+  const m = new RoutingModel(fakeClient({ "GET /kb/routing-tiers": () => ({ status: 200, body }) }));
+  await m.load();
+  assert.equal("plan" in m.getState().draft!.features, false);
+  assert.equal(visibleRoles(m.getState().loaded).some((r) => r.id === "plan"), true);
 });

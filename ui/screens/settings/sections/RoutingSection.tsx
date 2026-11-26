@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cleanFallback, rowsFromCatalog } from "../providers-model.ts";
-import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, ROLES, roleEmptyOptionLabel, preselectedRoles, PRESELECT_HINT, SWITCH_TEXT, TIERS, isDirty, roleFallbackWarning, roleStatusText, tierStatusText } from "../routing-model.ts";
+import { EXTRA_TIERS, MIGRATION_TEXT, RoutingModel, visibleRoles, roleEmptyOptionLabel, preselectedRoles, PRESELECT_HINT, SWITCH_TEXT, TIERS, isDirty, roleFallbackWarning, roleStatusText, tierStatusText } from "../routing-model.ts";
 import { ModelListsModel, OTHER_MODEL, pickerView, type ModelListEntry } from "../routing-models.ts";
 import { sharedProvidersModel, useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { CatalogMigration, ProviderSettings, TierChoice } from "../decoders.ts";
@@ -94,7 +94,7 @@ export default function RoutingSection() {
           <table className="st-table" aria-label="Roles">
             <thead><tr><th scope="col">Role</th><th scope="col">Tier</th><th scope="col">Status</th></tr></thead>
             <tbody>
-              {ROLES.map((role) => (
+              {visibleRoles(r.loaded).map((role) => (
                 <tr key={role.id}>
                   <th scope="row">{role.label}</th>
                   <td>
