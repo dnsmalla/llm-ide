@@ -15,7 +15,7 @@ use crate::fs_ops::FsError;
 use crate::fsutil;
 use crate::host_approval;
 use crate::prefs::{self, RemoteServerPrefs, SshRecentServer};
-use crate::secrets;
+use crate::secrets::{self, SecretBackend};
 use crate::ssh_key_install::{self, KEYGEN_FAILED, KEYGEN_MESSAGE};
 use crate::ssh_service::{self, Deps, SshServerStatus, SshServerTarget, SshServerTest};
 use crate::ssh_saved_password;
@@ -59,19 +59,32 @@ fn wants_saved_password(target: &SshServerTarget, typed: Option<&str>, flags: Pa
     typed.is_none() && password_request(target, None, flags).use_saved
 }
 
+/// Opens the secret store on demand, so a call that needs no Keychain access never opens it.
+type BackendFactory<'a> = &'a dyn Fn() -> Result<Box<dyn SecretBackend>, FsError>;
+
+fn os_backend() -> Result<Box<dyn SecretBackend>, FsError> {
+    secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))
+}
+
 /// Reads the stored password. The keychain is not touched unless the recent list says a password is stored there; a
 /// login with none stored (never saved, or cleared when its host key was replaced) must be typed.
-fn read_saved_password(target: &SshServerTarget) -> Result<Option<String>, FsError> {
+fn read_saved_password(target: &SshServerTarget, open_backend: BackendFactory<'_>) -> Result<Option<String>, FsError> {
     if !prefs::ssh_password_saved(&target.host, target.port, &target.user) {
         return Err(herr("SSH_PASSWORD_REQUIRED", "Enter the password for this server."));
     }
-    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+    let backend = open_backend()?;
     ssh_saved_password::resolve(backend.as_ref(), &password_request(target, None, PasswordFlags { use_saved: true, remember: None }))
 }
 
 /// The password to connect with: typed, or read from the keychain on request. A stored password is read only after
 /// the server offered the pinned host key, so an untrusted server cannot cause a keychain access (or get the password).
-fn resolve_password(deps: &Deps, target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<Option<String>, FsError> {
+fn resolve_password(
+    deps: &Deps,
+    target: &SshServerTarget,
+    typed: Option<&str>,
+    flags: PasswordFlags,
+    open_backend: BackendFactory<'_>,
+) -> Result<Option<String>, FsError> {
     let typed = typed.filter(|p| !p.is_empty());
     if !wants_saved_password(target, typed, flags) {
         return Ok(typed.map(str::to_string));
@@ -80,13 +93,13 @@ fn resolve_password(deps: &Deps, target: &SshServerTarget, typed: Option<&str>, 
         return Err(herr("SSH_PASSWORD_REQUIRED", "Enter the password for this server."));
     }
     ssh_service::require_pinned_key_offered(deps, target)?;
-    read_saved_password(target)
+    read_saved_password(target, open_backend)
 }
 
 /// After a login that worked: stores the typed password (checkbox on) or removes the stored one (checkbox off), and
 /// keeps the recent list's flag in step. Never reads or returns a password. Only Connect calls it: a Test never
 /// changes the keychain, so an unticked box does not delete the password before Connect has used it.
-fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<(), FsError> {
+fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags, open_backend: BackendFactory<'_>) -> Result<(), FsError> {
     let req = password_request(target, typed, flags);
     let flagged = prefs::ssh_password_saved(&target.host, target.port, &target.user);
     // No keychain access at all unless something is to be written or removed.
@@ -94,7 +107,7 @@ fn apply_remember(target: &SshServerTarget, typed: Option<&str>, flags: Password
     if !needs_keychain {
         return Ok(());
     }
-    let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
+    let backend = open_backend()?;
     let set_flag = |saved: bool| prefs::set_ssh_password_saved(&target.host, target.port, &target.user, saved);
     ssh_saved_password::apply_remember_flagged(backend.as_ref(), &req, flagged, &set_flag)
 }
@@ -117,14 +130,35 @@ pub struct SshConnectResult {
     warning: Option<String>,
 }
 
-/// The test: the key is checked first and the stored password is read only for a trusted server. It never changes the
-/// keychain or the saved-password flag.
+/// The test: the key is checked first and the stored password is read only for a trusted server. It never writes or
+/// removes the tested login's password or flag, but adding the login to the recent list can evict an older login, and
+/// that login's Keychain password is forgotten with it (`remember_login`).
 fn run_test(deps: &Deps, target: &SshServerTarget, typed: Option<&str>, flags: PasswordFlags) -> Result<SshServerTest, FsError> {
     let typed = typed.filter(|p| !p.is_empty());
     if wants_saved_password(target, typed, flags) {
-        return ssh_service::test_lazy(deps, target, &|| read_saved_password(target));
+        return ssh_service::test_lazy(deps, target, &|| read_saved_password(target, &os_backend));
     }
     ssh_service::test(deps, target, typed)
+}
+
+/// Connect as one unit under the operation lock: password lookup, connect, then the Keychain choice. A host-key Trust
+/// (`ssh_service::confirm`) takes the same lock, so it cannot land between the pin check and the connect, nor between
+/// the connect and the flag write; either would send a saved password to the server behind a newly trusted key.
+fn run_connect(
+    deps: &Deps,
+    host: &CoreHost,
+    target: &SshServerTarget,
+    password: Option<&str>,
+    flags: PasswordFlags,
+    take_over: bool,
+    open_backend: BackendFactory<'_>,
+) -> Result<SshConnectResult, FsError> {
+    let _operation = ssh_service::operation();
+    let resolved = resolve_password(deps, target, password, flags, open_backend)?;
+    let status = ssh_service::connect_with_options_locked(deps, host, target, resolved.as_deref(), take_over)?;
+    // The link is attached: a keychain that refuses now must not turn this good connect into a failure.
+    let warning = remember_warning(apply_remember(target, password, flags, open_backend));
+    Ok(SshConnectResult { status, warning })
 }
 
 #[tauri::command]
@@ -168,11 +202,7 @@ pub async fn remote_ssh_server_connect(
     let flags = PasswordFlags { use_saved: use_saved_password.unwrap_or(false), remember: remember_password };
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        let resolved = resolve_password(&deps, &target, password.as_deref(), flags)?;
-        let status = ssh_service::connect_with_options(&deps, &host, &target, resolved.as_deref(), take_over.unwrap_or(false))?;
-        // The link is attached: a keychain that refuses now must not turn this good connect into a failure.
-        let warning = remember_warning(apply_remember(&target, password.as_deref(), flags));
-        Ok(SshConnectResult { status, warning })
+        run_connect(&deps, &host, &target, password.as_deref(), flags, take_over.unwrap_or(false), &os_backend)
     })
     .await
     .map_err(|_| herr("internal", "the SSH server connect did not finish."))?
@@ -543,6 +573,111 @@ mod tests {
         let result = run_test(&deps, &target, Some("typed"), flags).unwrap();
         assert!(result.trusted, "a trusted login: the point where Test used to apply the unticked box");
         assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "only Connect applies the Keychain choice");
+    }
+
+    /// A shared in-memory store that counts how often the factory opened it.
+    struct CountingStore {
+        store: Arc<crate::secrets::MemoryBackend>,
+        opened: std::sync::atomic::AtomicUsize,
+    }
+
+    struct SharedBackend(Arc<crate::secrets::MemoryBackend>);
+
+    impl SecretBackend for SharedBackend {
+        fn get(&self, account: &str) -> Result<Option<String>, crate::secrets::SecretError> {
+            self.0.get(account)
+        }
+        fn set(&self, account: &str, value: &str) -> Result<(), crate::secrets::SecretError> {
+            self.0.set(account, value)
+        }
+        fn name(&self) -> &'static str {
+            "memory"
+        }
+    }
+
+    impl CountingStore {
+        fn new() -> Self {
+            Self { store: Arc::default(), opened: std::sync::atomic::AtomicUsize::new(0) }
+        }
+        fn open(&self) -> Result<Box<dyn SecretBackend>, FsError> {
+            self.opened.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(Box::new(SharedBackend(self.store.clone())))
+        }
+        fn opened(&self) -> usize {
+            self.opened.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    fn password_target() -> SshServerTarget {
+        use crate::ssh_service::tests::HOST;
+        SshServerTarget { host: HOST.into(), port: 22, user: "alice".into(), key_path: String::new(), auth: SshAuthKind::Password }
+    }
+
+    const SAVED_FLAGS: PasswordFlags = PasswordFlags { use_saved: true, remember: None };
+
+    #[test]
+    fn use_saved_without_a_saved_flag_needs_a_typed_password_and_opens_nothing() {
+        use crate::ssh_service::tests::{fake, pin_text, scan_of, Fixture, HOST};
+        let fx = Fixture::new("cmds-no-flag");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let deps = fx.deps(&fake(vec![]), &scan_of("key-a"), true, true);
+        let store = CountingStore::new();
+        let err = resolve_password(&deps, &password_target(), None, SAVED_FLAGS, &|| store.open()).unwrap_err();
+        assert_eq!(err.code, "SSH_PASSWORD_REQUIRED");
+        assert_eq!(store.opened(), 0, "no Keychain access without a saved flag");
+        assert_eq!(fx.scans.load(std::sync::atomic::Ordering::SeqCst), 0, "the flag is checked before the network scan");
+    }
+
+    #[test]
+    fn use_saved_against_a_different_host_key_never_opens_the_keychain() {
+        use crate::ssh_service::tests::{fake, pin_text, scan_of, Fixture, HOST};
+        let fx = Fixture::new("cmds-changed-key");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        prefs::upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let deps = fx.deps(&fake(vec![]), &scan_of("key-b"), true, true);
+        let store = CountingStore::new();
+        let err = resolve_password(&deps, &password_target(), None, SAVED_FLAGS, &|| store.open()).unwrap_err();
+        assert_eq!(err.code, "SSH_HOST_KEY_CHANGED");
+        assert_eq!(store.opened(), 0, "an untrusted server causes no Keychain access");
+    }
+
+    #[test]
+    fn use_saved_with_the_pinned_key_offered_reads_the_saved_password_last() {
+        use crate::ssh_service::tests::{fake, pin_text, scan_of, Fixture, HOST};
+        let fx = Fixture::new("cmds-pinned-key");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        prefs::upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let deps = fx.deps(&fake(vec![]), &scan_of("key-a"), true, true);
+        let store = CountingStore::new();
+        ssh_saved_password::save(&SharedBackend(store.store.clone()), HOST, 22, "alice", "saved-pw").unwrap();
+        let resolved = resolve_password(&deps, &password_target(), None, SAVED_FLAGS, &|| store.open()).unwrap();
+        assert_eq!(resolved.as_deref(), Some("saved-pw"));
+        assert_eq!((fx.scans.load(std::sync::atomic::Ordering::SeqCst), store.opened()), (1, 1));
+    }
+
+    #[test]
+    fn a_connect_waits_for_the_operation_lock() {
+        use crate::ssh_service::tests::{fake, pin_text, scan_of, Fixture, HOST};
+        let fx = Fixture::new("cmds-connect-serialized");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let deps = fx.deps(&fake(vec![]), &scan_of("key-a"), true, true);
+        let host = fx.host.clone();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let held = ssh_service::operation();
+        let worker = std::thread::spawn(move || {
+            let store = CountingStore::new();
+            let outcome = run_connect(&deps, &host, &password_target(), Some("typed"), PasswordFlags::default(), false, &|| store.open());
+            let _ = done_tx.send(outcome.is_ok());
+        });
+        assert!(done_rx.recv_timeout(Duration::from_millis(100)).is_err(), "the connect must wait for the lock");
+        drop(held);
+        // The fake server answers nothing, so the connect itself fails; only that it ran after the release matters.
+        assert!(done_rx.recv_timeout(Duration::from_secs(10)).is_ok(), "the connect runs once the lock is free");
+        worker.join().unwrap();
     }
 
     const COMMANDS: [&str; 11] = [
