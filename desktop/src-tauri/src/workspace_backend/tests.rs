@@ -183,7 +183,7 @@ fn confirm_required_round_trip() {
     };
     let err = remote.call(&connector, "git_discard", json!({"paths": ["a.txt"]}), &ask_no).unwrap_err();
     assert_eq!((err.code, err.message.as_str()), ("cancelled", "discard cancelled"));
-    assert_eq!(asked.lock().unwrap().as_slice(), &[("discard".to_string(), false, "Discard changes to a.txt?".to_string())]);
+    assert_eq!(asked.lock().unwrap().as_slice(), &[("git_discard".to_string(), false, "Discard changes to a.txt?".to_string())]);
     let discards: Vec<Recorded> = connector.channel(0).calls().into_iter().filter(|(cmd, _, _)| cmd == "git_discard").collect();
     assert_eq!(discards.len(), 1, "a cancelled confirmation sends nothing more");
 

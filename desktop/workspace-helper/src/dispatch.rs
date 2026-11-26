@@ -12,6 +12,7 @@ use llmide_workspace_core::fs::{
 use llmide_workspace_core::git::{diff, git_binary, scm_root, show, stage, status, DiffReq, ScmRoot, ShowReq, StageReq};
 use llmide_workspace_core::project::clone::CloneRequest;
 use llmide_workspace_core::scm::{
+    CONFIRMED_COMMANDS,
     branch_delete, branches, checkout, commit, commit_amend, commit_diff, commit_files, create_branch, diff_hunks, discard_all_with,
     discard_with, identity, log, merge, merge_abort, merge_mode, stage_all, stage_hunks, stash_apply, stash_drop, stash_list,
     stash_pop, stash_push, tag_create, tags, AmendReq, CommitDiffReq, DiscardAllReq, HunksReq, LogReq, MergeOutcome, MergeReq,
@@ -43,19 +44,6 @@ const FS_COMMANDS: [&str; 9] = [
     "fs_rename",
     "fs_copy",
     "fs_delete",
-];
-
-/// The git commands whose core function asks a native dialog. They run in two phases.
-const CONFIRMED_GIT: [&str; 9] = [
-    "git_discard",
-    "git_checkout",
-    "git_branch_delete",
-    "git_stash_pop",
-    "git_stash_drop",
-    "git_merge",
-    "git_merge_abort",
-    "git_commit_amend",
-    "git_discard_all",
 ];
 
 /// Runs one request and returns its response line. Never panics: a panic in a handler is answered as `internal`.
@@ -171,7 +159,7 @@ fn git_command(session: &Session, req: &Request) -> R<Value> {
         return err("git_missing", "git is not installed on this server.");
     }
     let scm = scm_root(&root);
-    if CONFIRMED_GIT.contains(&req.cmd.as_str()) {
+    if CONFIRMED_COMMANDS.contains(&req.cmd.as_str()) {
         return git_confirmed(&scm, session.trasher(), req);
     }
     match req.cmd.as_str() {

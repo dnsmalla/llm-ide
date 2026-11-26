@@ -250,38 +250,8 @@ fn route_watch(routes: &Mutex<Routes>, data: Value) {
     }
 }
 
-fn dialog_for(cmd: &str, args: &Value) -> Option<(&'static str, bool)> {
-    match cmd {
-        "git_discard" => Some(("discard", false)),
-        "git_discard_all" => Some(("discard_all", false)),
-        "git_checkout" => Some(("checkout", false)),
-        "git_branch_delete" => Some(("branch_delete", args.get("force").and_then(Value::as_bool).unwrap_or(false))),
-        "git_stash_pop" => Some(("stash_pop", false)),
-        "git_stash_drop" => Some(("stash_drop", false)),
-        "git_merge" => Some(("merge", false)),
-        "git_merge_abort" => Some(("merge_abort", false)),
-        "git_commit_amend" => Some(("amend", false)),
-        _ => None,
-    }
-}
-
-/// The text a refused confirmation carries. Each matches the local command's own cancel message.
-fn cancel_message(cmd: &str) -> &'static str {
-    match cmd {
-        "git_discard" | "git_discard_all" => "discard cancelled",
-        "git_checkout" => "checkout cancelled",
-        "git_branch_delete" => "branch delete cancelled",
-        "git_stash_pop" => "pop cancelled",
-        "git_stash_drop" => "drop cancelled",
-        "git_merge" => "merge cancelled",
-        "git_merge_abort" => "abort cancelled",
-        "git_commit_amend" => "amend cancelled",
-        _ => "cancelled",
-    }
-}
-
 fn cancelled(cmd: &str) -> FsError {
-    FsError { code: "cancelled", message: cancel_message(cmd).into() }
+    llmide_workspace_core::scm::cancelled::<()>(cmd).unwrap_err()
 }
 
 /// One request, with the two-phase confirmation the native dialog needs. Without `confirm` the helper answers
@@ -292,10 +262,9 @@ fn call_confirmed(client: &dyn WorkspaceApi, cmd: &str, args: Value, ask: Ask<'_
         Err(e) if e.code == CONFIRM_REQUIRED => e.message,
         other => return other,
     };
-    let Some((key, force)) = dialog_for(cmd, &args) else {
-        return Err(cancelled(cmd));
-    };
-    if !ask(key, force, &question)? {
+    // Only the branch delete's wording depends on an argument: `force` names an unmerged branch.
+    let force = cmd == "git_branch_delete" && args.get("force").and_then(Value::as_bool).unwrap_or(false);
+    if !ask(cmd, force, &question)? {
         return Err(cancelled(cmd));
     }
     match client.call(cmd, args, Some(&question)) {

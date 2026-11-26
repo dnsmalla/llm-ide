@@ -45,7 +45,7 @@ pub async fn git_stage_all(stage: bool) -> R<Value> {
 pub async fn git_discard(paths: Vec<String>) -> R<Value> {
     blocking_scm("git_discard", paths, |p| json!({"paths": p}), |s, paths| {
         let paths = s.to_repo_all(&paths)?;
-        DESTRUCTIVE_DIALOGS.run(|| discard(&s.repo, &paths, &native_ask("discard", false)))
+        DESTRUCTIVE_DIALOGS.run(|| discard(&s.repo, &paths, &native_ask("git_discard", false)))
     })
     .await
 }
@@ -68,7 +68,7 @@ pub async fn git_branches() -> R<Value> {
 #[tauri::command]
 pub async fn git_checkout(name: String) -> R<Value> {
     blocking("git_checkout", name, |n| json!({"name": n}), |root, name| {
-        DESTRUCTIVE_DIALOGS.run(|| checkout(&root, &name, &native_ask("checkout", false)))
+        DESTRUCTIVE_DIALOGS.run(|| checkout(&root, &name, &native_ask("git_checkout", false)))
     })
     .await
 }
@@ -108,7 +108,7 @@ pub async fn git_commit_diff(req: CommitDiffReq) -> R<Value> {
 #[tauri::command]
 pub async fn git_branch_delete(name: String, force: bool) -> R<Value> {
     blocking("git_branch_delete", (name, force), |(n, f)| json!({"name": n, "force": f}), |root, (name, force)| {
-        let ask = native_ask("branch_delete", force);
+        let ask = native_ask("git_branch_delete", force);
         DESTRUCTIVE_DIALOGS.run(|| branch_delete(&root, &name, force, &ask))
     })
     .await
@@ -140,7 +140,7 @@ pub async fn git_stash_apply(index: usize, hash: String) -> R<Value> {
 #[tauri::command]
 pub async fn git_stash_pop(index: usize, hash: String) -> R<Value> {
     blocking("git_stash_pop", (index, hash), |(i, h)| json!({"index": i, "hash": h}), |root, (index, hash)| {
-        DESTRUCTIVE_DIALOGS.run(|| stash_pop(&root, index, &hash, &native_ask("stash_pop", false)))
+        DESTRUCTIVE_DIALOGS.run(|| stash_pop(&root, index, &hash, &native_ask("git_stash_pop", false)))
     })
     .await
 }
@@ -148,7 +148,7 @@ pub async fn git_stash_pop(index: usize, hash: String) -> R<Value> {
 #[tauri::command]
 pub async fn git_stash_drop(index: usize, hash: String) -> R<Value> {
     blocking("git_stash_drop", (index, hash), |(i, h)| json!({"index": i, "hash": h}), |root, (index, hash)| {
-        DESTRUCTIVE_DIALOGS.run(|| stash_drop(&root, index, &hash, &native_ask("stash_drop", false)))
+        DESTRUCTIVE_DIALOGS.run(|| stash_drop(&root, index, &hash, &native_ask("git_stash_drop", false)))
     })
     .await
 }
@@ -157,7 +157,7 @@ pub async fn git_stash_drop(index: usize, hash: String) -> R<Value> {
 pub async fn git_merge(req: MergeReq) -> R<Value> {
     blocking_scm("git_merge", req, |r| json!({"req": r}), |s, req| {
         let mode = merge_mode(req.mode.as_deref())?;
-        let mut outcome = DESTRUCTIVE_DIALOGS.run(|| merge(&s.repo, &req.name, mode, &None, &native_ask("merge", false)))?;
+        let mut outcome = DESTRUCTIVE_DIALOGS.run(|| merge(&s.repo, &req.name, mode, &None, &native_ask("git_merge", false)))?;
         if let MergeOutcome::Conflicts { paths, .. } = &mut outcome {
             for p in paths.iter_mut() {
                 *p = s.to_project(p);
@@ -170,13 +170,13 @@ pub async fn git_merge(req: MergeReq) -> R<Value> {
 
 #[tauri::command]
 pub async fn git_merge_abort() -> R<Value> {
-    blocking("git_merge_abort", (), |_| json!({}), |root, ()| DESTRUCTIVE_DIALOGS.run(|| merge_abort(&root, &native_ask("merge_abort", false)))).await
+    blocking("git_merge_abort", (), |_| json!({}), |root, ()| DESTRUCTIVE_DIALOGS.run(|| merge_abort(&root, &native_ask("git_merge_abort", false)))).await
 }
 
 #[tauri::command]
 pub async fn git_commit_amend(req: AmendReq) -> R<Value> {
     blocking("git_commit_amend", req, |r| json!({"req": r}), |root, req| {
-        DESTRUCTIVE_DIALOGS.run(|| commit_amend(&root, req.message.as_deref(), req.force, &None, &native_ask("amend", false)))
+        DESTRUCTIVE_DIALOGS.run(|| commit_amend(&root, req.message.as_deref(), req.force, &None, &native_ask("git_commit_amend", false)))
     })
     .await
 }
@@ -184,7 +184,7 @@ pub async fn git_commit_amend(req: AmendReq) -> R<Value> {
 #[tauri::command]
 pub async fn git_discard_all(req: DiscardAllReq) -> R<Value> {
     blocking("git_discard_all", req, |r| json!({"req": r}), |root, req| {
-        DESTRUCTIVE_DIALOGS.run(|| discard_all(&root, req.include_untracked, &native_ask("discard_all", false)))
+        DESTRUCTIVE_DIALOGS.run(|| discard_all(&root, req.include_untracked, &native_ask("git_discard_all", false)))
     })
     .await
 }
