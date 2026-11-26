@@ -76,15 +76,6 @@ pub struct RecentRecord {
     pub opened_at: Option<String>,
 }
 
-/// Puts `new` first, drops duplicates, keeps at most `max`.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn push_recent(list: &[String], new: &str, max: usize) -> Vec<String> {
-    let mut out = vec![new.to_string()];
-    out.extend(list.iter().filter(|p| p.as_str() != new).cloned());
-    out.truncate(max);
-    out
-}
-
 /// Puts `new` first, drops any earlier entry for the same root, keeps at most `max`.
 pub fn push_record(list: &[RecentRecord], new: RecentRecord, max: usize) -> Vec<RecentRecord> {
     let mut out = vec![new.clone()];
@@ -111,12 +102,6 @@ pub fn parse_recent_records(json: &str, max: usize) -> Vec<RecentRecord> {
         })
         .take(max)
         .collect()
-}
-
-/// Root strings only, in stored order (see `parse_recent_records`).
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn parse_recent(json: &str, max: usize) -> Vec<String> {
-    parse_recent_records(json, max).into_iter().map(|r| r.root).collect()
 }
 
 /// Current time as RFC 3339 UTC, whole seconds (`2026-11-02T10:00:00Z`).
@@ -516,26 +501,35 @@ mod tests {
         TempDirGuard(fs::canonicalize(&d).unwrap())
     }
 
+    fn record(root: &str) -> RecentRecord {
+        RecentRecord { root: root.to_string(), opened_at: None }
+    }
+
+    /// The stored roots, in order (the part of a parsed list these tests compare).
+    fn roots(json: &str, max: usize) -> Vec<String> {
+        parse_recent_records(json, max).into_iter().map(|r| r.root).collect()
+    }
+
     #[test]
     fn recent_list_is_bounded_deduped_and_most_recent_first() {
-        let mut l: Vec<String> = Vec::new();
+        let mut l: Vec<RecentRecord> = Vec::new();
         for i in 0..25 {
-            l = push_recent(&l, &format!("/p/{i}"), MAX_RECENT);
+            l = push_record(&l, record(&format!("/p/{i}")), MAX_RECENT);
         }
         assert_eq!(l.len(), MAX_RECENT);
-        assert_eq!(l[0], "/p/24");
-        l = push_recent(&l, "/p/20", MAX_RECENT);
-        assert_eq!(l[0], "/p/20");
-        assert_eq!(l.iter().filter(|p| *p == "/p/20").count(), 1);
+        assert_eq!(l[0].root, "/p/24");
+        l = push_record(&l, record("/p/20"), MAX_RECENT);
+        assert_eq!(l[0].root, "/p/20");
+        assert_eq!(l.iter().filter(|r| r.root == "/p/20").count(), 1);
         assert_eq!(l.len(), MAX_RECENT);
     }
 
     #[test]
     fn parse_recent_ignores_garbage_and_caps() {
-        assert!(parse_recent("not json", 10).is_empty());
-        assert_eq!(parse_recent("[1,\"/a\",null,\"/b\"]", 10), vec!["/a", "/b"]);
+        assert!(roots("not json", 10).is_empty());
+        assert_eq!(roots("[1,\"/a\",null,\"/b\"]", 10), vec!["/a", "/b"]);
         let many = serde_json::to_string(&(0..50).map(|i| format!("/p/{i}")).collect::<Vec<_>>()).unwrap();
-        assert_eq!(parse_recent(&many, MAX_RECENT).len(), MAX_RECENT);
+        assert_eq!(roots(&many, MAX_RECENT).len(), MAX_RECENT);
     }
 
 
@@ -802,7 +796,8 @@ mod recent_time_tests {
                 rec("/offset", None),
             ]
         );
-        assert_eq!(parse_recent(json, 50), vec!["/old", "/new", "/bad-time", "/offset"]);
+        let parsed: Vec<String> = parse_recent_records(json, 50).into_iter().map(|r| r.root).collect();
+        assert_eq!(parsed, vec!["/old", "/new", "/bad-time", "/offset"]);
     }
 
     #[test]

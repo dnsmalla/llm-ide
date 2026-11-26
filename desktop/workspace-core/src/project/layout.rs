@@ -26,7 +26,7 @@ pub const LAYOUT: &[&str] = &[
 ];
 
 /// How many entries the Memory list may return.
-pub const MAX_MEMORY_FILES: usize = 200;
+pub(crate) const MAX_MEMORY_FILES: usize = 200;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
 pub struct Folder {
@@ -98,7 +98,7 @@ pub fn paths(root: &Path) -> Paths {
 }
 
 /// Files under `system/` that are safe to list: plain files, no dotfiles, no SQLite side files.
-pub fn memory_files(root: &Path) -> Vec<MemoryFile> {
+pub(crate) fn memory_files(root: &Path) -> Vec<MemoryFile> {
     let dir = root.join("system");
     let Ok(rd) = std::fs::read_dir(&dir) else { return Vec::new() };
     let mut out: Vec<MemoryFile> = Vec::new();

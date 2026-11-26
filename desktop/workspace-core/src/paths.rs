@@ -26,7 +26,7 @@ pub fn checked_root(root: &Path) -> R<PathBuf> {
 
 /// Normalises a canonical path to forward slashes and strips the Windows verbatim
 /// prefix (`\\?\C:\x` -> `C:/x`, `\\?\UNC\srv\share` -> `//srv/share`).
-pub fn normalise(p: &str) -> String {
+pub(crate) fn normalise(p: &str) -> String {
     let w = p.replace('\\', "/");
     if let Some(rest) = w.strip_prefix("//?/UNC/") {
         return format!("//{rest}");

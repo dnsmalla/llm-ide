@@ -39,15 +39,15 @@ use crate::fs::{deny_git_rel, is_git_component, nlink, open_nofollow, rel_of, re
 use crate::paths::fd_path;
 use crate::{err, FsError, R};
 
-pub const MAX_MATCHES: usize = 5000;
-pub const MAX_QUERY_CHARS: usize = 1000;
-pub const MAX_GLOBS: usize = 50;
-pub const MAX_GLOB_CHARS: usize = 256;
-pub const MAX_ONLY_PATHS: usize = 500;
-pub const MAX_FILES_SCANNED: usize = 500_000;
-pub const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
-pub const HARD_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
-pub const PREVIEW_BYTES: usize = 500;
+pub(crate) const MAX_MATCHES: usize = 5000;
+pub(crate) const MAX_QUERY_CHARS: usize = 1000;
+pub(crate) const MAX_GLOBS: usize = 50;
+pub(crate) const MAX_GLOB_CHARS: usize = 256;
+pub(crate) const MAX_ONLY_PATHS: usize = 500;
+pub(crate) const MAX_FILES_SCANNED: usize = 500_000;
+pub(crate) const DEFAULT_MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+pub(crate) const HARD_MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const PREVIEW_BYTES: usize = 500;
 const PREVIEW_LEAD: usize = 40;
 const MAX_PER_LINE: usize = 20;
 const MAX_PER_FILE: usize = 500;
@@ -139,7 +139,7 @@ pub enum SearchEvent {
 
 // ---- query -> matcher -------------------------------------------------------------------
 
-pub fn build_matcher(q: &Query) -> R<Regex> {
+pub(crate) fn build_matcher(q: &Query) -> R<Regex> {
     if q.query.is_empty() {
         return err("invalid_query", "enter something to search for");
     }
@@ -256,13 +256,8 @@ const PROBE_WINDOW: usize = 64 * 1024;
 /// The whole-text prefilter (literal acceleration) only below this size; above it the per-line pass runs alone.
 const PREFILTER_MAX: usize = 1024 * 1024;
 
-/// Scans decoded text; pure, so it is unit-tested directly.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn scan_text(text: &str, re: &Regex, rel: &str) -> Option<FileHits> {
-    scan_text_ctl(text, re, rel, None)
-}
-
-pub fn scan_text_ctl(text: &str, re: &Regex, rel: &str, ctl: Option<&ScanCtl<'_>>) -> Option<FileHits> {
+/// Scans decoded text; pure, so it is unit-tested directly. `ctl` lets a halted scan return nothing.
+pub(crate) fn scan_text_ctl(text: &str, re: &Regex, rel: &str, ctl: Option<&ScanCtl<'_>>) -> Option<FileHits> {
     let stop = || ctl.is_some_and(|c| c.stop());
     // A cheap whole-text prefilter (literal acceleration); the per-line pass is authoritative.
     if text.len() <= PREFILTER_MAX && !re.is_match(text) {
@@ -422,7 +417,7 @@ fn thread_count() -> usize {
 
 /// Runs a search and reports through `sink` (returns false to stop). Blocking; call from a
 /// blocking thread. `id` only labels the events.
-pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &mut dyn FnMut(SearchEvent) -> bool) -> R<()> {
+pub(crate) fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &mut dyn FnMut(SearchEvent) -> bool) -> R<()> {
     valid_globs(&q.include)?;
     valid_globs(&q.exclude)?;
     let re = build_matcher(q)?;
@@ -706,6 +701,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A scan with no control, the plain case most tests check.
+    fn scan_text(text: &str, re: &Regex, rel: &str) -> Option<FileHits> {
+        scan_text_ctl(text, re, rel, None)
+    }
     use std::fs;
 
     /// A temp folder removed when the test ends, on success and on panic. The old helper only cleared the

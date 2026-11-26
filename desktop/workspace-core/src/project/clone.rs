@@ -167,7 +167,7 @@ pub fn plan(root: &Path, req: &CloneRequest) -> Result<ClonePlan, String> {
 }
 
 /// The folder a request clones into under `code/`: the typed folder, else the repository name.
-pub fn target_name(req: &CloneRequest, repo_ref: &RepoRef) -> Result<String, String> {
+pub(crate) fn target_name(req: &CloneRequest, repo_ref: &RepoRef) -> Result<String, String> {
     match req.folder.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(f) => folder_name("", f).ok_or_else(|| "invalid folder name".to_string()),
         None => folder_name("", &repo_ref.name).ok_or_else(|| "invalid repository name".to_string()),
@@ -184,7 +184,7 @@ pub fn run(plan: &ClonePlan, token: Option<&Token>, cancel: &AtomicBool, git: &P
 
 /// `owner/repo` shorthand or an https github.com / gitlab.com URL, stripped to its path. GitHub is exactly
 /// `owner/repo`; GitLab allows nested groups (2 to 20 segments). Rejects any other path shape.
-pub fn parse_repo(raw: &str, provider: &str) -> Option<RepoRef> {
+pub(crate) fn parse_repo(raw: &str, provider: &str) -> Option<RepoRef> {
     let t = raw.trim();
     if t.is_empty() || t.len() > 500 || t.chars().any(|c| c.is_control()) {
         return None;
@@ -217,13 +217,13 @@ pub fn parse_repo(raw: &str, provider: &str) -> Option<RepoRef> {
 }
 
 /// The clone URL for a provider (always https, `.git` suffix).
-pub fn remote_url(provider: &str, path: &str) -> String {
+pub(crate) fn remote_url(provider: &str, path: &str) -> String {
     let host = if provider == "gitlab" { "gitlab.com" } else { "github.com" };
     format!("https://{host}/{path}.git")
 }
 
 /// The folder name inside `code/`: the repository name, never a path.
-pub fn folder_name(_owner: &str, repo: &str) -> Option<String> {
+pub(crate) fn folder_name(_owner: &str, repo: &str) -> Option<String> {
     let name = repo.trim();
     (!name.is_empty() && name.len() <= 100 && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-')) && name != "." && name != "..")
         .then(|| name.to_string())

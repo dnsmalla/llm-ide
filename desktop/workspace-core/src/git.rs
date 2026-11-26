@@ -97,7 +97,7 @@ fn read_small(path: &Path) -> Option<String> {
 }
 
 /// Resolves and validates every git directory git would read for `root`.
-pub fn check_repo(root: &Path) -> R<()> {
+pub(crate) fn check_repo(root: &Path) -> R<()> {
     check_repo_opts(root, false)
 }
 
@@ -198,13 +198,13 @@ pub fn base_args() -> Vec<String> {
 }
 
 /// Wall-clock limit for a call that touches `n` paths or entries: 30 s plus 25 ms each, at most 5 minutes.
-pub fn scaled_timeout(n: usize) -> Duration {
+pub(crate) fn scaled_timeout(n: usize) -> Duration {
     (TIMEOUT + Duration::from_millis(25) * n.min(1_000_000) as u32).min(Duration::from_secs(300))
 }
 
 /// Kills the child AND everything it started (git spawns helpers: a filter, `gc`, a credential helper). On
 /// unix the child leads its own process group (`process_group(0)` at spawn), so the whole group gets SIGKILL.
-pub fn kill_tree(child: &mut std::process::Child) {
+pub(crate) fn kill_tree(child: &mut std::process::Child) {
     #[cfg(unix)]
     {
         // SAFETY: killpg with a pid we spawned as a group leader; an already-dead group is just ESRCH.
@@ -247,7 +247,7 @@ pub struct Opts<'a> {
 }
 
 /// The git subcommand in `args`, skipping leading `-c <k=v>` pairs and other global options.
-pub fn subcommand<'a>(args: &[&'a str]) -> &'a str {
+pub(crate) fn subcommand<'a>(args: &[&'a str]) -> &'a str {
     let mut i = 0;
     while i < args.len() {
         match args[i] {
@@ -329,7 +329,7 @@ static USER_DATA: std::sync::LazyLock<UserDataCache> = std::sync::LazyLock::new(
 
 /// `-c` arguments carrying the user's plain-data settings for `root`. Looked up at most every 15 s per repository:
 /// each lookup starts git a few times, and the runner is called for every status refresh.
-pub fn user_data_args(root: &Path, home: &Option<PathBuf>) -> Vec<String> {
+pub(crate) fn user_data_args(root: &Path, home: &Option<PathBuf>) -> Vec<String> {
     if cfg!(test) || home.is_some() {
         return compute_user_data_args(root, home);
     }
@@ -355,7 +355,7 @@ pub fn user_data_args(root: &Path, home: &Option<PathBuf>) -> Vec<String> {
 // message that says so, instead of being run.
 
 /// True when a line of a gitattributes file assigns the LFS filter (comments and other filters do not count).
-pub fn attributes_use_lfs(text: &str) -> bool {
+pub(crate) fn attributes_use_lfs(text: &str) -> bool {
     text.lines().map(str::trim).any(|l| !l.starts_with('#') && l.split_whitespace().skip(1).any(|a| a == "filter=lfs"))
 }
 
@@ -378,7 +378,7 @@ fn compute_uses_lfs(root: &Path) -> bool {
 static LFS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<PathBuf, (Instant, bool)>>> =
     std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
 
-pub fn uses_lfs(root: &Path) -> bool {
+pub(crate) fn uses_lfs(root: &Path) -> bool {
     if cfg!(test) {
         return compute_uses_lfs(root);
     }
@@ -396,7 +396,7 @@ pub fn uses_lfs(root: &Path) -> bool {
 
 /// True for a command that would run file content through the filters: staging, or anything that checks files out.
 /// Index-only and read-only forms are left alone (`restore --staged`, `switch -c`, `stash list`, `commit`).
-pub fn needs_filters(args: &[&str]) -> bool {
+pub(crate) fn needs_filters(args: &[&str]) -> bool {
     let has = |x: &str| args.contains(&x);
     match subcommand(args) {
         // Aborting a merge puts back the content the user had before it; refusing that would leave a merge started in
@@ -410,7 +410,7 @@ pub fn needs_filters(args: &[&str]) -> bool {
     }
 }
 
-pub const LFS_REFUSED: &str = "This repository uses Git LFS, and LLM-IDE's Source Control does not run the LFS filters. Staging here would store the large files as ordinary git blobs, and switching, discarding, stashing or merging would write LFS pointer text over the real files. Do this step with git in a terminal.";
+pub(crate) const LFS_REFUSED: &str = "This repository uses Git LFS, and LLM-IDE's Source Control does not run the LFS filters. Staging here would store the large files as ordinary git blobs, and switching, discarding, stashing or merging would write LFS pointer text over the real files. Do this step with git in a terminal.";
 
 /// Runs `git <base> args` in `root`. `Err` on spawn failure, timeout or non-zero exit (stderr in the message).
 pub fn run_git(root: &Path, args: &[&str], cap: usize) -> R<Out> {
@@ -547,7 +547,7 @@ pub struct GitStatus {
 }
 
 /// Parses `git status --porcelain=v2 -z --branch` output.
-pub fn parse_status(raw: &[u8]) -> GitStatus {
+pub(crate) fn parse_status(raw: &[u8]) -> GitStatus {
     let text = String::from_utf8_lossy(raw);
     let mut st = GitStatus::default();
     let mut it = text.split('\0').peekable();
@@ -626,7 +626,7 @@ pub fn status(root: &Path) -> R<GitStatus> {
 
 // ---- diff / show / stage -----------------------------------------------------------------
 
-pub fn rel_arg(rel: &str) -> R<String> {
+pub(crate) fn rel_arg(rel: &str) -> R<String> {
     let parts = split_rel(rel)?;
     if parts.is_empty() {
         return gerr("invalid_path", "a file path is required");
@@ -704,7 +704,7 @@ pub struct ScmRoot {
 
 impl ScmRoot {
     /// A project-relative path from the webview as a path inside the repository; anything outside it is refused.
-    pub fn to_repo(&self, rel: &str) -> R<String> {
+    pub(crate) fn to_repo(&self, rel: &str) -> R<String> {
         if self.prefix.is_empty() {
             return Ok(rel.to_string());
         }
@@ -714,12 +714,12 @@ impl ScmRoot {
         }
     }
 
-    pub fn to_repo_all(&self, rels: &[String]) -> R<Vec<String>> {
+    pub(crate) fn to_repo_all(&self, rels: &[String]) -> R<Vec<String>> {
         rels.iter().map(|r| self.to_repo(r)).collect()
     }
 
     /// A repository-relative path git printed, as the project-relative path the Explorer opens.
-    pub fn to_project(&self, rel: &str) -> String {
+    pub(crate) fn to_project(&self, rel: &str) -> String {
         if self.prefix.is_empty() { rel.to_string() } else { format!("{}/{rel}", self.prefix) }
     }
 }
@@ -742,7 +742,7 @@ pub fn scrub_env(parent: impl IntoIterator<Item = (OsString, OsString)>) -> Vec<
 
 /// The project folder when it is a repository, else the first clone under `code/` (the Loop's work-root rule).
 /// Symlinked folders are skipped so git never runs outside the project.
-pub fn scm_root(root: &Path) -> ScmRoot {
+pub(crate) fn scm_root(root: &Path) -> ScmRoot {
     let here = || ScmRoot { repo: root.to_path_buf(), prefix: String::new() };
     if std::fs::symlink_metadata(root.join(".git")).is_ok() {
         return here();

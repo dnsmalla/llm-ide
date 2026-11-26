@@ -54,15 +54,6 @@ impl Request {
     }
 }
 
-/// The `{code, message}` of an answer's `err`.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct WireError {
-    #[serde(default)]
-    pub code: String,
-    #[serde(default)]
-    pub message: String,
-}
-
 /// `{"id", "ok"}`.
 pub fn ok_response(id: u64, value: Value) -> Value {
     json!({"id": id, "ok": value})

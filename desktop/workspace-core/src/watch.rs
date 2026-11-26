@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::fs::{rel_of, resolve_existing};
 use crate::{FsError, R};
 
-pub const MAX_DIRS: usize = 512;
+pub(crate) const MAX_DIRS: usize = 512;
 pub const MAX_PATHS: usize = 2000;
 const QUEUE: usize = 4096;
 const QUIET_MS: u64 = 150;
@@ -50,7 +50,7 @@ pub struct WatchBatch {
 }
 
 /// True for paths the UI must not be told about.
-pub fn is_noise(rel: &str) -> bool {
+pub(crate) fn is_noise(rel: &str) -> bool {
     let segs: Vec<&str> = rel.split('/').collect();
     if let Some(i) = segs.iter().position(|s| *s == ".git") {
         let tail = &segs[i + 1..];
@@ -72,7 +72,7 @@ pub struct Coalescer {
 }
 
 impl Coalescer {
-    pub fn push_rel(&mut self, rel: &str) {
+    pub(crate) fn push_rel(&mut self, rel: &str) {
         if rel.is_empty() || is_noise(rel) {
             return;
         }
@@ -84,7 +84,7 @@ impl Coalescer {
         self.dirs.insert(parent.to_string());
         self.files.insert(rel.to_string());
     }
-    pub fn mark_overflow(&mut self) {
+    pub(crate) fn mark_overflow(&mut self) {
         self.overflow = true;
     }
     pub fn is_empty(&self) -> bool {

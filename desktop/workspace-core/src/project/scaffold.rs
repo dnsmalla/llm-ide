@@ -27,7 +27,7 @@ pub const NAME_MAX_CHARS: usize = 80;
 const NAME_MAX_BYTES: usize = 200;
 
 /// Directories that exist under every project root (`ProjectScaffolder.requiredDirectories`).
-pub const REQUIRED_DIRECTORIES: [&str; 17] = [
+pub(crate) const REQUIRED_DIRECTORIES: [&str; 17] = [
     "source",
     "source/meetings",
     "source/emails",

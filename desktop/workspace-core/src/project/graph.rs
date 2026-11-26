@@ -18,7 +18,7 @@ use crate::fs::nlink;
 use crate::paths::{fd_path, home_or_empty, is_too_broad};
 
 /// Upper bound on a graph file the webview may load (the real graph is ~1 MB).
-pub const GRAPH_FILE_MAX_BYTES: u64 = 128 * 1024 * 1024;
+pub(crate) const GRAPH_FILE_MAX_BYTES: u64 = 128 * 1024 * 1024;
 
 /// The error for a graph file over the size limit. The helper maps this text to its own `too_large` code, so the
 /// text is fixed.
