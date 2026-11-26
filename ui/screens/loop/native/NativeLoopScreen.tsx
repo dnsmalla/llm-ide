@@ -23,6 +23,7 @@ import { RUN_COMMAND_MAX, isOneItemRun } from "./run-command.ts";
 import { reviewModeOf, stepReviewRecords } from "./review.ts";
 import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
+import { pickInputPath } from "./pick-input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
 import { runNativeLoop, runStatusCode, type RunnerDeps } from "./runner.ts";
@@ -1368,18 +1369,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
                   patchLoop((l) => { l.inputPath = r.path; });
                 }} />
                 <button type="button" className="loop-btn" title="Choose the folder to refactor" onClick={() => { void (async () => {
-                  try {
-                    const choice = await invokeHost<{ token: string } | null>("pick_folder", { title: "Choose the folder to refactor" });
-                    if (!choice) return;
-                    const picked = await invokeHost<{ path: string }>("pick_folder_redeem", { token: choice.token });
-                    const root = workRoot ?? projectRoot;
-                    const rel = picked.path === root ? "" : picked.path.startsWith(`${root}/`) ? picked.path.slice(root.length + 1) : null;
-                    if (rel === null) { setInputDraft({ loopId: loop.id, text: '', error: "Choose a folder inside this repository." }); return; }
-                    const r = normalizeInputPath(rel);
-                    if ("error" in r) { setInputDraft({ loopId: loop.id, text: '', error: r.error }); return; }
-                    setInputDraft({ loopId: loop.id, text: r.path, error: null });
-                    patchLoop((l) => { l.inputPath = r.path; });
-                  } catch (e) { setInputDraft({ loopId: loop.id, text: '', error: e instanceof Error ? e.message : String(e) }); }
+                  const r = await pickInputPath(workRoot ?? projectRoot, "Choose the folder to refactor");
+                  if (!r) return;
+                  if ("error" in r) { setInputDraft({ loopId: loop.id, text: '', error: r.error }); return; }
+                  setInputDraft({ loopId: loop.id, text: r.path, error: null });
+                  patchLoop((l) => { l.inputPath = r.path; });
                 })(); }}>+</button>
               </div>
               <span className="loop-native-hint">Choose a folder, or type a repository-relative path. Empty means the whole repository.</span>

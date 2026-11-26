@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeInputPath, pathInside, loopUsesInputPath, INPUT_PATH_SKILLS } from "../native/input-path.ts";
+import { normalizeInputPath, pathInside, loopUsesInputPath, inputPathFromPicked, INPUT_PATH_SKILLS } from "../native/input-path.ts";
 
 const ok = (raw) => {
   const r = normalizeInputPath(raw);
@@ -59,4 +59,18 @@ test("loopUsesInputPath follows enabled skill stages", () => {
   assert.equal(loopUsesInputPath(loopWith({ name: "Test", kind: "shellCommand", command: "npm test", enabled: true, skillId: "skills/refactor-apply" })), false);
   assert.equal(loopUsesInputPath(loopWith({ name: "Test", kind: "shellCommand", command: "npm test", enabled: true, skillId: null })), false);
   assert.equal(loopUsesInputPath(loopWith(stage("skills/other"))), false);
+});
+
+test("a picked folder becomes a repository-relative input path", () => {
+  assert.deepEqual(inputPathFromPicked("/work/repo", "/work/repo"), { path: "" });
+  assert.deepEqual(inputPathFromPicked("/work/repo/src/billing", "/work/repo"), { path: "src/billing" });
+  assert.deepEqual(inputPathFromPicked("/work/repo/src", "/work/repo/"), { path: "src" }, "a root with a trailing slash");
+  assert.deepEqual(inputPathFromPicked("/work/repo/", "/work/repo"), { path: "" }, "a picked path with a trailing slash");
+});
+
+test("a picked folder outside the repository, or one the input path refuses, is an error", () => {
+  assert.ok("error" in inputPathFromPicked("/work/other", "/work/repo"));
+  assert.ok("error" in inputPathFromPicked("/work/repo2/src", "/work/repo"), "a sibling with the same prefix is outside");
+  assert.ok("error" in inputPathFromPicked("/work/repo/node_modules/x", "/work/repo"));
+  assert.ok("error" in inputPathFromPicked("/work/repo/system", "/work/repo"));
 });

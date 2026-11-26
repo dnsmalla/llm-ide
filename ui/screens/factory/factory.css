@@ -40,6 +40,8 @@
 .fx-foot { margin: 0; }
 .fx-form { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; padding: 12px; border: var(--fx-hair); border-radius: var(--fx-r); background: var(--tok-color-surface); box-shadow: var(--fx-shadow); }
 .fx-grow { flex: 1; min-width: 160px; }
+.fx-input-pick { display: flex; gap: 6px; }
+.fx-input-pick input { flex: 1; min-width: 0; }
 .fx-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fx-fs-small); color: var(--tok-color-text-muted); }
 
 /* Lanes: Backlog, one numbered lane per process step, Done */

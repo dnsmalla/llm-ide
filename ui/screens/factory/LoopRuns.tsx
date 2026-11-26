@@ -3,6 +3,8 @@
 // Loop page owns execution (approval dialog, worktree, queue, ship), so this board never runs or edits anything.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { shellBus } from "../shell/bus";
+import { invokeHost } from "../shell/host";
+import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops } from "../loop/native/store.ts";
 import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
@@ -63,6 +65,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const [loop, setLoop] = useState<LoopDefinition | null>(null);
   const [input, setInput] = useState<RunBarInput>({ inputPath: "", task: "" });
   const [runNote, setRunNote] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
   const [typed, setTyped] = useState(false);
   // The loaded loop only counts for this board when it is the one named by the scope.
   const [ambiguous, setAmbiguous] = useState(false);
@@ -130,7 +133,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
 
   // Restore what was typed for this loop last time; `typed` stops a refresh from overwriting a draft.
   // Drop the previous loop at once: until the refresh answers, the bar must not send the old loop's id for this scope.
-  useEffect(() => { setTyped(false); setRunNote(null); setLoop(null); setAmbiguous(false); clearPending(); }, [scope, scopeId]);
+  useEffect(() => { setTyped(false); setRunNote(null); setPickError(null); setLoop(null); setAmbiguous(false); clearPending(); }, [scope, scopeId]);
   useEffect(() => () => { if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current); }, []);
   // The saved path changed on the Loop page: the field follows it (typing holds only until then).
   const savedPath = loop?.inputPath;
@@ -156,7 +159,15 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   }, [scope, loopId]);
   // The started run is on the board now; ▶ Run may queue another one deliberately.
   useEffect(() => { if (pending && live?.loopName === scope) clearPending(); }, [pending, live, scope]);
-  const edit = (next: RunBarInput) => { setTyped(true); setInput(next); saveRunBarInput(scope, next, storage()); };
+  const edit = (next: RunBarInput) => { setTyped(true); setPickError(null); setInput(next); saveRunBarInput(scope, next, storage()); };
+  const pickFolder = async () => {
+    // Same root as the Loop page (the repository loops run in), so both "+" buttons accept the same folders.
+    const root = await invokeHost<string>("loop_work_root").catch(() => projectRoot);
+    const r = await pickInputPath(root);
+    if (!r) return;
+    if ("error" in r) { setPickError(r.error); return; }
+    edit({ ...input, inputPath: r.path });
+  };
   const bar = boardLoop ? runBarState(boardLoop, input) : null;
   const sendRun = () => {
     const ev = boardLoop ? buildRunEvent(boardLoop, input) : null;
@@ -220,10 +231,13 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       {boardLoop && bar ? (
         <form className="fx-form" aria-label={`Run ${scope}`} onSubmit={(e) => { e.preventDefault(); sendRun(); }}>
           {bar.showInputPath ? (
-            <label className="fx-field fx-grow"><span>Input path</span>
-              <input value={input.inputPath} placeholder="(whole repository)" aria-invalid={bar.inputError !== null} onChange={(e) => edit({ ...input, inputPath: e.target.value })} />
-              {bar.inputError ? <small className="fx-error">{bar.inputError}</small> : null}
-            </label>
+            <div className="fx-field fx-grow"><span>Input path</span>
+              <div className="fx-input-pick">
+                <input aria-label="Input path" value={input.inputPath} placeholder="(whole repository)" aria-invalid={bar.inputError !== null} onChange={(e) => edit({ ...input, inputPath: e.target.value })} />
+                <button type="button" className="fx-btn" title="Choose the folder to work on" aria-label="Choose the input folder" onClick={() => void pickFolder()}>+</button>
+              </div>
+              {bar.inputError ?? pickError ? <small className="fx-error">{bar.inputError ?? pickError}</small> : null}
+            </div>
           ) : <p className="fx-hint">{bar.reads}</p>}
           <label className="fx-field fx-grow"><span>Task{bar.taskRequired ? " (required)" : " (optional)"}</span>
             <textarea rows={2} value={input.task} maxLength={RUN_COMMAND_MAX} placeholder="One item, one line" onChange={(e) => edit({ ...input, task: e.target.value })} />
