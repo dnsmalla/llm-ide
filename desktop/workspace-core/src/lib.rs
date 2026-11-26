@@ -13,6 +13,7 @@
 //! - `git`, `git_config`: the hardened git runner, status, diff and stage; `scm`: the Changes actions (discard, commit,
 //!   branches, stash, merge, amend) and `confirm_spec`, the one table of their native dialog wording.
 //! - `text`: single-line sanitising for text the user reads.
+//! - `wire`: the host/helper line protocol, its constants and typed replies, defined once.
 //! - `trash`: the only removal path. It moves to the OS trash and never deletes permanently.
 
 pub mod fs;
@@ -25,6 +26,7 @@ pub mod search;
 pub mod text;
 pub mod trash;
 pub mod watch;
+pub mod wire;
 
 use std::sync::Mutex;
 

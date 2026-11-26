@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 
 use llmide_workspace_core::scm::confirm_spec;
 use llmide_workspace_core::search::aborted_done;
+use llmide_workspace_core::wire::{CloneEvent, CloneStarted, Opened, BUSY_CODE, CONFIRM_REQUIRED_CODE};
 use llmide_workspace_core::{FsError, R};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -26,16 +27,14 @@ use crate::ssh_link::HelperSpawn;
 use crate::ssh_workspace::{decode_error, lost, EventKind, EventSink, WorkspaceClient};
 
 /// The reply the helper gives when a destructive command needs the user's answer first. Its message is the question.
-const CONFIRM_REQUIRED: &str = "confirm_required";
+const CONFIRM_REQUIRED: &str = CONFIRM_REQUIRED_CODE;
 /// The helper's code and the app's fixed text for an open folder that was deleted or renamed on the server.
-pub const ROOT_MISSING_CODE: &str = "root_missing";
-pub const ROOT_MISSING_MESSAGE: &str = "This folder is no longer on the server.";
+pub use llmide_workspace_core::wire::{ROOT_MISSING_CODE, ROOT_MISSING_MESSAGE};
 const CHANGED_MESSAGE: &str = "the files changed while the dialog was open; nothing was changed";
 /// The codes that mean the channel itself failed, so the folder stays open and the next call reconnects.
 const LOST_CODE: &str = "lost_connection";
 const TIMEOUT_CODE: &str = "SSH_TIMEOUT";
 /// A clone is already running on this channel. The helper allows one at a time too; this refuses before sending.
-const BUSY_CODE: &str = "busy";
 const BUSY_MESSAGE: &str = "A repository is already being cloned.";
 /// A clone that runs past its cap. Its own code, so it is not read as a failed channel (`SSH_TIMEOUT`).
 const CLONE_TIMEOUT_CODE: &str = "clone_timeout";
@@ -213,10 +212,11 @@ fn route_clone(routes: &Mutex<Routes>, data: Value) {
 
 /// The result of a clone from its `clone` event: `{path, name}` on success, the helper's error otherwise.
 fn clone_outcome(data: &Value) -> R<Value> {
-    if data.get("ok").and_then(Value::as_bool) != Some(true) {
+    let event = serde_json::from_value::<CloneEvent>(data.clone()).ok().filter(|event| event.ok);
+    let Some(event) = event else {
         return Err(decode_error(data));
-    }
-    match (data.get("path").and_then(Value::as_str), data.get("name").and_then(Value::as_str)) {
+    };
+    match (event.path, event.name) {
         (Some(path), Some(name)) => Ok(json!({"path": path, "name": name})),
         _ => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
     }
@@ -499,11 +499,11 @@ impl Remote {
     pub fn project_create(&self, connector: &dyn Connector, parent: &str, name: &str) -> R<ProjectInfo> {
         let client = self.ensure(connector)?;
         let answer = client.call("project_create", json!({"parent": parent, "name": name}), None)?;
-        let root = answer.get("root").and_then(Value::as_str).unwrap_or_default();
+        let root = serde_json::from_value::<Opened>(answer).unwrap_or_default().root;
         if root.is_empty() {
             return Err(FsError { code: "invalid_path", message: "The server did not return a usable folder.".into() });
         }
-        self.open(connector, root)
+        self.open(connector, &root)
     }
 
     /// Runs a clone on the server and waits for its `clone` event, up to `cap`. The helper answers the start with
@@ -526,8 +526,8 @@ impl Remote {
         // closes. The route is cleared on every path below. `settle` applies to a clone too, so a folder that is gone
         // returns the app to the server home.
         let outcome = match client.call("repo_clone", json!({"req": req}), None) {
-            Ok(started) => match started.get("id").and_then(Value::as_u64) {
-                Some(id) => wait_for_clone(&*client, &events, id, cap),
+            Ok(started) => match serde_json::from_value::<CloneStarted>(started).ok() {
+                Some(started) => wait_for_clone(&*client, &events, started.id, cap),
                 None => Err(FsError { code: "bad_response", message: "The server sent an answer this app does not understand.".into() }),
             },
             Err(e) => Err(e),
@@ -542,10 +542,8 @@ impl Remote {
         let _opening = locked(&self.opening);
         let client = self.ensure(connector)?;
         let answer = client.call("open", json!({"root": path}), None)?;
-        let info = ProjectInfo {
-            name: answer.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
-            root: answer.get("root").and_then(Value::as_str).unwrap_or_default().to_string(),
-        };
+        let opened = serde_json::from_value::<Opened>(answer).unwrap_or_default();
+        let info = ProjectInfo { name: opened.name, root: opened.root };
         if info.name.is_empty() || info.root.is_empty() {
             // The helper now sits on a folder this app cannot name, so neither side keeps it: the channel ends and
             // the next call starts a helper with no folder.

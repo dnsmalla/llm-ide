@@ -5,72 +5,15 @@
 //! from two threads never share a line. The input is untrusted: a line is read with a cap, and a line that cannot be
 //! parsed gets an answer with id 0 instead of ending the process.
 
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::sync::Mutex;
 
 use serde::de::DeserializeOwned;
-use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::Value;
 
-/// Version of this wire format, reported by `hello`. Bump it when a message changes shape.
-pub const PROTOCOL: u64 = 2;
-
-/// The longest request line accepted. The largest legitimate request is a write of a 64 MB file; the cap is the
-/// line size, so a JSON-escaped write near that size can be refused (see the report's concerns).
-pub const MAX_LINE_BYTES: usize = 64 * 1024 * 1024;
-
-#[derive(Deserialize, Debug)]
-pub struct Request {
-    pub id: u64,
-    pub cmd: String,
-    /// The same JSON object the desktop passes to the Tauri command. Absent means no arguments.
-    #[serde(default)]
-    pub args: Value,
-    /// The user's answer to a confirmation, copied from the desktop's native dialog text.
-    #[serde(default)]
-    pub confirm: Option<Value>,
-}
-
-/// One line read from stdin.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Line {
-    Eof,
-    Text(Vec<u8>),
-    /// The line went past the cap. Its bytes were discarded up to the newline.
-    TooLong,
-}
-
-/// Reads one line without ever holding more than `max` bytes of it. An oversized line is consumed to its newline so
-/// the reader is positioned at the next request.
-pub fn read_bounded_line<R: BufRead>(reader: &mut R, max: usize) -> io::Result<Line> {
-    let mut buf = Vec::new();
-    let mut too_long = false;
-    loop {
-        let available = reader.fill_buf()?;
-        if available.is_empty() {
-            if buf.is_empty() && !too_long {
-                return Ok(Line::Eof);
-            }
-            break;
-        }
-        let newline = available.iter().position(|b| *b == b'\n');
-        let used = newline.map_or(available.len(), |i| i + 1);
-        if !too_long {
-            let chunk = &available[..newline.unwrap_or(available.len())];
-            if buf.len() + chunk.len() > max {
-                too_long = true;
-                buf = Vec::new();
-            } else {
-                buf.extend_from_slice(chunk);
-            }
-        }
-        reader.consume(used);
-        if newline.is_some() {
-            break;
-        }
-    }
-    Ok(if too_long { Line::TooLong } else { Line::Text(buf) })
-}
+// A last line with no newline arrives as `Line::Unterminated`; `main` handles it like a whole line, so a client that
+// closes its input right after a request is still answered.
+pub use llmide_workspace_core::wire::{err_response, event, ok_response, read_bounded_line, Line, Request, MAX_LINE_BYTES, PROTOCOL};
 
 /// Parses one request line. A line that is not a request answers with id 0, or with its own id when the JSON has
 /// one, and the caller keeps reading.
@@ -82,18 +25,6 @@ pub fn parse_request(bytes: &[u8]) -> Result<Request, Value> {
             Err(err_response(id.unwrap_or(0), "bad_request", &format!("the request is not valid: {e}")))
         }
     }
-}
-
-pub fn ok_response(id: u64, value: Value) -> Value {
-    json!({"id": id, "ok": value})
-}
-
-pub fn err_response(id: u64, code: &str, message: &str) -> Value {
-    json!({"id": id, "err": {"code": code, "message": message}})
-}
-
-pub fn event(name: &str, data: Value) -> Value {
-    json!({"event": name, "data": data})
 }
 
 /// Decodes the named argument. A missing key counts as `null`, so an optional field is `Option<T>`.
@@ -227,7 +158,7 @@ mod tests {
     #[test]
     fn line_without_newline_at_eof_is_still_read() {
         let mut reader = std::io::BufReader::new(std::io::Cursor::new(b"abc".to_vec()));
-        assert!(matches!(read_bounded_line(&mut reader, 10).unwrap(), Line::Text(t) if t == b"abc"));
+        assert!(matches!(read_bounded_line(&mut reader, 10).unwrap(), Line::Unterminated(t) if t == b"abc"));
         assert!(matches!(read_bounded_line(&mut reader, 10).unwrap(), Line::Eof));
     }
 }

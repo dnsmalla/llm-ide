@@ -348,7 +348,7 @@ fn confirmed<T>(req: &Request, run: impl FnOnce(&dyn Fn(&str) -> bool) -> R<T>) 
     let result = run(&ask);
     let pending = if expected.is_some() { refused.into_inner() } else { first_question.into_inner() };
     match pending {
-        Some(question) => Err(FsError { code: "confirm_required", message: question }),
+        Some(question) => Err(FsError { code: llmide_workspace_core::wire::CONFIRM_REQUIRED_CODE, message: question }),
         None => result,
     }
 }
