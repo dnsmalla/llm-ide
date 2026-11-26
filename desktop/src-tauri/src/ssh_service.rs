@@ -128,6 +128,8 @@ pub struct Deps {
     pub version: String,
     /// The secrets line the core reads from stdin.
     pub secrets_payload: Arc<dyn Fn() -> Result<String, FsError> + Send + Sync>,
+    /// Removes the stored Keychain password of a login (host, port, user). Best effort, never fails the caller.
+    pub forget_password: Arc<dyn Fn(&str, u16, &str) + Send + Sync>,
     pub session_file: PathBuf,
 }
 
@@ -169,14 +171,69 @@ struct Remembered {
 ///     `SSH_PASSWORD_REQUIRED`, `SSH_UNREACHABLE` (no usable key offered), `SSH_AUTH_FAILED` and the
 ///     transport codes of the probe.
 pub fn test(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<SshServerTest, FsError> {
-    let endpoint = target_endpoint(target, password)?;
+    test_inner(deps, target, password, None)
+}
+
+/// [`test`] for a password that is fetched only when it is needed: `resolve` runs after the offered key matched the pin,
+/// so a server that is not trusted never makes the app read the Keychain. An untrusted answer needs no password.
+pub fn test_lazy(deps: &Deps, target: &SshServerTarget, resolve: &dyn Fn() -> Result<Option<String>, FsError>) -> Result<SshServerTest, FsError> {
+    test_inner(deps, target, None, Some(resolve))
+}
+
+type PasswordSource<'a> = &'a dyn Fn() -> Result<Option<String>, FsError>;
+
+fn test_inner(deps: &Deps, target: &SshServerTarget, password: Option<&str>, lazy: Option<PasswordSource<'_>>) -> Result<SshServerTest, FsError> {
+    let endpoint = if lazy.is_some() { endpoint_shape(target)? } else { target_endpoint(target, password)? };
     let offered = scan_offered(deps, &endpoint)?;
     locked(observed()).insert(endpoint_key(&endpoint), offered.clone());
     match pin_for(&endpoint) {
         Some(pin) if pin.key_type == offered.key_type && pin.key_b64 == offered.key_b64 => {
-            probe_trusted(deps, &endpoint, &pin, &offered, password)
+            let resolved = match lazy {
+                Some(resolve) => resolve()?,
+                None => password.map(str::to_string),
+            };
+            with_password(endpoint.clone(), resolved.as_deref())?;
+            let result = probe_trusted(deps, &endpoint, &pin, &offered, resolved.as_deref())?;
+            // The login worked: keep it in the recent list even if the connect that follows fails.
+            remember_login(deps, target);
+            Ok(result)
         }
         pin => Ok(base_result(&offered, false, pin.is_some())),
+    }
+}
+
+/// Whether the key the server offers now is the pinned one. Used before the Keychain is read for a connect: only a
+/// server that shows its pinned key may cause a Keychain access.
+///
+/// Errors: `SSH_HOST_KEY_UNCONFIRMED` (no pin), `SSH_HOST_KEY_CHANGED` (another key), `SSH_UNREACHABLE`.
+pub fn require_pinned_key_offered(deps: &Deps, target: &SshServerTarget) -> Result<(), FsError> {
+    let endpoint = endpoint_shape(target)?;
+    let pin = require_pin(&endpoint)?;
+    let offered = scan_offered(deps, &endpoint)?;
+    if pin.key_type == offered.key_type && pin.key_b64 == offered.key_b64 {
+        return Ok(());
+    }
+    Err(herr("SSH_HOST_KEY_CHANGED", "The server's host key changed. Test the connection again and confirm the new fingerprint."))
+}
+
+/// Puts the login in the recent list at once (the saved server and the mode stay as they are). Best effort: a
+/// preference write that fails must not fail the check it follows. A login pushed out of the list takes its stored
+/// password with it.
+fn remember_login(deps: &Deps, target: &SshServerTarget) {
+    // A Test never changes the Keychain: a key login over a login with a saved password would orphan it here, so that
+    // switch is left to Connect (`set_remote_ssh_collect`).
+    if target.auth == SshAuthKind::Key && prefs::ssh_password_saved(&target.host, target.port, &target.user) {
+        return;
+    }
+    if let Ok(orphaned) = prefs::remember_ssh_server(&target.host, target.port, &target.user, &target.key_path, target.auth) {
+        forget_orphaned(deps, &orphaned);
+    }
+}
+
+/// Forgets the Keychain password of every login in `orphaned` (best effort).
+pub(crate) fn forget_orphaned(deps: &Deps, orphaned: &[prefs::SshRecentServer]) {
+    for entry in orphaned {
+        (deps.forget_password)(&entry.host, entry.port, &entry.user);
     }
 }
 
@@ -203,7 +260,20 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     if !(deps.ask)(&shown, &offered.key_type, &offered.fingerprint) {
         return Err(herr("cancelled", "The server's host key was not trusted, so nothing was saved."));
     }
-    prefs::upsert_ssh_known_host(pin_text(&endpoint, &offered))?;
+    // A different key was pinned for this server: the passwords saved for it were meant for that key's server. Their
+    // flags go before the new pin is stored, so no later connect can send one to the server behind the new key.
+    // No pin at all counts as a replacement too: the pin may have been evicted while a login still holds a password.
+    let keeps_same_key = pin_for(&endpoint).is_some_and(|old| old.key_type == offered.key_type && old.key_b64 == offered.key_b64);
+    if !keeps_same_key {
+        let cleared = prefs::clear_ssh_password_flags_for_endpoint(&endpoint.host, endpoint.port)?;
+        for user in &cleared {
+            (deps.forget_password)(&endpoint.host, endpoint.port, user);
+        }
+    }
+    let (_, evicted) = prefs::upsert_ssh_known_host_collect(pin_text(&endpoint, &offered))?;
+    forget_orphaned(deps, &evicted);
+    // The host key is trusted: the login is worth keeping even if the sign-in below fails.
+    remember_login(deps, target);
     Ok(base_result(&offered, true, false))
 }
 
@@ -284,11 +354,34 @@ fn open_link_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str
 /// The operation lock is held from the connect to the attach, so a Stop or Uninstall cannot run between them.
 ///
 /// Errors: the codes of [`open_link`], plus any preference validation error.
+#[cfg(test)]
 pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password: Option<&str>) -> Result<SshServerStatus, FsError> {
+    connect_with_options(deps, host, target, password, false)
+}
+
+/// [`connect`], optionally taking over first. `take_over` stops the core that is running on the server account, even
+/// when this desktop's session record does not own it, and then continues the same connect. It is the user's explicit
+/// answer to `SSH_CORE_FOREIGN`: the caller passes it only after that click.
+///
+/// Everything else is unchanged: the host key must be pinned, the stop runs over the pinned transport
+/// (`StrictHostKeyChecking=yes`), and the stop and the connect run under one operation lock, so no other connect,
+/// stop or uninstall can run between them.
+///
+/// Errors: the codes of [`connect`], plus those of the stop (`SSH_STOP_UNKNOWN`, `SSH_STOP_FAILED`).
+pub fn connect_with_options(
+    deps: &Deps,
+    host: &CoreHost,
+    target: &SshServerTarget,
+    password: Option<&str>,
+    take_over: bool,
+) -> Result<SshServerStatus, FsError> {
     let _operation = operation();
+    if take_over {
+        stop_running_core_locked(deps, target, password)?;
+    }
     let opened = open_link_locked(deps, target, password)?;
     let mode = prefs::stored().remote_server.mode;
-    prefs::set_remote_ssh(
+    let (_, orphaned) = prefs::set_remote_ssh_collect(
         target.host.clone(),
         target.port,
         target.user.clone(),
@@ -296,6 +389,7 @@ pub fn connect(deps: &Deps, host: &CoreHost, target: &SshServerTarget, password:
         target.auth,
         mode,
     )?;
+    forget_orphaned(deps, &orphaned);
     Ok(attach_link(host, opened))
 }
 
@@ -435,6 +529,20 @@ pub fn stop_server(
     let output = run_pinned(deps, &endpoint, &pinned, password, STOP)?;
     parse_stop(&output.stdout)?;
     Ok(build_status(host))
+}
+
+/// Stops whatever core runs on the target's server account, without the ownership check, for [`connect_with_options`].
+/// The target need not be the saved server (a first connect is not saved yet), but its host key must be pinned. The
+/// operation lock is held by the caller. A live link is left alone: attaching the new one replaces it.
+fn stop_running_core_locked(deps: &Deps, target: &SshServerTarget, password: Option<&str>) -> Result<(), FsError> {
+    let endpoint = target_endpoint(target, password)?;
+    let pin = require_pin(&endpoint)?;
+    let pinned = pinned_dir(&endpoint, &pin)?;
+    // STATUS first: it fails clearly (auth, timeout) before STOP, and keeps the same two-call shape as a forced stop.
+    read_state(deps, &endpoint, &pinned, password)?;
+    let output = run_pinned(deps, &endpoint, &pinned, password, STOP)?;
+    parse_stop(&output.stdout)?;
+    Ok(())
 }
 
 /// Stops the forward and the server core, then removes the releases. Data on the server is kept.
@@ -877,6 +985,8 @@ pub(crate) mod tests {
     /// Process-wide state a test may change, held for the whole test. Preferences are taken before the
     /// CoreHost mode, always in that order. Everything is put back on drop.
     pub(crate) struct Fixture {
+        /// `user@host:port` of every login whose stored password the service asked to forget.
+        pub(crate) forgotten: Arc<Mutex<Vec<String>>>,
         pub(crate) dir: PathBuf,
         pub(crate) host: CoreHost,
         pub(crate) scans: Arc<AtomicUsize>,
@@ -896,6 +1006,7 @@ pub(crate) mod tests {
             set_remote_server_for_test(RemoteServerPrefs::default());
             reset_for_tests();
             Self {
+                forgotten: Arc::default(),
                 dir,
                 host,
                 scans: Arc::default(),
@@ -915,6 +1026,7 @@ pub(crate) mod tests {
             let scan = scan.to_string();
             let (scans, asks, keygens) = (self.scans.clone(), self.asks.clone(), self.keygens.clone());
             let echo = exec.clone();
+            let forgotten = self.forgotten.clone();
             Deps {
                 exec: exec.clone(),
                 scan: Arc::new(move |_: &SshEndpoint| {
@@ -933,6 +1045,7 @@ pub(crate) mod tests {
                 bundle: Arc::new(move || bundle_path.clone()),
                 version: "2.0.0".into(),
                 secrets_payload: Arc::new(|| Ok(PAYLOAD.to_string())),
+                forget_password: Arc::new(move |host: &str, port: u16, user: &str| locked(&forgotten).push(format!("{user}@{host}:{port}"))),
                 session_file: self.dir.join("state").join("ssh-session.json"),
             }
         }
@@ -1090,6 +1203,145 @@ pub(crate) mod tests {
         assert_eq!(result.os, None, "confirm never logs in, so the probe fields stay empty");
         assert_eq!(prefs::stored().remote_server.ssh_known_hosts, vec![pin_text(22, "key-a")]);
         assert!(exec.calls().is_empty());
+    }
+
+    fn password_login(user: &str) -> SshServerTarget {
+        SshServerTarget { user: user.into(), ..target(22, SshAuthKind::Password) }
+    }
+
+    #[test]
+    fn replacing_a_different_host_key_forgets_the_saved_passwords_of_that_server() {
+        let fx = Fixture::new("svc-key-change");
+        upsert_ssh_known_host(pin_text(22, "key-old")).unwrap();
+        for user in ["alice", "bob"] {
+            prefs::remember_ssh_server(HOST, 22, user, "", SshAuthKind::Password).unwrap();
+            prefs::set_ssh_password_saved(HOST, 22, user, true).unwrap();
+        }
+        prefs::remember_ssh_server("elsewhere.example", 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved("elsewhere.example", 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-new"), true, true);
+        let seen = test(&deps, &password_login("alice"), Some("pw")).unwrap();
+        assert!(seen.changed && !seen.trusted, "the new key is not trusted yet");
+        confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-new")).unwrap();
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice") && !prefs::ssh_password_saved(HOST, 22, "bob"), "no flag survives a new key");
+        assert!(prefs::ssh_password_saved("elsewhere.example", 22, "alice"), "another server keeps its password");
+        let mut forgotten = locked(&fx.forgotten).clone();
+        forgotten.sort();
+        assert_eq!(forgotten, vec![format!("alice@{HOST}:22"), format!("bob@{HOST}:22")]);
+    }
+
+    #[test]
+    fn re_confirming_the_same_key_keeps_the_saved_password() {
+        let fx = Fixture::new("svc-key-same");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        // The trusted probe may fail on the fake; it still records the key it saw, which is all confirm needs.
+        let _ = test(&deps, &password_login("alice"), Some("pw"));
+        confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
+        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "re-confirming the same key keeps the password");
+        assert!(locked(&fx.forgotten).is_empty());
+    }
+
+    #[test]
+    fn a_first_pin_without_a_saved_password_forgets_nothing() {
+        let other = Fixture::new("svc-first-pin");
+        let exec = fake(vec![]);
+        prefs::remember_ssh_server(HOST, 22, "bob", "", SshAuthKind::Password).unwrap();
+        let deps = other.deps(&exec, &scan_of("key-a"), true, true);
+        test(&deps, &password_login("bob"), Some("pw")).unwrap();
+        confirm(&deps, &password_login("bob"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
+        assert!(locked(&other.forgotten).is_empty(), "nothing was saved, so nothing is forgotten");
+    }
+
+    #[test]
+    fn a_first_pin_for_a_login_with_a_saved_password_forgets_it() {
+        // The pin was evicted (or never existed) while the login kept its password: it must not reach a key the user
+        // trusts only now.
+        let fx = Fixture::new("svc-first-pin-saved");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        test(&deps, &password_login("alice"), Some("pw")).unwrap();
+        confirm(&deps, &password_login("alice"), "ssh-ed25519", &fingerprint_of("key-a")).unwrap();
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice"));
+        assert_eq!(*locked(&fx.forgotten), vec![format!("alice@{HOST}:22")]);
+    }
+
+    #[test]
+    fn evicting_the_oldest_pin_forgets_the_passwords_saved_for_its_host() {
+        let fx = Fixture::new("svc-pin-evict");
+        upsert_ssh_known_host(pin_text(22, "key-old")).unwrap();
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let mut cleared = Vec::new();
+        for i in 0..prefs::SSH_KNOWN_HOSTS_MAX {
+            let pin = format!("h{i}.example:22 ssh-ed25519 {}", key_b64(&format!("k{i}")));
+            cleared.extend(prefs::upsert_ssh_known_host_collect(pin).unwrap().1);
+        }
+        assert_eq!(cleared.len(), 1);
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        forget_orphaned(&deps, &cleared);
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice"), "the login lost its flag with its pin");
+        assert_eq!(*locked(&fx.forgotten), vec![format!("alice@{HOST}:22")]);
+    }
+
+    #[test]
+    fn a_test_with_a_key_never_forgets_a_saved_password() {
+        let fx = Fixture::new("svc-test-keeps-keychain");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        remember_login(&deps, &target(22, SshAuthKind::Key));
+        assert!(prefs::ssh_password_saved(HOST, 22, "alice"), "only Connect switches the login to a key");
+        assert!(locked(&fx.forgotten).is_empty());
+    }
+
+    #[test]
+    fn a_lazy_password_is_not_read_for_a_server_that_is_not_trusted() {
+        let fx = Fixture::new("svc-lazy");
+        upsert_ssh_known_host(pin_text(22, "key-old")).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-new"), true, true);
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counter = reads.clone();
+        let resolve = move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+            Ok(Some("saved".to_string()))
+        };
+        let result = test_lazy(&deps, &password_login("alice"), &resolve).unwrap();
+        assert!(result.changed && !result.trusted);
+        assert_eq!(reads.load(Ordering::SeqCst), 0, "a changed key never makes the app read the keychain");
+        assert!(exec.calls().is_empty(), "nothing was logged into");
+        assert_eq!(code(require_pinned_key_offered(&deps, &password_login("alice"))), "SSH_HOST_KEY_CHANGED");
+    }
+
+    #[test]
+    fn a_login_switched_to_a_key_or_pushed_out_of_the_recent_list_forgets_its_password() {
+        let fx = Fixture::new("svc-orphans");
+        prefs::remember_ssh_server(HOST, 22, "alice", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved(HOST, 22, "alice", true).unwrap();
+        let (_, orphaned) = prefs::set_remote_ssh_collect(HOST.into(), 22, "alice".into(), KEY_PATH.into(), SshAuthKind::Key, ServerMode::Local).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        forget_orphaned(&deps, &orphaned);
+        assert_eq!(*locked(&fx.forgotten), vec![format!("alice@{HOST}:22")]);
+        assert!(!prefs::ssh_password_saved(HOST, 22, "alice"), "the key login carries no flag");
+
+        prefs::remember_ssh_server("first.example", 22, "carol", "", SshAuthKind::Password).unwrap();
+        prefs::set_ssh_password_saved("first.example", 22, "carol", true).unwrap();
+        let mut pushed = Vec::new();
+        for i in 0..prefs::SSH_RECENT_SERVERS_MAX {
+            pushed.extend(prefs::remember_ssh_server(&format!("h{i}.example"), 22, "dave", "", SshAuthKind::Password).unwrap());
+        }
+        forget_orphaned(&deps, &pushed);
+        assert!(locked(&fx.forgotten).contains(&"carol@first.example:22".to_string()), "the evicted login's password goes with it");
     }
 
     #[test]
@@ -1352,6 +1604,74 @@ pub(crate) mod tests {
         let status = stop_server(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
         assert_eq!(status.link, "off", "the test host is not in SSH mode");
         assert_eq!(exec.names(), vec!["status", "stop"]);
+    }
+
+    #[test]
+    fn connect_refuses_a_core_the_session_record_does_not_own() {
+        let fx = Fixture::new("svc-connect-foreign");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let exec = fake(vec![probe_out(""), foreign_status()]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = connect(&deps, &fx.host, &target(22, SshAuthKind::Key), None).unwrap_err();
+        assert_eq!(refused.code, "SSH_CORE_FOREIGN");
+        assert!(!exec.names().contains(&"stop"), "no stop without the explicit take over");
+    }
+
+    #[test]
+    fn take_over_stops_the_foreign_core_then_continues_the_same_connect() {
+        let fx = Fixture::new("svc-connect-take-over");
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let mut outputs = vec![foreign_status(), ok(STOP_OK)];
+        outputs.extend(connect_outputs());
+        let exec = fake(outputs);
+        let deps = fx.deps(&exec, "", true, true);
+        let status = connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
+        assert_eq!(status.link, "restart_required", "the test host is not in SSH mode");
+        let names = exec.names();
+        assert_eq!(&names[..2], ["status", "stop"], "the stop comes first");
+        assert_eq!(names[2..], ["probe", "status", "install", "start", "forward"], "then the ordinary connect");
+        for call in exec.calls() {
+            assert!(has_option(&call.args, "StrictHostKeyChecking=yes"), "{} is not strict", call.name);
+        }
+    }
+
+    #[test]
+    fn take_over_without_a_pinned_host_key_runs_nothing() {
+        let fx = Fixture::new("svc-connect-take-over-unpinned");
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, "", true, true);
+        let refused = connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap_err();
+        assert_eq!(refused.code, "SSH_HOST_KEY_UNCONFIRMED");
+        assert!(exec.calls().is_empty(), "the host-key check is not skipped by a take over");
+    }
+
+    #[test]
+    fn take_over_does_not_need_the_server_to_be_the_saved_one() {
+        let fx = Fixture::new("svc-connect-take-over-unsaved");
+        set_remote_server_for_test(RemoteServerPrefs::default());
+        upsert_ssh_known_host(pin_text(22, "key-a")).unwrap();
+        let mut outputs = vec![foreign_status(), ok(STOP_OK)];
+        outputs.extend(connect_outputs());
+        let exec = fake(outputs);
+        let deps = fx.deps(&exec, "", true, true);
+        connect_with_options(&deps, &fx.host, &target(22, SshAuthKind::Key), None, true).unwrap();
+        assert_eq!(&exec.names()[..2], ["status", "stop"]);
+    }
+
+    #[test]
+    fn a_trusted_test_and_a_confirm_list_the_login_before_any_connect() {
+        let fx = Fixture::new("svc-remember-early");
+        set_remote_server_for_test(RemoteServerPrefs::default());
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-a"), true, true);
+        let seen = test(&deps, &target(22, SshAuthKind::Key), None).unwrap();
+        assert!(!seen.trusted);
+        assert!(prefs::stored().remote_server.ssh_recent_servers.is_empty(), "an untrusted key lists nothing yet");
+        confirm(&deps, &target(22, SshAuthKind::Key), &seen.host_key_type, &seen.fingerprint).unwrap();
+        let listed = prefs::stored().remote_server.ssh_recent_servers;
+        assert_eq!(listed.len(), 1, "listed once the host key is trusted, with no connect");
+        assert_eq!((listed[0].host.as_str(), listed[0].user.as_str()), (HOST, "alice"));
+        assert!(prefs::stored().remote_server.host.is_empty(), "the saved server is untouched");
     }
 
     #[test]

@@ -21,6 +21,12 @@ export default function WelcomeSection({ mode, onOpenServerFolder }: SectionProp
   const p = useActiveProject();
   const [focusNew, setFocusNew] = useState(0);
   const [guideSignal, setGuideSignal] = useState(0);
+  // The Loop run manager is loaded lazily, as self-heal does, so Welcome does not pull it into its chunk. Until it has
+  // loaded the answer is unknown, which the dialog treats as "work may be running" and so asks before restarting.
+  const [liveRuns, setLiveRuns] = useState<(() => readonly unknown[]) | null>(null);
+  useEffect(() => {
+    void import("../loop/native/run-manager").then((m) => setLiveRuns(() => m.liveRuns), () => undefined);
+  }, []);
   // The SSH connect card talks to the host through the same commands as Settings' SSH card.
   const ssh = useMemo<WelcomeSsh>(
     () => ({
@@ -30,8 +36,10 @@ export default function WelcomeSection({ mode, onOpenServerFolder }: SectionProp
         await switchToSshMode();
         await invokeHost<unknown>("app_restart");
       },
+      // Loop runs (running or queued) live in this window and end with the restart; the same signal self-heal uses.
+      hasLiveWork: () => (liveRuns === null ? true : liveRuns().length > 0),
     }),
-    [],
+    [liveRuns],
   );
   // "New project" buttons elsewhere (the no-project cards) ask for the form via the shell bus.
   useEffect(() => {

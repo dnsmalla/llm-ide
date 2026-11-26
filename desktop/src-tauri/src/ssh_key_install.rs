@@ -54,11 +54,15 @@ pub fn install_key(deps: &Deps, host: &CoreHost, key_dir: &Path, password: &str)
 
     let installed = install_and_verify(deps, &endpoint, &pinned, &key_path, password).and_then(|()| {
         let key_text = path_text(&key_path)?;
-        prefs::set_remote_ssh(saved.host, saved.port, saved.user, key_text, SshAuthKind::Key, saved.mode)
+        prefs::set_remote_ssh_collect(saved.host, saved.port, saved.user, key_text, SshAuthKind::Key, saved.mode)
     });
-    if let Err(error) = installed {
-        remove_key_files(&key_path);
-        return Err(error);
+    match installed {
+        // The login now uses the key, so a password stored for it can never be used again: forget it.
+        Ok((_, orphaned)) => crate::ssh_service::forget_orphaned(deps, &orphaned),
+        Err(error) => {
+            remove_key_files(&key_path);
+            return Err(error);
+        }
     }
     Ok(build_status(host))
 }

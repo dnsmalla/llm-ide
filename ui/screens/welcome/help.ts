@@ -80,6 +80,7 @@ const TOPICS: readonly HelpTopic[] = [
   { id: "recipe-issue", group: "Recipes", title: "Recipe: issue to shipped change", what: "A complete path from a GitHub or GitLab issue to a reviewed change, without writing the code yourself.", steps: ["Save the repository in Settings → Repositories and import its issues on the Issues screen.", "Open Loop → Board: the issue is in Backlog. Click Start.", "Let it run through the steps; answer if it asks a question.", "In Done, open the draft MR, review it and merge."], example: "The card ends in Done with a draft MR link; merging it removes the card from the board." , target: "conflicts" },
   { id: "recipe-review", group: "Recipes", title: "Recipe: review a change", what: "Run the review task and read the result.", steps: ["Open Auto Tasks.", "Choose Review Code.", "Click Run.", "Read the log and findings."], example: "A failed test appears under Test with the command." , target: "autotasks" },
   { id: "recipe-provider", group: "Recipes", title: "Recipe: connect a model", what: "Add a key and make it the default.", steps: ["Open Settings → Providers.", "Add the provider and paste the key.", "Test it.", "Open Model routing and choose it."], example: "If no key is set, the core falls back to Claude CLI." , target: "settings" },
+  { id: "recipe-ssh", group: "Recipes", title: "Recipe: connect to an SSH server", what: "Work on a Linux server you can sign in to with SSH. One Connect button checks the server, installs and starts the server part, and connects.", steps: ["On Welcome press Connect…, enter host, user and key or password.", "Press Connect and, for a new server, compare the fingerprint and press Trust this key.", "If a server part from an earlier session is still running, press Take over, or Cancel to leave it.", "The app restarts onto the server; it asks first only if Loop work is running here."], example: "Tick Remember password in Keychain to connect a password server in one click next time.", target: "welcome" },
   { id: "recipe-terminal", group: "Recipes", title: "Recipe: use the terminal", what: "The terminal runs a shell in the project.", steps: ["Click Terminal in the bottom bar.", "Run a command.", "Resize or close the dock.", "Use Ctrl+` anywhere."], example: "Run your project's test command without leaving LLM-IDE.", diagram: "terminal", target: "explorer" },
   { id: "trouble-core", group: "Recipes", title: "Troubleshooting: Core offline", what: "Most screens need the local core.", steps: ["Check Core ready in the bottom bar.", "Open Settings → Server & Backend.", "Read the log.", "Start or Kill & Restart."], example: "A busy port is shown in the status bar; the core may be starting." , target: "settings" },
 ];
@@ -278,6 +279,13 @@ const EXTRAS: Readonly<Record<string, Pick<HelpTopic, "oneLine" | "flow" | "faq"
       { label: "Paste key", detail: "The key is write-only: once saved it is never shown again." },
       { label: "Test", tone: "check", detail: "Test the connection; a clear error tells you what to fix." },
       { label: "Route it", tone: "end", detail: "Settings → Model routing: pick it for chat, planning or review." },
+    ] },
+  "recipe-ssh": { oneLine: "Connect checks the server, sets up its server part and switches the app onto it.", related: ["set-server"],
+    flow: [
+      { label: "Connect…", tone: "start", detail: "On Welcome, enter the host, user and a key file or password, then press Connect. There is no separate Test." },
+      { label: "Trust the key", tone: "check", detail: "A new server shows its host-key fingerprint. Compare it with the operator's, then press Trust this key." },
+      { label: "Set up", detail: "The server part is installed or updated, started, and the app connects. A running server part from an earlier session needs your Take over click." },
+      { label: "Switch", tone: "end", detail: "The app restarts onto the server. It asks first only when Loop work is running on this computer." },
     ] },
   "recipe-terminal": { oneLine: "A shell inside your project, one click from any screen.", related: ["explorer"] },
   "trouble-core": { oneLine: "If screens say offline, the local core is stopped: restart it from Settings → Server & Backend.", related: ["set-server"],

@@ -27,10 +27,17 @@ export type SshServerBusy = "test" | "confirm" | "connect" | "disconnect" | "sta
 const isNullableString = (v: unknown): v is string | null => v === null || typeof v === "string";
 const SSH_LINKS: readonly SshServerLink[] = ["off", "restart_required", "connecting", "connected", "reconnecting", "needs_password", "failed", "stopped"];
 const GLIBC_VERSION = /^\d+\.\d+$/;
-/** The stop or uninstall the foreign-core prompt asks to repeat with `force`. */
-export type SshForeignAction = "stop" | "uninstall";
+/** The stop, uninstall or connect the foreign-core prompt asks to repeat with `force` (or, for a connect, `takeOver`). */
+export type SshForeignAction = "stop" | "uninstall" | "connect";
 /** Shown for a server another computer started. The same sentence for stop and for uninstall. */
 export const SSH_FOREIGN_TEXT = "Another computer started the server on this account. Stopping it ends that computer's work.";
+/** Shown when Connect finds a server part that this desktop's session record does not own. The user must click Take over. */
+export const SSH_TAKE_OVER_TEXT = "A server part from an earlier session is still running on this account (another computer, or this one before its app data was reset). Taking over stops it; any work running in it ends.";
+/**
+ * Shown for SSH_CORE_FOREIGN wherever no Take over button is offered (the app's startup, the live link, a failed start).
+ * The prompt that does offer the button shows SSH_TAKE_OVER_TEXT instead.
+ */
+export const SSH_FOREIGN_NEXT_STEP_TEXT = "A server part from an earlier session is still running on this account. To replace it, open Welcome, choose Connect to SSH server and use Take over.";
 const isForeignCore = (e: unknown): boolean => isRecord(e) && e.code === "SSH_CORE_FOREIGN";
 
 /** Strict decode of `remote_ssh_server_test` / `_confirm`; any wrong type reads as null (the host answered something unknown). */
@@ -57,7 +64,8 @@ export function decodeSshServerStatus(raw: unknown): SshServerStatus | null {
   if (typeof port !== "number" || !Number.isInteger(port) || port < 1 || port > 65535) return null;
   if (error !== null && typeof error !== "string") return null;
   const known = SSH_LINKS.includes(link as SshServerLink) ? (link as SshServerLink) : "failed";
-  return { link: known, host, port, user, localUrl, version, claude, error, bundleAvailable: raw.bundleAvailable !== false };
+  const warning = typeof raw.warning === "string" && raw.warning.length > 0 ? raw.warning.slice(0, 300) : null;
+  return { link: known, host, port, user, localUrl, version, claude, error, bundleAvailable: raw.bundleAvailable !== false, ...(warning === null ? {} : { warning }) };
 }
 
 /** Shown beside the disabled SSH actions when the host reports no server bundle in this build. */
@@ -78,7 +86,7 @@ const SSH_ERROR_TEXT: HostErrorTable = {
   SSH_UNREACHABLE: "Could not reach the server.",
   SSH_HOST_KEY_UNCONFIRMED: "Test the connection and confirm the server's host key first.",
   SSH_HOST_KEY_CHANGED: "The server's host key changed. Test the connection again and confirm the new fingerprint.",
-  SSH_CORE_FOREIGN: "Another computer started the server on this account. This version supports one desktop per server account.",
+  SSH_CORE_FOREIGN: SSH_FOREIGN_NEXT_STEP_TEXT,
   SSH_TIMEOUT: "The server did not answer in time.",
   SSH_START_BUSY: "The server is already starting. Try again in a moment.",
   SSH_FORWARD_FAILED: hostSentence(SSH_REQUEST_FAILED),
@@ -168,6 +176,8 @@ export interface SshRecentServer {
   auth: SshAuth;
   /** Epoch milliseconds of the last successful connect. The list is already sorted, most recent first. */
   lastUsed: number;
+  /** The password is in the Keychain (a flag only: the host reads it, the webview never gets it back). */
+  passwordSaved: boolean;
 }
 /** The fields that identify one saved server (its login), which is what Forget removes. */
 export type SshRecentRef = Pick<SshRecentServer, "host" | "port" | "user">;
@@ -189,9 +199,23 @@ export function decodeSshRecentList(raw: unknown): SshRecentServer[] | null {
     if (typeof user !== "string" || typeof keyPath !== "string") return null;
     if (auth !== "key" && auth !== "password") return null;
     if (typeof lastUsed !== "number" || !Number.isFinite(lastUsed)) return null;
-    out.push({ host, port, user, keyPath, auth, lastUsed });
+    // An older host does not send the flag, and a wrong type must not make the whole list unreadable.
+    out.push({ host, port, user, keyPath, auth, lastUsed, passwordSaved: auth === "password" && item.passwordSaved === true });
   }
   return out;
+}
+
+/**
+ * What a test or connect says about the password and the running core, besides the typed password. These are flags
+ * only: the host reads a stored password itself and the webview never receives it.
+ */
+export interface SshPasswordOptions {
+  /** Sign in with the password stored in the Keychain (none typed). */
+  useSaved?: boolean;
+  /** The "Remember password in Keychain" checkbox: true stores the typed password, false removes the stored one. */
+  remember?: boolean;
+  /** Connect only: stop the server part another session left running, then continue. Set only by the Take over click. */
+  takeOver?: boolean;
 }
 
 export interface SshServerIo {
@@ -201,9 +225,9 @@ export interface SshServerIo {
   /** Remove one saved server and its saved host-key pin. */
   forget(entry: SshRecentRef): Promise<void>;
   installKey(password: string): Promise<SshServerStatus>;
-  test(target: SshServerTarget, password?: string): Promise<SshServerTest>;
+  test(target: SshServerTarget, password?: string, options?: SshPasswordOptions): Promise<SshServerTest>;
   confirm(target: SshServerTarget, hostKeyType: string, fingerprint: string): Promise<SshServerTest>;
-  connect(target: SshServerTarget, password?: string): Promise<SshServerStatus>;
+  connect(target: SshServerTarget, password?: string, options?: SshPasswordOptions): Promise<SshServerStatus>;
   disconnect(): Promise<SshServerStatus>;
   status(): Promise<SshServerStatus>;
   /** The target is the form's current one: the host stops the server only when it is the saved one. */
@@ -222,15 +246,23 @@ function decodeOrThrow<T>(raw: unknown, decode: (v: unknown) => T | null): T {
 /** The production io: the host commands with their camelCase arguments. The password is added only when given. */
 export function createSshServerIo(invoke: SshInvoke): SshServerIo {
   const withPassword = (args: Record<string, unknown>, password: string | undefined) => (password === undefined ? args : { ...args, password });
+  const withOptions = (args: Record<string, unknown>, options: SshPasswordOptions | undefined) => {
+    if (options === undefined) return args;
+    const out = { ...args };
+    if (options.useSaved) out.useSavedPassword = true;
+    if (options.remember !== undefined) out.rememberPassword = options.remember;
+    if (options.takeOver) out.takeOver = true;
+    return out;
+  };
   return {
-    async test(target, password) {
-      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_test", withPassword({ target }, password)), decodeSshServerTest);
+    async test(target, password, options) {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_test", withOptions(withPassword({ target }, password), options)), decodeSshServerTest);
     },
     async confirm(target, hostKeyType, fingerprint) {
       return decodeOrThrow(await invoke<unknown>("remote_ssh_server_confirm", { target, hostKeyType, fingerprint }), decodeSshServerTest);
     },
-    async connect(target, password) {
-      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_connect", withPassword({ target }, password)), decodeSshServerStatus);
+    async connect(target, password, options) {
+      return decodeOrThrow(await invoke<unknown>("remote_ssh_server_connect", withOptions(withPassword({ target }, password), options)), decodeSshServerStatus);
     },
     async disconnect() {
       return decodeOrThrow(await invoke<unknown>("remote_ssh_server_disconnect"), decodeSshServerStatus);
@@ -295,8 +327,15 @@ export interface SshServerState {
   /** The last status the host reported. */
   status: SshServerStatus | null;
   error: string | null;
-  /** Set when a stop or uninstall found a core another computer started: the action waits for an explicit "anyway". */
+  /**
+   * Set when a stop, uninstall or connect found a core another computer started: the action waits for an explicit
+   * "anyway" (for a connect, the Take over click).
+   */
   foreign: SshForeignAction | null;
+  /** The "Remember password in Keychain" checkbox. Not a secret; the password itself is never in this state. */
+  rememberPassword: boolean;
+  /** The host says a password is stored in the Keychain for this login (from the recent list). */
+  passwordSaved: boolean;
 }
 
 export const SSH_SERVER_INITIAL: SshServerState = {
@@ -311,6 +350,8 @@ export const SSH_SERVER_INITIAL: SshServerState = {
   status: null,
   error: null,
   foreign: null,
+  rememberPassword: false,
+  passwordSaved: false,
 };
 
 export class SshServerModel extends Store<SshServerState> {
@@ -327,6 +368,8 @@ export class SshServerModel extends Store<SshServerState> {
     const fieldErrors = { ...this.getState().fieldErrors };
     delete fieldErrors[field];
     const patch: Partial<SshServerState> = { fieldErrors, error: null, foreign: null };
+    // The stored password belongs to one login (user@host:port): a different one has none.
+    if (field !== "keyPath") patch.passwordSaved = false;
     if (field === "host") patch.host = value;
     else if (field === "port") patch.port = value;
     else if (field === "user") patch.user = value;
@@ -349,10 +392,28 @@ export class SshServerModel extends Store<SshServerState> {
    */
   loadFrom(entry: SshRecentServer): void {
     this.#generation += 1;
+    // A Keychain warning belongs to the connect that raised it, not to the server loaded next.
+    const status = this.getState().status;
+    const { warning: _dropped, ...withoutWarning } = status ?? ({} as SshServerStatus);
     this.set({
+      status: status === null ? null : withoutWarning,
       host: entry.host, port: String(entry.port), user: entry.user, keyPath: entry.keyPath, auth: entry.auth,
       fieldErrors: {}, test: null, error: null, foreign: null,
+      passwordSaved: entry.auth === "password" && entry.passwordSaved, rememberPassword: entry.auth === "password" && entry.passwordSaved,
     });
+  }
+
+  /**
+   * The dialog was closed or cancelled: every answer still on its way is dropped (a scoped run returns null), so a late
+   * `restart_required` cannot make the closed form switch the app. The host call itself cannot be recalled.
+   */
+  cancel(): void {
+    this.#generation += 1;
+  }
+
+  /** The "Remember password in Keychain" checkbox. */
+  setRemember(remember: boolean): void {
+    this.set({ rememberPassword: remember });
   }
 
   /**
@@ -386,8 +447,10 @@ export class SshServerModel extends Store<SshServerState> {
     this.set({ busy: "test", error: null, test: null });
     const generation = this.#generation;
     try {
-      const test = await this.#io.test(this.target(), password);
+      const options = this.#passwordOptions(password);
+      const test = await (options === undefined ? this.#io.test(this.target(), password) : this.#io.test(this.target(), password, options));
       if (generation !== this.#generation) return;
+      // A Test never changes the Keychain (the host applies the checkbox only after a connect), so the flag stays.
       this.set({ test, error: null });
     } catch (e) {
       if (generation !== this.#generation) return;
@@ -411,7 +474,8 @@ export class SshServerModel extends Store<SshServerState> {
     try {
       const test = await this.#io.confirm(this.target(), last.hostKeyType, last.fingerprint);
       if (generation !== this.#generation) return;
-      this.set({ test, error: null });
+      // The host forgets the passwords saved for a server whose key was replaced: the next sign-in is typed.
+      this.set(last.changed ? { test, error: null, passwordSaved: false } : { test, error: null });
     } catch (e) {
       if (generation !== this.#generation) return;
       this.set({ error: sshServerErrorText(e) });
@@ -427,6 +491,7 @@ export class SshServerModel extends Store<SshServerState> {
       const saved = await this.#io.saved();
       if (generation === this.#generation && saved.host.length > 0) {
         this.set({ host: saved.host, port: String(saved.port), user: saved.user, keyPath: saved.keyPath, auth: saved.auth, test: null });
+        await this.#loadPasswordFlag(generation);
       }
     } catch {
       // Nothing saved, or the host could not read it: the form starts empty and the user enters the server again.
@@ -434,27 +499,75 @@ export class SshServerModel extends Store<SshServerState> {
     await this.refreshStatus();
   }
 
+  /** Whether the saved server has a password in the Keychain, read from the recent list (never from the Keychain). */
+  async #loadPasswordFlag(generation: number): Promise<void> {
+    try {
+      const s = this.getState();
+      const entry = (await this.#io.recent()).find((e) => e.host === s.host && e.port === Number(s.port) && e.user === s.user);
+      if (generation === this.#generation && entry !== undefined) {
+        this.set({ passwordSaved: entry.passwordSaved, rememberPassword: entry.passwordSaved });
+      }
+    } catch {
+      // An older host has no recent list: no password is remembered.
+    }
+  }
+
+  /** What the host needs to know about the password for this call; undefined when there is nothing to say. */
+  #passwordOptions(password: string | undefined, takeOver = false): SshPasswordOptions | undefined {
+    const s = this.getState();
+    const options: SshPasswordOptions = {};
+    if (s.auth === "password") {
+      if (password === undefined && s.passwordSaved) options.useSaved = true;
+      options.remember = s.rememberPassword;
+    }
+    if (takeOver) options.takeOver = true;
+    return Object.keys(options).length > 0 ? options : undefined;
+  }
+
+  /** The Keychain choice was applied by the host after a good login: the saved flag now follows the checkbox. */
+  #syncPasswordFlag(): void {
+    const s = this.getState();
+    if (s.auth === "password" && s.passwordSaved !== s.rememberPassword) this.set({ passwordSaved: s.rememberPassword });
+  }
+
   /** The fingerprint prompt's "Trust this key": confirm the last test's key, then test again so the probe is filled in. */
   async trustAndTest(password?: string): Promise<void> {
+    const replacedKey = this.getState().test?.changed === true;
     await this.confirmFingerprint();
     if (this.getState().error !== null || this.getState().test?.trusted !== true) return;
+    // After a changed key the saved password is gone (the host forgot it): it must be typed again, never sent silently.
+    if (replacedKey && this.getState().auth === "password" && password === undefined) {
+      this.set({ error: sshServerErrorText({ code: "SSH_PASSWORD_REQUIRED", message: "" }) });
+      return;
+    }
     await this.test(password);
+  }
+
+  /**
+   * The one-Connect flow's host-key step: trust the key the user confirmed, probe the server, and connect. Any step
+   * that fails stops there with its error shown; the key is never trusted without the user's click on Trust.
+   */
+  async trustAndConnect(password?: string): Promise<SshServerStatus | null> {
+    await this.trustAndTest(password);
+    const state = this.getState();
+    if (state.error !== null || state.test?.trusted !== true || state.test.os === null) return null;
+    return this.connect(password);
   }
 
   /**
    * Connect for the reconnect prompt. After a restart the last test is gone, so the key is checked again first: a
    * changed key stops here and is shown, never connected silently.
    */
-  async connectWithTest(password?: string): Promise<SshServerStatus | null> {
+  async connectWithTest(password?: string, options: { takeOver?: boolean } = {}): Promise<SshServerStatus | null> {
     if (this.getState().test?.trusted !== true) {
       await this.test(password);
       if (this.getState().test?.trusted !== true) return null;
     }
-    return this.connect(password);
+    return this.connect(password, options);
   }
 
   /** Start the forward. Refused client-side until the last test trusts the host key. */
-  async connect(password?: string): Promise<SshServerStatus | null> {
+  async connect(password?: string, options: { takeOver?: boolean } = {}): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;
     if (!this.validate()) {
       this.set({ error: SSH_TEXT.checkFields });
@@ -465,7 +578,11 @@ export class SshServerModel extends Store<SshServerState> {
       return null;
     }
     const target = this.target();
-    return this.run("connect", () => this.#io.connect(target, password), true);
+    const passwordOptions = this.#passwordOptions(password, options.takeOver === true);
+    const status = await this.run("connect", () => (passwordOptions === undefined ? this.#io.connect(target, password) : this.#io.connect(target, password, passwordOptions)), true, "connect");
+    // A warning means the Keychain step failed: the box and the flag must not claim a saved password.
+    if (status !== null && !status.warning) this.#syncPasswordFlag();
+    return status;
   }
 
   refreshStatus(): Promise<SshServerStatus | null> {
@@ -526,7 +643,7 @@ export class SshServerModel extends Store<SshServerState> {
 
   /**
    * `scoped`: the answer is about the target it was asked for, so a change of target while it runs drops it.
-   * `foreignAction`: a stop or uninstall, whose SSH_CORE_FOREIGN answer asks for confirmation instead of showing an error.
+   * `foreignAction`: a stop, uninstall or connect, whose SSH_CORE_FOREIGN answer asks for confirmation (force, or Take over) instead of showing an error.
    */
   private async run(busy: SshServerBusy, action: () => Promise<SshServerStatus>, scoped = false, foreignAction: SshForeignAction | null = null): Promise<SshServerStatus | null> {
     if (this.getState().busy) return null;

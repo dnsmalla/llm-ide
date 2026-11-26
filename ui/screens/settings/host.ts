@@ -80,6 +80,8 @@ export interface SshServerStatus {
   error: string | null;
   /** False when this build holds no Linux server bundle, so SSH mode cannot connect. An older host omits it (read as true). */
   bundleAvailable: boolean;
+  /** Connect only: set when the connect worked but a Keychain step did not (a sentence to show; the connect stands). */
+  warning?: string | null;
 }
 
 /** What the host's `remote_ssh_test` reports after a successful connection. */

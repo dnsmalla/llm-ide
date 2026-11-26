@@ -3,17 +3,19 @@
 // file only connects them. The host answers come through `ssh.io`, never from this file.
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { useModel, useStore } from "../settings/context.tsx";
-import { SshServerModel, UNAVAILABLE_SSH_IO, type SshRecentServer, type SshServerIo } from "../settings/ssh-server-model.ts";
+import { SshServerModel, UNAVAILABLE_SSH_IO, sshServerErrorText, type SshRecentServer, type SshServerIo } from "../settings/ssh-server-model.ts";
 import { SshConnectCard } from "./SshConnectCard.tsx";
 import { SshConnectDialog } from "./SshConnectDialog.tsx";
 import { RecentSshServers } from "./RecentSshServers.tsx";
-import { connectRecentServer, loadRecent, recentKey, recentRowMessage } from "./ssh-recent.ts";
+import { connectRecentServer, loadRecent, recentKey, recentRowMessage, switchDecision } from "./ssh-recent.ts";
 
 /** What the Welcome page needs from the desktop host to connect to an SSH server. */
 export interface WelcomeSsh {
   io: SshServerIo;
   /** Saves the SSH mode and restarts the app. Called only when the user confirms the switch. */
   switchToServer: () => Promise<void>;
+  /** True while Loop work is running on this computer: the restart then asks first. Absent means unknown, so it asks. */
+  hasLiveWork?: () => boolean;
 }
 
 const NO_HOST_SWITCH = async (): Promise<void> => {
@@ -29,7 +31,8 @@ export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
   // The row whose action is running or whose result shows; null when none does.
   const [active, setActive] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<{ passwordOnly: boolean } | null>(null);
+  const [dialog, setDialog] = useState<{ passwordOnly: boolean; askSwitch?: boolean } | null>(null);
+  const hasLiveWork = ssh?.hasLiveWork ?? (() => true);
 
   // Reloaded after every connect, forget and edit, so the list shows what the host now remembers.
   const reloadRecent = useCallback(() => {
@@ -56,10 +59,21 @@ export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
     setNotice(null);
     const outcome = await connectRecentServer(m, entry);
     if (outcome === "connected") {
-      setActive(null);
+      // A warning stays on the row (see recentRowMessage); only a clean connect clears it.
+      if (!m.getState().status?.warning) setActive(null);
       setNotice(`Connected to ${entry.host}.`);
     } else if (outcome === "switch") {
-      setDialog({ passwordOnly: false });
+      // The restart is the only thing left. It asks (in the dialog) only when work is running on this computer.
+      if (switchDecision(hasLiveWork()) === "ask") {
+        setDialog({ passwordOnly: false, askSwitch: true });
+      } else {
+        try {
+          await switchToServer();
+        } catch (e) {
+          setActive(null);
+          setNotice(sshServerErrorText(e));
+        }
+      }
     } else if (outcome === "dialog") {
       setDialog({ passwordOnly: entry.auth === "password" });
     }
@@ -108,6 +122,8 @@ export function SshWelcome({ ssh }: { ssh?: WelcomeSsh }): ReactNode {
             reloadRecent();
           }}
           onSwitch={switchToServer}
+          hasLiveWork={hasLiveWork}
+          askSwitch={dialog.askSwitch === true}
         />
       ) : null}
     </>

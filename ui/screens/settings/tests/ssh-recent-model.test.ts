@@ -11,7 +11,7 @@ import {
 } from "../ssh-server-model.ts";
 import type { SshServerTest } from "../host.ts";
 
-const entry: SshRecentServer = { host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/me/.ssh/id_ed25519", auth: "key", lastUsed: 1700000000000 };
+const entry: SshRecentServer = { host: "server.example.com", port: 22, user: "deploy", keyPath: "/home/me/.ssh/id_ed25519", auth: "key", lastUsed: 1700000000000, passwordSaved: false };
 /** A host stand-in whose answer is untyped, as the real host's is; the io decodes it. */
 function fakeInvoke(fn: (command: string, args?: Record<string, unknown>) => Promise<unknown>): SshInvoke {
   return (command, args) => fn(command, args) as Promise<never>;

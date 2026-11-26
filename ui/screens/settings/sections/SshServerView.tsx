@@ -84,7 +84,7 @@ export function SshServerView({ m, s, password, onPassword, dialog, onDialog, on
         />
       ) : null}
       {/* The host refused a stop or uninstall because another computer started the core: only an explicit "anyway" repeats it. */}
-      {s.foreign !== null ? (
+      {s.foreign === "stop" || s.foreign === "uninstall" ? (
         <div className="st-dialog" role="alertdialog" aria-label="Another computer started the server">
           <StatusBanner severity="warning" message={SSH_FOREIGN_TEXT} />
           <div className="st-row">

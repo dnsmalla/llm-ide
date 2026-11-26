@@ -36,15 +36,30 @@ You can connect from the Welcome screen or from Settings. Both use the same form
 ### From the Welcome screen
 
 1. Press **Connect to SSH server**, then **Connect…**. The dialog opens over the Welcome screen.
-2. Enter the server's details and choose the login method, as described below. The dialog runs the same
-   Test and Connect steps as Settings.
-3. When the connection works, the dialog asks **Switch to this server now?**. Connect has already saved the
-   server and its host key, but not the mode, so the app is still local at this point. If the app is already in
-   SSH server mode, Connect attaches at once and there is nothing to switch.
-   - **Switch**: restarts the app into SSH server mode for this session, and the server home opens. SSH mode
-     lasts for this session only (see [Start screen](#start-screen)).
+2. Enter the server's details and choose the login method, as described below, then press **Connect**. There is
+   no separate Test button. The dialog shows each step as it runs:
+   - **Checking the server…** The app reads the server's host key. For a server it has not seen, the dialog shows
+     the fingerprint and waits for you to press **Trust this key** and confirm; after that it carries on by itself.
+   - The facts box appears as soon as the check returns: system, glibc, free disk, the installed server part
+     version and Claude.
+   - **Installing the server part, starting it and connecting…** (or **Updating the server part if needed, …**
+     when a version is already installed). The host runs these as one step, so the dialog shows one line.
+   - An error appears under the facts box in plain words, with what to do next.
+3. When the connection works the app restarts into SSH server mode for this session and the server home opens.
+   The restart ends Loop work running on this computer, so the dialog asks **Switch to this server now?** only
+   when Loop work is running or queued; with nothing running, Connect itself was your answer. If the app is
+   already in SSH server mode, Connect attaches at once and there is nothing to switch.
+   - **Switch** (when asked): restarts the app. SSH mode lasts for this session only (see [Start screen](#start-screen)).
    - **Cancel**: changes nothing. The app stays local, and the next start is local too. The server stays saved.
-     To switch later, connect again (from Welcome or Settings) and choose **Switch**.
+     To switch later, connect again (from Welcome or Settings).
+
+### A server part from an earlier session is still running
+
+If the server part on the account was not started by this desktop's current session record (another computer
+started it, or this computer did before its app data folder was reset), Connect cannot tell it is yours and stops
+with a question: **A server part from an earlier session is still running on this account … Taking over stops it;
+any work running in it ends.** Press **Take over** to stop it and continue the same Connect, or **Cancel** to leave
+it running. The app never takes over without that click, and the host key is still checked first.
 
 ### Start screen
 
@@ -61,11 +76,14 @@ stays SSH. The next start then opens the server again, and **Close server** does
 
 ### Recent SSH servers
 
-The Welcome screen lists up to 10 saved servers, most recent first, under **Connect to SSH server**. **Connect**
-on a row connects at once for a key login. A password login opens the dialog and asks only for the password. If the
-app must restart to use the server, the dialog offers **Switch to this server now**. **Edit** opens the dialog
-filled in. **Forget** removes the server, its recent folders, and its saved host key, unless another saved
-server uses the same host. **Connect to SSH server…** opens the dialog for a new server.
+The Welcome screen lists up to 10 saved servers, most recent first, under **Connect to SSH server**. A server is
+saved as soon as its host key is trusted or its check works, so a later failure does not lose it. **Connect** on a
+row connects in one click for a key login and for a password login whose password is in the Keychain (the row says
+**Password (in Keychain)**). Any other password login opens the dialog and asks only for the password. A host key
+that changed, a server part to take over, or a remembered password the server now refuses also opens the dialog.
+**Edit** opens the dialog filled in. **Forget** removes the server, its recent folders, its saved host key
+(unless another saved server uses the same host) and its remembered password. **Connect to SSH server…** opens
+the dialog for a new server.
 
 ### From Settings
 
@@ -74,22 +92,24 @@ server uses the same host. **Connect to SSH server…** opens the dialog for a n
    from `~/.ssh/config` cannot be used: the app's key scan cannot resolve it.
 3. Choose how you log in: **Key file** (enter the absolute path to the private key, for example
    `/Users/alice/.ssh/id_ed25519`) or **Password**.
-4. Press **Test**. The app connects only to read the server's host key and shows its fingerprint.
-   Nothing is installed yet.
+4. Press **Connect**. The app first connects only to read the server's host key. For a new server it shows the
+   fingerprint; nothing is installed yet.
 5. Compare the fingerprint with the one the server's operator gives you, then press **Trust this key**
-   and confirm the dialog. The app saves the key and refuses any other key for this server from now on.
-6. Press **Test** again. The app logs in and shows what it found: the operating system and architecture,
-   the free disk space, the installed core version, and whether the Claude CLI is installed. The app checks
-   only that `claude --version` runs, not that you are signed in. With password login, this step asks for
-   the password.
-7. Press **Connect**. The app uploads the core only when the server's current release is another version,
-   checks the upload's SHA-256 on the server, starts the core, opens the forward and checks that the core
-   it reached is the one it started.
+   and confirm the dialog. The app saves the key, refuses any other key for this server from now on, and carries on.
+6. The app logs in and shows what it found: the operating system and architecture, the free disk space, the
+   installed core version, and whether the Claude CLI is installed. The app checks only that `claude --version`
+   runs, not that you are signed in.
+7. The app uploads the core only when the server's current release is another version, checks the upload's
+   SHA-256 on the server, starts the core, opens the forward and checks that the core it reached is the one it
+   started. If a server part from an earlier session is running, it asks before taking over (see above).
 
-Connect saves the server, its host key and its entry in the recent list. It does not change the mode. To use
+Connect saves the server, its host key and its entry in the recent list (the entry is written earlier, when the
+host key is trusted). It does not change the mode. To use
 the server, choose **Switch to this server now** (Welcome screen) or the same switch in Settings. That saves SSH
-server mode and restarts the app into SSH mode for this session. The app restarts only after you confirm the
-switch. If you cancel, the app keeps its current mode. The next start after that opens the local Welcome screen.
+server mode and restarts the app into SSH mode for this session. In the Welcome dialog the switch happens by itself
+after Connect; it asks first only when Loop work is running on this computer, because the restart ends that work.
+If you cancel, the app keeps its current mode, and a Connect still running when you cancel does not restart the app.
+The next start after that opens the local Welcome screen.
 
 ## Login methods
 
@@ -101,12 +121,32 @@ copies the key.
 
 ### Password
 
-The password is typed in the app and kept in memory for this run of the app only. It is never saved in
-the app's settings, the OS keychain, a log, a command line or an environment variable. The app hands it to
-the system `ssh` through a one-time helper. Reconnects during the same run reuse it. After you restart the
-app, a password connection asks for the password again.
+The password is typed in the app. By default it is kept in memory for this run only and is never saved in the
+app's settings, a log, a command line or an environment variable. The app hands it to the system `ssh` through a
+one-time helper. Reconnects during the same run reuse it.
 
-The password is used for Test (after the key is trusted), Connect, Stop server and Uninstall.
+Tick **Remember password in Keychain** (unticked by default) to keep it. After the first successful sign-in, the
+host stores the password in the same single Keychain item the app already uses for its other secrets (one more
+entry in that item, keyed by `user@host:port`), so there is no new Keychain item and no new prompt. The window
+never receives a stored password back: it only sends "use the saved one", and the host reads it when it connects.
+The recent list stores only a flag that a password exists, not the password. Connecting a remembered server from the
+list then takes one click. Untick the box on a later connect, or choose **Forget** on the server, to remove it.
+
+Keychain details:
+
+- A Test never changes the Keychain. The tick box is applied only after a Connect that worked.
+- If Connect works but the Keychain refuses the save, the connection stays up and the dialog says "Connected, but the
+  password could not be saved in Keychain."
+- When you trust a different host key for a server, the passwords saved for that server (every login on that host and
+  port) are removed, and you type the password again. A saved password is never sent to a server behind a new key. The
+  same happens when a login with a saved password has no stored host key (the app keeps the 32 newest keys, so an old
+  one can drop out): trusting the key again means typing the password again.
+- A saved password is read only after the server shows the pinned host key.
+- The password is removed when its server is pushed out of the recent list (it keeps the 10 newest) and when the login
+  is switched to a key.
+
+The password is used for Connect, Stop server and Uninstall. On a platform without a single shared Keychain item,
+each remembered password is its own Keychain entry.
 
 ### Switch from a password to a key
 
