@@ -15,6 +15,7 @@ import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
+import { fetchRoutedLoopModel, stepModel } from "./step-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -52,6 +53,8 @@ export interface LiveRun {
     startedAt: string | null;
     /** What the run does inside the current step while its AI review runs; null otherwise. */
     substate: "reviewing" | "fixing review" | null;
+    /** The model the running agent step uses; null for shell steps, finished steps or unknown routing. Display only. */
+    model: string | null;
   } | null;
 }
 
@@ -551,8 +554,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null };
+  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null, model: null };
   run.live.progress = progress;
+  // Not awaited: the routing read may wait for a CLI probe, and a label must never delay the run's first step.
+  let routed: string | null = null;
+  void fetchRoutedLoopModel(d.core).then((m) => { routed = m; });
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
     else if (e.type === "stage-start") {
@@ -561,9 +567,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
       progress.substate = null;
+      progress.model = e.stage.kind === "skill" ? stepModel(routed, "step") : null;
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {
+      progress.model = null;
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = e.ok ? "passed" : "failed";
       try {
@@ -575,8 +583,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
     } else if (e.type === "step-review") {
       progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
+      progress.model = stepModel(routed, "step");
     } else if (e.type === "step-review-result") {
       progress.substate = null;
+      progress.model = null;
     } else if (e.type === "loopback") {
       // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
       const row = progress.stages.find((r) => r.id === e.stage.id);
@@ -584,6 +594,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.substate = null;
     } else if (e.type === "repair") {
       progress.repairs += 1;
+      progress.model = stepModel(routed, "repair", config.repairModel);
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row && row.state !== "passed") row.state = "repaired";
     }

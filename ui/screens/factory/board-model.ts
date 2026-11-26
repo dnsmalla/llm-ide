@@ -479,13 +479,13 @@ export function formatDuration(seconds: number): string {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 }
 
-/** One line for a live card: `Implement · 3 of 8 · round 2 of 3 · repair 1 · 4m 12s`. */
+/** One line for a live card: `Implement · claude-opus-5-5 · 3 of 8 · round 2 of 3 · repair 1 · 4m 12s`. */
 export function progressLabel(
-  p: { stageName: string | null; stageIndex: number; stageCount: number; iteration: number; maxIterations?: number; repairs: number; startedAt: string | null; substate?: string | null },
+  p: { stageName: string | null; stageIndex: number; stageCount: number; iteration: number; maxIterations?: number; repairs: number; startedAt: string | null; substate?: string | null; model?: string | null },
   nowMs = Date.now(),
 ): string {
   // The sub-state sits between the step name and its position, so the card reads "Implement · reviewing · 3 of 8".
-  const stage = p.stageName ? `${p.stageName}${p.substate ? ` · ${p.substate}` : ""} · ${p.stageIndex} of ${p.stageCount}` : p.iteration > 0 ? `Iteration ${p.iteration}` : "Starting";
+  const stage = p.stageName ? `${p.stageName}${p.model ? ` · ${p.model}` : ""}${p.substate ? ` · ${p.substate}` : ""} · ${p.stageIndex} of ${p.stageCount}` : p.iteration > 0 ? `Iteration ${p.iteration}` : "Starting";
   const parts = [stage];
   if (p.stageName && p.iteration > 0) parts.push(p.maxIterations ? `round ${p.iteration} of ${p.maxIterations}` : `iter ${p.iteration}`);
   if (p.repairs > 0) parts.push(`repair ${p.repairs}`);

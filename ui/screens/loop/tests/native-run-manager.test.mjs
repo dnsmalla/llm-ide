@@ -548,6 +548,24 @@ test("LiveRun.progress follows the runner events", async () => {
   assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.repairs, 1);
 });
 
+test("the running agent step carries the routed model and clears it when the step ends", async () => {
+  let emit;
+  setup({
+    core: { async request(path) { return path === "/kb/routing-tiers" ? { tiers: { strong: { model: "claude-opus-5-5" } }, featureStatus: { loop: { usable: true, tier: "strong" } } } : {}; } },
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const model = () => rm.liveRuns().find((r) => r.runId === a).progress.model;
+  const skill = { id: "s1", name: "Implement", kind: "skill" };
+  emit({ type: "stage-start", stage: skill, index: 1, count: 8, iteration: 1 });
+  assert.equal(model(), "claude-opus-5-5");
+  emit({ type: "stage-result", stage: skill, ok: true, iteration: 1, durationMs: 1 });
+  assert.equal(model(), null);
+  emit({ type: "stage-start", stage: { id: "s2", name: "Verify", kind: "shellCommand" }, index: 2, count: 8, iteration: 1 });
+  assert.equal(model(), null);
+});
+
 test("a step review sets the live sub-state and its verdicts reach the record, findings capped at 2000", async () => {
   let emit;
   setup({ runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });
