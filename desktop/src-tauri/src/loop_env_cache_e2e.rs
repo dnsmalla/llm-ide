@@ -65,6 +65,13 @@ fn env_cache_e2e_on_a_real_project() {
     let again = prepare_gated(&project, &wt_path, run_id, &loop_id, Some(1800), &store, None).unwrap();
     let after = crate::loop_runner::run_command_keyed(&wt_path, "command -v pytest", Some(30), run_id).unwrap();
     println!("[resume] before: {} | prepare: {} in {:?} | after: {}", before.stdout.trim(), again.status, t.elapsed(), after.stdout.trim());
+    // The restore copies the cached venv into the worktree, so a resumed run must resolve pytest from that
+    // worktree-local `.venv` (not a system pytest); `before` is only printed because it may legitimately differ.
+    let resolved = after.stdout.trim();
+    assert!(
+        resolved.ends_with(".venv/bin/pytest") && Path::new(resolved).starts_with(&wt_path),
+        "after a resume pytest must resolve from the restored cache venv in the worktree, got: {resolved:?}"
+    );
     let cache = cache_root(&project);
     for e in std::fs::read_dir(&cache).unwrap().flatten() {
         println!("cache entry: {}", e.file_name().to_string_lossy());
