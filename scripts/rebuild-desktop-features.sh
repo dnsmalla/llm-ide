@@ -40,8 +40,9 @@ trap finish EXIT
 {
   echo
   echo "=== rebuild $(date) features=$FEATURES app-pid=$PID ==="
+  # --verbose: this log is the only record of an in-app rebuild, so it keeps every tool's full output.
   CARGO_TARGET_DIR="$CACHE" LLMIDE_BUILD_FEATURES="$FEATURES" LLMIDE_BUILD_OUT="$STAGE" \
-    "$ROOT/scripts/build-desktop-mac.sh" 2>&1
+    "$ROOT/scripts/build-desktop-mac.sh" --verbose 2>&1
 } >>"$LOG" 2>&1
 
 NEW="$STAGE/LLM-IDE.app"

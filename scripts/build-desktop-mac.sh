@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Builds LLM-IDE.app (the Tauri desktop app) for THIS Mac, verifies it, and prints how to open it.
 #
-#   scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke]
+#   scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke] [--verbose]
 #
 #   --dmg          also make LLM-IDE-<version>-<arch>.dmg next to the .app (hdiutil, no Finder scripting)
 #   --skip-checks  skip `npm run check:security` before the build
 #   --no-smoke     skip the core smoke test and the shell e2e suite against the core inside the built app
+#   --verbose      stream every tool's output (also LLMIDE_BUILD_VERBOSE=1); by default each step prints one line
+#                  and the full output goes to desktop/src-tauri/target/build-desktop.log
 #
 # Idempotent: every run restages the core from scratch and rebuilds; nothing outside desktop/ is touched.
 # Needs network on the first run (pinned official Node download, npm ci, cargo crates). Nothing here launches
@@ -26,12 +28,13 @@ set -euo pipefail
 RUST_SYSROOT="$(rustc --print sysroot)"
 RUST_LIB="${RUST_SYSROOT}/lib"
 
-DMG=0; CHECKS=1; SMOKE=1
+DMG=0; CHECKS=1; SMOKE=1; VERBOSE="${LLMIDE_BUILD_VERBOSE:-0}"
 for a in "$@"; do
   case "$a" in
     --dmg) DMG=1 ;;
     --skip-checks) CHECKS=0 ;;
     --no-smoke) SMOKE=0 ;;
+    --verbose) VERBOSE=1 ;;
     -h|--help) awk 'NR>1 && /^#/ {print; next} NR>1 {exit}' "$0"; exit 0 ;;
     *) echo "unknown option: $a" >&2; exit 2 ;;
   esac
@@ -46,7 +49,44 @@ case "$(uname -m)" in
   *) echo "unsupported CPU: $(uname -m)" >&2; exit 2 ;;
 esac
 
-step() { printf '\n==> %s\n' "$*"; }
+# A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
+TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
+LOG_FILE="$TARGET_DIR/build-desktop.log"
+mkdir -p "$TARGET_DIR"
+: >"$LOG_FILE"
+export LLMIDE_BUILD_VERBOSE="$VERBOSE" # stage-core.mjs prints its size table only when verbose
+BUILD_START=$SECONDS
+
+# run <label> <command...>: one line per step ("label ... ok 12s"); the command's output goes to $LOG_FILE.
+# On failure the log tail is shown and the build stops. The command runs in a subshell with its own `set -e`, and
+# its status is read with $? after `set +e`: inside `if`, `||` or `&&` bash ignores errexit even in the subshell,
+# which would let a multi-command step carry on past a failed command.
+run() {
+  local label="$1"; shift
+  local t0=$SECONDS code=0 ticker=""
+  if [ "$VERBOSE" = 1 ]; then
+    printf '\n==> %s\n' "$label"
+    set +e; ( set -e; "$@" ); code=$?; set -e
+  else
+    printf '==> %s\n' "$label" >>"$LOG_FILE"
+    printf '  %-56s ' "$label"
+    if [ -t 1 ]; then # live elapsed time, so a multi-minute step does not look hung
+      ( while sleep 1; do printf '%4ss\b\b\b\b\b' $((SECONDS - t0)); done ) & ticker=$!
+    fi
+    set +e; ( set -e; "$@" ) >>"$LOG_FILE" 2>&1; code=$?; set -e
+    [ -n "$ticker" ] && { kill "$ticker" 2>/dev/null; wait "$ticker" 2>/dev/null || true; }
+    if [ "$code" = 0 ]; then printf 'ok %4ss\n' $((SECONDS - t0)); else printf 'FAILED\n'; fi
+  fi
+  if [ "$code" != 0 ]; then
+    if [ "$VERBOSE" != 1 ]; then
+      echo; tail -n 40 "$LOG_FILE" | sed 's/^/    /'; echo
+      echo "full log: $LOG_FILE" >&2
+    fi
+    echo "build failed at: $label (exit $code)" >&2
+    exit "$code"
+  fi
+}
+info() { if [ "$VERBOSE" = 1 ]; then echo "$*"; else echo "$*" >>"$LOG_FILE"; fi; }
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 ($2)" >&2; exit 2; }; }
 
 # Prefer the rustup stable toolchain's own cargo: a `cargo` earlier on PATH can be a broken rustup proxy
@@ -57,13 +97,13 @@ done
 [ -x "$HOME/.cargo/bin/cargo" ] && PATH="$PATH:$HOME/.cargo/bin"
 need node "install Node 22+"; need npm "comes with Node"; need cargo "install Rust with rustup (https://rustup.rs)"
 need codesign "Xcode command line tools: xcode-select --install"; need plutil "macOS"
-echo "node $(node -v), $(cargo --version), target $TARGET"
+echo "LLM-IDE desktop build: $TARGET, node $(node -v), $(cargo --version | cut -d' ' -f1-2)"
+[ "$VERBOSE" = 1 ] || echo "log: $LOG_FILE"
 
 npm_ci_if_needed() { # dir
   local dir="$1"
   if [ ! -d "$dir/node_modules" ] || [ "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]; then
-    step "npm ci in ${dir#$ROOT/}"
-    (cd "$dir" && npm ci --no-audit --no-fund)
+    run "Install dependencies (${dir#$ROOT/})" bash -c 'cd "$1" && npm ci --no-audit --no-fund' _ "$dir"
   fi
 }
 npm_ci_if_needed "$ROOT/ui/kit"
@@ -71,23 +111,23 @@ npm_ci_if_needed "$DESKTOP"
 # desktop/vite.config.ts aliases three into graph-kit/web/node_modules
 npm_ci_if_needed "$ROOT/graph-kit/web"
 
-step "Stage the core (pinned official Node, production dependencies, no SDK claude binary)"
-LLMIDE_STAGE_RELEASE=1 node "$DESKTOP/scripts/stage-core.mjs" --target "$TARGET"
+run "Stage the core (pinned Node + production dependencies)" \
+  env LLMIDE_STAGE_RELEASE=1 node "$DESKTOP/scripts/stage-core.mjs" --target "$TARGET"
 
 # Always, even with the other checks skipped: the product build must not carry the spike/bench commands.
-step "Product security gate (no spike feature, capabilities least-privilege)"
-(cd "$DESKTOP" && npm run --silent check:security:product)
+run "Product security gate (no spike, least-privilege)" bash -c 'cd "$1" && npm run --silent check:security:product' _ "$DESKTOP"
 
 if [ "$CHECKS" = 1 ]; then
-  step "Security checks (capability manifest, DOMPurify pin)"
-  (cd "$DESKTOP" && npm run --silent check:security)
+  run "Security checks (capabilities, DOMPurify pin)" bash -c 'cd "$1" && npm run --silent check:security' _ "$DESKTOP"
 fi
 
-step "Build the app (frontend + release Rust binary; the first cargo build takes several minutes)"
-# A rebuild from inside the app sets CARGO_TARGET_DIR so it never writes into the running bundle.
-TARGET_DIR="${CARGO_TARGET_DIR:-$DESKTOP/src-tauri/target}"
-echo "features: ${LLMIDE_BUILD_FEATURES:-all}"
-(cd "$DESKTOP" && DYLD_LIBRARY_PATH="${RUST_LIB}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" CARGO_TARGET_DIR="$TARGET_DIR" node node_modules/@tauri-apps/cli/tauri.js build --bundles app)
+info "features: ${LLMIDE_BUILD_FEATURES:-all}"
+tauri_build() {
+  cd "$DESKTOP"
+  DYLD_LIBRARY_PATH="${RUST_LIB}${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}" CARGO_TARGET_DIR="$TARGET_DIR" \
+    node node_modules/@tauri-apps/cli/tauri.js build --bundles app
+}
+run "Build the app (frontend + release Rust binary)" tauri_build
 
 APP="$TARGET_DIR/release/bundle/macos/LLM-IDE.app"
 [ -d "$APP" ] || { echo "build finished but $APP is missing" >&2; exit 1; }
@@ -100,65 +140,76 @@ if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
   chmod 600 "$APP/Contents/Resources/source-root.txt"
 fi
 
-step "Sign"
 # Re-sign the whole bundle in one pass so the seal covers the bundled core. No hardened runtime (see header).
 IDENTITY="${LLMIDE_CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ] && [ "${LLMIDE_ADHOC_SIGN:-0}" != "1" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development:/{print $2; exit}')"
 fi
-if [ -n "$IDENTITY" ]; then
-  echo "identity: $IDENTITY"
-  codesign --force --deep --sign "$IDENTITY" "$APP"
-else
-  echo "identity: ad-hoc (no Apple Development identity; LLMIDE_ADHOC_SIGN=1 forces this)"
-  codesign --force --deep --sign - "$APP"
-fi
-codesign --verify --deep --strict --verbose=2 "$APP"
+SIGN_AS="${IDENTITY:--}"
+SIGN_NAME="${IDENTITY:-ad-hoc}"
+sign_app() {
+  info "identity: $SIGN_NAME"
+  codesign --force --deep --sign "$SIGN_AS" "$APP"
+  codesign --verify --deep --strict --verbose=2 "$APP"
+}
+run "Sign ($SIGN_NAME)" sign_app
 
-step "Verify the bundle"
-node "$DESKTOP/scripts/verify-bundle.mjs" "$APP"
-# The spike commands are compiled out without `--features spike`; prove it on the finished binary.
-for bin in "$APP"/Contents/MacOS/*; do
-  if grep -aq "LLMIDE_POC_AUTOBENCH" "$bin"; then
-    echo "product binary $bin still contains the spike/autobench code (built with --features spike?)" >&2
-    exit 1
-  fi
-done
-echo "bundle id: $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")"
-echo "app data:  ~/Library/Application Support/llm-ide-desktop"
+verify_app() {
+  node "$DESKTOP/scripts/verify-bundle.mjs" "$APP"
+  # The spike commands are compiled out without `--features spike`; prove it on the finished binary.
+  for bin in "$APP"/Contents/MacOS/*; do
+    if grep -aq "LLMIDE_POC_AUTOBENCH" "$bin"; then
+      echo "product binary $bin still contains the spike/autobench code (built with --features spike?)" >&2
+      exit 1
+    fi
+  done
+  echo "bundle id: $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")"
+}
+run "Verify the bundle" verify_app
 
 if [ "$SMOKE" = 1 ]; then
-  step "Smoke-test the core inside the app (health + nonce, DB under the data dir, claude probe, clean stop)"
-  LLMIDE_CORE_DIR="$APP/Contents/Resources/core" node "$DESKTOP/scripts/smoke-core.mjs"
-  step "Run the shell end-to-end suite against the core inside the app (fake engine, no model call)"
-  (cd "$DESKTOP" && LLMIDE_E2E_BUNDLE="$APP/Contents/Resources/core" node --test --experimental-strip-types ../ui/screens/shell/tests/e2e/e2e.test.mjs)
+  run "Smoke-test the bundled core" env LLMIDE_CORE_DIR="$APP/Contents/Resources/core" node "$DESKTOP/scripts/smoke-core.mjs"
+  e2e() {
+    cd "$DESKTOP"
+    LLMIDE_E2E_BUNDLE="$APP/Contents/Resources/core" node --test --experimental-strip-types ../ui/screens/shell/tests/e2e/e2e.test.mjs
+  }
+  run "End-to-end suite against the bundled core" e2e
 fi
 
 if [ -n "${LLMIDE_BUILD_OUT:-}" ]; then
-  step "Copy the finished app to $LLMIDE_BUILD_OUT (the rebuild script swaps it in)"
-  mkdir -p "$LLMIDE_BUILD_OUT"
-  rm -rf "$LLMIDE_BUILD_OUT/LLM-IDE.app"
-  ditto "$APP" "$LLMIDE_BUILD_OUT/LLM-IDE.app"
+  copy_out() {
+    mkdir -p "$LLMIDE_BUILD_OUT"
+    rm -rf "$LLMIDE_BUILD_OUT/LLM-IDE.app"
+    ditto "$APP" "$LLMIDE_BUILD_OUT/LLM-IDE.app"
+  }
+  run "Copy the app to $LLMIDE_BUILD_OUT" copy_out
 fi
 
+DMG_OUT=""
 if [ "$DMG" = 1 ]; then
-  step "Make the .dmg"
   VERSION="$(node -p "require('$DESKTOP/src-tauri/tauri.conf.json').version")"
-  OUT="$(dirname "$APP")/LLM-IDE-$VERSION-$(uname -m).dmg"
-  STAGE="$(mktemp -d)"
-  cp -R "$APP" "$STAGE/"; ln -s /Applications "$STAGE/Applications"
-  rm -f "$OUT"
-  hdiutil create -quiet -volname "LLM-IDE" -srcfolder "$STAGE" -format UDZO -ov "$OUT"
-  rm -rf "$STAGE"
-  echo "dmg: $OUT ($(du -h "$OUT" | cut -f1))"
+  DMG_OUT="$(dirname "$APP")/LLM-IDE-$VERSION-$(uname -m).dmg"
+  make_dmg() {
+    local stage; stage="$(mktemp -d)"
+    cp -R "$APP" "$stage/"; ln -s /Applications "$stage/Applications"
+    rm -f "$DMG_OUT"
+    hdiutil create -quiet -volname "LLM-IDE" -srcfolder "$stage" -format UDZO -ov "$DMG_OUT"
+    rm -rf "$stage"
+  }
+  run "Make the .dmg" make_dmg
 fi
 
-step "Done"
-echo "app:  $APP ($(du -sh "$APP" | cut -f1))"
+ELAPSED=$((SECONDS - BUILD_START))
 echo
-echo "Open it with:"
-echo "  open \"$APP\""
+echo "Built in $((ELAPSED / 60))m $((ELAPSED % 60))s"
+echo "  app:  $APP ($(du -sh "$APP" | cut -f1))"
+[ -n "$DMG_OUT" ] && echo "  dmg:  $DMG_OUT ($(du -h "$DMG_OUT" | cut -f1))"
+[ "$VERBOSE" = 1 ] || echo "  log:  $LOG_FILE"
 echo
-echo "Built here, so macOS has not quarantined it. Only if you COPY it from another machine or download the .dmg, run:"
-echo "  xattr -dr com.apple.quarantine /Applications/LLM-IDE.app"
-echo "Then follow desktop/RUN-ON-MAC.md."
+echo "Open it with:  open \"$APP\""
+if [ "$VERBOSE" = 1 ]; then
+  echo
+  echo "Built here, so macOS has not quarantined it. Only if you COPY it from another machine or download the .dmg, run:"
+  echo "  xattr -dr com.apple.quarantine /Applications/LLM-IDE.app"
+  echo "Then follow desktop/RUN-ON-MAC.md."
+fi
