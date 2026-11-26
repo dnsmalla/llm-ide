@@ -912,3 +912,42 @@ test("the runner caps a raw config that skipped decode at 3 rounds", async () =>
   assert.equal(impl, 3);
   assert.equal(out.statusSummary, "Stopped after 3 rounds: tests still failing");
 });
+
+test("baseline: a Verify that already fails on the untouched tree stops the run before the code stage", async () => {
+  const asked = [];
+  let reviews = 0;
+  const out = await runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { asked.push(s.id); return { ok: true, output: "" }; },
+    repair: noRepair,
+    reviewStep: async () => { reviews += 1; return { verdict: "approve", findings: "" }; },
+    baselineCheck: async (stages) => { asked.push(`baseline:${stages.map((s) => s.id)}`); return { ok: false, stage: stages[0], output: "pytest aborted", costUsd: 0.5 }; },
+  }));
+  assert.deepEqual(asked, ["baseline:v"]);
+  assert.equal(reviews, 0);
+  assert.equal(out.passed, false);
+  assert.equal(out.stoppedAtLimit, true);
+  assert.equal(out.failedStage.id, "v");
+  assert.equal(out.costUsd, 0.5);
+  assert.equal(out.loopback.reason, "baseline");
+  assert.equal(out.loopback.stopped, true);
+  assert.match(out.loopback.findings, /pytest aborted/);
+  assert.equal(out.statusSummary, "Stopped: the tests already fail before any change");
+  assert.equal(runStatusCode(out), "stopped.limit");
+});
+
+test("baseline: a passing baseline runs once and leaves the loopback rounds as they were", async () => {
+  const withBaseline = [];
+  const without = [];
+  let baselineCalls = 0;
+  const run = (log, extra) => runNativeLoop(cfg3([code("impl", "Implement"), verify]), base({
+    async runStage(s) { log.push(s.id); return { ok: s.id !== "v", output: `fail ${log.length}` }; },
+    repair: noRepair,
+    ...extra,
+  }));
+  const a = await run(withBaseline, { baselineCheck: async () => { baselineCalls += 1; return null; } });
+  const b = await run(without, {});
+  assert.equal(baselineCalls, 1);
+  assert.deepEqual(withBaseline, without);
+  assert.equal(a.statusSummary, b.statusSummary);
+  assert.equal(a.loopback.reason, "tests");
+});

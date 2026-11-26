@@ -10,7 +10,7 @@ export type Column = "inbox" | "needsDecision" | "working" | "needsYou" | "ready
 
 export interface ShipComment { author: string; body: string; at: string; /** Posted by an integration, not a person. */ bot?: boolean }
 export interface ShipStatus { url: string; state: "open" | "merged" | "closed"; ci: "none" | "pending" | "success" | "failed"; ciSummary: string | null; comments: ShipComment[]; /** The MR's commits, oldest first; absent when the provider list could not be read. */ commits?: { sha: string }[] }
-export interface LoopbackFacts { rounds: number; maxRounds: number; reason: "tests" | "review" | "limit" | "nochange"; findings: string }
+export interface LoopbackFacts { rounds: number; maxRounds: number; reason: "tests" | "review" | "limit" | "nochange" | "baseline"; findings: string }
 /** The factory fields of one run record, as `decodeRunRecordFacts` reads them. */
 export interface RunRecordFacts {
   runId: string; mode: RunMode; statusCode: string; needsDecision: string | null;
@@ -125,7 +125,7 @@ function decodeLoopback(v: unknown): LoopbackFacts | null {
   if (!isRecord(v)) return null;
   const { rounds, maxRounds, reason, findings } = v;
   if (typeof rounds !== "number" || !Number.isFinite(rounds) || typeof maxRounds !== "number" || !Number.isFinite(maxRounds)) return null;
-  if (reason !== "tests" && reason !== "review" && reason !== "limit" && reason !== "nochange") return null;
+  if (reason !== "tests" && reason !== "review" && reason !== "limit" && reason !== "nochange" && reason !== "baseline") return null;
   // Findings are untrusted model/test output: cap them and strip control characters before the card renders them as text.
   return { rounds, maxRounds, reason, findings: typeof findings === "string" ? displayText(findings).slice(0, 4000) : "" };
 }

@@ -556,7 +556,7 @@ async function recordRoundFindings(ctx: StageExecContext, loop: LoopDefinition, 
 }
 
 /** The runner deps that execute stages for one run. Each call has its own halt state. */
-export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview" | "codeChanged"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
+export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pick<RunnerDeps, "runStage" | "repair" | "halt" | "haltIsError" | "snapshotBefore" | "reviewStep" | "noteUnresolvedReview" | "codeChanged" | "baselineCheck"> & { recordFindings(stage: LoopStage, entry: FindingsEntry): Promise<void> } {
   const halt: HaltState = { reason: null, isError: false };
   return {
     async runStage(s, prior, loopback) {
@@ -582,6 +582,18 @@ export function createStageDeps(ctx: StageExecContext, loop: LoopDefinition): Pi
     noteUnresolvedReview: (s, findings) => noteUnresolvedStep(ctx, s, findings),
     recordFindings: (_stage, entry) => recordRoundFindings(ctx, loop, entry),
     // Factory only: its work item may be no code task at all (closing issues), and a red baseline must not be repaired.
-    ...(isFactoryLoop(loop) ? { codeChanged: async () => changesCode(await runChangesNow(ctx)) } : {}),
+    ...(isFactoryLoop(loop) ? {
+      codeChanged: async () => changesCode(await runChangesNow(ctx)),
+      baselineCheck: async (verifyStages: LoopStage[]) => {
+        for (const stage of verifyStages) {
+          ctx.log(`$ Baseline: ${stage.name}`);
+          const r = await runOneStage(ctx, stage, loop, [], halt);
+          ctx.log(r.output);
+          ctx.log("");
+          if (!r.ok) return { ok: false, stage, output: r.output, costUsd: r.usage?.costUsd };
+        }
+        return null;
+      },
+    } : {}),
   };
 }

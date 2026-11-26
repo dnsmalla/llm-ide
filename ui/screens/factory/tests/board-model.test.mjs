@@ -463,3 +463,9 @@ test("a record with a nochange loopback keeps it on the card; an unknown reason 
   assert.deepEqual(decodeRunRecordFacts(record("nochange")).loopback, { rounds: 1, maxRounds: 3, reason: "nochange", findings: "Fatal Python error" });
   assert.equal(decodeRunRecordFacts(record("something else")).loopback, null);
 });
+
+test("a baseline loopback has its own headline and survives decoding", () => {
+  assert.equal(loopbackTitle({ rounds: 1, maxRounds: 3, reason: "baseline", findings: "" }), "Tests already fail before this run — fix them on the base branch first");
+  const record = { worktree: { runId: "20261125-095555-srghyh" }, loopback: { rounds: 1, maxRounds: 3, reason: "baseline", findings: "pytest aborted" } };
+  assert.equal(decodeRunRecordFacts(record).loopback.reason, "baseline");
+});

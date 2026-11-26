@@ -4,7 +4,7 @@
 // A stage that runs once per run (runsOncePerRun) is skipped in later iterations once it has passed.
 import { clampIterations, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { effectiveReviewAfter } from "./review.ts";
-import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, headAndTail, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, unchangedSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
+import { LOOPBACK_IDENTICAL_STOP, LOOPBACK_MAX_ROUNDS, LOOPBACK_STOPPED_CODE, failureSignature, findingsText, headAndTail, groupOfCode, groupOfVerify, loopbackGroups, stoppedSummary, unchangedSummary, baselineSummary, type FindingsEntry, type LoopbackContext, type LoopbackGroup, type LoopbackSummary } from "./loopback.ts";
 
 export interface StageRunResult { ok: boolean; output: string; durationMs?: number; usage?: { costUsd?: number } }
 
@@ -68,6 +68,11 @@ export interface RunnerDeps {
    * changed nothing stops the run at once instead of looping back. Null = cannot tell.
    */
   codeChanged?(): Promise<boolean | null>;
+  /**
+   * Runs a code group's Verify stages on the untouched tree, once per run, before the group's first code stage. Returns the
+   * first failure (the run then stops: the tests were red before any change), or null when they pass or cannot be run.
+   */
+  baselineCheck?(verifyStages: LoopStage[]): Promise<{ ok: boolean; stage: LoopStage; output: string; costUsd?: number } | null>;
   /** Typed run progress for the board; never parsed out of the log. */
   onProgress?(event: ProgressEvent): void;
   /** Waits `ms` (the stage pause). Default: a 100 ms-tick wait that ends early once `isCancelled` is true. */
@@ -179,6 +184,7 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
   const groupBaseline = new Map<string, StepSnapshot | null>();
   const groupAttempts = new Map<string, number>();
   const reviewDue = new Set<string>();
+  const baselineChecked = new Set<string>();
   /** Per Verify closer: whether the code step before it changed the project, as of right after that step (before Verify). */
   const groupCodeChanged = new Map<string, boolean | null>();
   const repairs = new Map<string, number>();
@@ -328,6 +334,23 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       // The baseline is taken before the stage writes anything, so its review sees only this stage's diff.
       const isReviewed = codeGroup === null && deps.reviewStep !== undefined && effectiveReviewAfter(stage) && !reviews.closed.has(stage.id);
       const baseline = isReviewed ? (deps.snapshotBefore ? await deps.snapshotBefore(stage) : null) : undefined;
+      if (codeGroup && groupHead && stage.id === groupHead.id && iteration === 1 && deps.baselineCheck && !baselineChecked.has(codeGroup.closerId)) {
+        baselineChecked.add(codeGroup.closerId);
+        const verifyStages = codeGroup.verifyIds.map((id) => stages.find((s) => s.id === id)).filter((s): s is LoopStage => s !== undefined);
+        const base = await Promise.resolve().then(() => deps.baselineCheck?.(verifyStages) ?? null).catch(() => null);
+        spentUsd += base?.costUsd ?? 0;
+        const haltAfterBaseline = haltedOutcome();
+        if (haltAfterBaseline) return haltAfterBaseline;
+        if (deps.isCancelled?.()) return cancelledOutcome();
+        if (base && !base.ok) {
+          const summary = baselineSummary();
+          deps.log(summary);
+          return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: base.stage, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: "baseline", findings: findingsText([{ round: iteration, source: "tests", text: headAndTail(base.output, 12_000) }]), stopped: true } };
+        }
+        if (config.maxCostUsd !== null && spentUsd >= config.maxCostUsd) {
+          return { passed: false, iterationsUsed, stages: outcomes, iterations, failedStage: stage, statusSummary: `cost ceiling reached ($${spentUsd.toFixed(2)} of $${config.maxCostUsd})`, costUsd: spentUsd };
+        }
+      }
       const t0 = Date.now();
       const loopbackContext: LoopbackContext | undefined = codeGroup && (groupFindings.get(codeGroup.closerId)?.length ?? 0) > 0 ? { round: iteration, maxRounds, findings: findingsText(groupFindings.get(codeGroup.closerId) ?? []) } : undefined;
       const result = await deps.runStage(stage, outcomes, loopbackContext);

@@ -7,7 +7,7 @@ import { effectiveReviewAfter } from "./review.ts";
 /** Status code of a run that used up its rounds (or budget) without passing; a warning state, never shipped. */
 export const LOOPBACK_STOPPED_CODE = "stopped.limit";
 
-export type LoopbackReason = "tests" | "review" | "limit" | "nochange";
+export type LoopbackReason = "tests" | "review" | "limit" | "nochange" | "baseline";
 
 export interface LoopbackSummary { rounds: number; maxRounds: number; reason: LoopbackReason; findings: string; stopped: boolean }
 /** What a code stage is told when it is re-run after a failed round. */
@@ -104,6 +104,11 @@ export function changesCode(paths: readonly string[] | null): boolean | null {
 /** A failed Verify after a code step that left the project's code as it was: another round could not fix anything. */
 export function unchangedSummary(): string {
   return "Stopped: this run changed no code and the tests fail";
+}
+
+/** The Verify already failed on the untouched tree, so no code step could have caused it. */
+export function baselineSummary(): string {
+  return "Stopped: the tests already fail before any change";
 }
 
 export function stoppedSummary(rounds: number, reason: "tests" | "review", unchanged = false): string {
