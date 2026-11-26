@@ -21,7 +21,10 @@ from pathlib import Path
 SPEC_DIR = Path("docs/spec")
 
 # Trees we treat as real repo source. A cited path must start with one of these.
-KNOWN_ROOTS = ("extension/", "mac/", "docs/", "kb/", ".github/", "core/")
+KNOWN_ROOTS = (
+    "extension/", "desktop/", "ui/", "schema/", "scripts/", "web/", "ios_app/",
+    "deploy/", "graph-kit/", "docs/", ".github/",
+)
 
 # Extensions that denote a real file (not a prose word with a dot).
 KNOWN_EXTS = (
