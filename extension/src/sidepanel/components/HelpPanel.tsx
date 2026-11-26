@@ -5,7 +5,7 @@ import type { TourFlow } from '../help/tour-model';
 
 interface Props {
   onClose: () => void;
-  onStartTour: (flow: TourFlow) => void;
+  onStartTour?: (flow: TourFlow) => void;
 }
 
 // Inline stroke icons (Feather-style, 24px grid) replacing the old emoji
@@ -276,7 +276,7 @@ export default function HelpPanel({ onClose, onStartTour }: Props) {
    OVERVIEW
    ================================================================ */
 
-function OverviewSection({ onStartTour }: { onStartTour: (flow: TourFlow) => void }) {
+function OverviewSection({ onStartTour }: { onStartTour?: (flow: TourFlow) => void }) {
   return (
     <div className="help-section">
       <h3>{OVERVIEW.heading}</h3>
@@ -325,11 +325,13 @@ function OverviewSection({ onStartTour }: { onStartTour: (flow: TourFlow) => voi
         </div>
       </div>
 
-      <div className="help-card">
-        <button type="button" className="btn btn-generate" onClick={() => onStartTour(RECORD_NOTES_TOUR)}>
-          Start tour →
-        </button>
-      </div>
+      {onStartTour && (
+        <div className="help-card">
+          <button type="button" className="btn btn-generate" onClick={() => onStartTour(RECORD_NOTES_TOUR)}>
+            Start tour →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

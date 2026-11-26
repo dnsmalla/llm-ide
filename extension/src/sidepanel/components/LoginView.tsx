@@ -129,8 +129,7 @@ export default function LoginView({ onLogin, onRegister, busy, error, registrati
         </button>
       </footer>
 
-      {/* No tour target exists before login (no tabs/recording UI yet), so this is a no-op here. */}
-      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} onStartTour={() => {}} />}
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
     </div>
   );
 }
