@@ -75,6 +75,12 @@ export function actionsFor(column: Column, note: string | null, process: { intak
   }
 }
 
+/** Done cards are link-only, except when the MR needs the user (CI failed or new review comments): without Send back
+ * and Open diff such a card would say it needs the user yet offer no way to act. Discard stays out on purpose. */
+function doneActions(note: string | null): CardAction[] {
+  return note === NOTE.ciFailed || note === NOTE.newComments || note === NOTE.ciFailedAndComments ? ["sendBack", "openDiff"] : [];
+}
+
 export const LANE_BACKLOG = "backlog";
 export const LANE_DONE = "done";
 /** Merged work leaves the board: Done holds finished work that is not merged yet. */
@@ -190,7 +196,7 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
     const f = facts.get(item.key) ?? EMPTY_FACTS;
     const lane = laneFor(column, f, steps);
     const request = lane === LANE_DONE ? requestLink(f.lastRecord?.ship?.url ?? null) : null;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane, ...(lane === LANE_DONE ? { request } : {}), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: lane === LANE_DONE ? [] : actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null, ...(note === NOTE.stoppedNoMr ? { loopback: f.lastRecord?.loopback ?? null } : {}), ...(f.lastRecord?.stepReviews ? { stepReviews: f.lastRecord.stepReviews } : {}) });
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane, ...(lane === LANE_DONE ? { request } : {}), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: lane === LANE_DONE ? doneActions(note) : actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null, ...(note === NOTE.stoppedNoMr ? { loopback: f.lastRecord?.loopback ?? null } : {}), ...(f.lastRecord?.stepReviews ? { stepReviews: f.lastRecord.stepReviews } : {}) });
   }
   return board;
 }

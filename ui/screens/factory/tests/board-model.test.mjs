@@ -491,7 +491,11 @@ test("Done means an MR exists: finished work without one stays in its last step 
   assert.deepEqual(cards("Review")[1].actions, ["openDiff", "ship", "discard"]);
   assert.deepEqual(cards("Review")[0].actions, ["approve", "requestChanges", "openDiff", "discard"]);
   assert.deepEqual(cards("Done").map((c) => c.key).sort(), ["issue:c", "issue:f", "issue:p"]);
-  for (const c of cards("Done")) assert.deepEqual(c.actions, []);
+  // Failed CI / new comments need the user: Send back + Open diff (no Discard); a plain open MR stays link-only.
+  const doneBy = (k) => cards("Done").find((c) => c.key === k);
+  assert.deepEqual(doneBy("issue:f").actions, ["sendBack", "openDiff"]);
+  assert.deepEqual(doneBy("issue:c").actions, ["sendBack", "openDiff"]);
+  assert.deepEqual(doneBy("issue:p").actions, []);
   assert.deepEqual(cards("Done").map((c) => c.request?.label).sort(), ["PR #1", "PR #2", "PR #3"]);
   assert.deepEqual(cards("Backlog").map((c) => c.key), ["issue:x"]);
   assert.ok(![...lanes.flatMap((l) => l.cards)].some((c) => c.key === "issue:m"), "merged leaves the board");
