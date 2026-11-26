@@ -566,6 +566,38 @@ test("the running agent step carries the routed model and clears it when the ste
   assert.equal(model(), null);
 });
 
+test("a routing read that lands after the first step started still labels that step", async () => {
+  let emit;
+  const routing = deferred();
+  setup({
+    core: { async request(path) { return path === "/kb/routing-tiers" ? routing.promise : {}; } },
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  const model = () => rm.liveRuns().find((r) => r.runId === a).progress.model;
+  emit({ type: "stage-start", stage: { id: "p", name: "Plan", kind: "skill" }, index: 1, count: 7, iteration: 1 });
+  assert.equal(model(), null);
+  routing.resolve({ tiers: { cheap: { model: "claude-haiku-5-5" } }, featureStatus: { loop: { usable: true, tier: "cheap" } } });
+  await settle();
+  assert.equal(model(), "Haiku 5.5");
+});
+
+test("a routing read that lands during a shell step labels nothing", async () => {
+  let emit;
+  const routing = deferred();
+  setup({
+    core: { async request(path) { return path === "/kb/routing-tiers" ? routing.promise : {}; } },
+    runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; },
+  });
+  const a = rm.startRun("/p", item(1), "full");
+  await settle();
+  emit({ type: "stage-start", stage: { id: "v", name: "Verify", kind: "shellCommand" }, index: 1, count: 7, iteration: 1 });
+  routing.resolve({ tiers: { cheap: { model: "claude-haiku-5-5" } }, featureStatus: { loop: { usable: true, tier: "cheap" } } });
+  await settle();
+  assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.model, null);
+});
+
 test("a step review sets the live sub-state and its verdicts reach the record, findings capped at 2000", async () => {
   let emit;
   setup({ runLoop: (_config, deps) => { emit = deps.onProgress; const g = deferred(); world.gates.set(deps.__runId, g); return g.promise; } });

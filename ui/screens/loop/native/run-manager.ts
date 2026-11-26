@@ -558,7 +558,13 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   run.live.progress = progress;
   // Not awaited: the routing read may wait for a CLI probe, and a label must never delay the run's first step.
   let routed: string | null = null;
-  void fetchRoutedLoopModel(d.core).then((m) => { routed = m; });
+  // The agent phase running now, so a routing read that lands mid-step (always the first step) still labels it.
+  let agentPhase: "step" | "repair" | null = null;
+  const showModel = (phase: "step" | "repair" | null) => { agentPhase = phase; progress.model = phase ? stepModel(routed, phase, config.repairModel) : null; };
+  void fetchRoutedLoopModel(d.core).then((m) => {
+    routed = m;
+    if (agentPhase && run.live.progress === progress) { showModel(agentPhase); emit(); }
+  });
   const onProgress = (e: RunProgressEvent) => {
     if (e.type === "iteration") progress.iteration = e.iteration;
     else if (e.type === "stage-start") {
@@ -567,11 +573,11 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
       progress.substate = null;
-      progress.model = e.stage.kind === "skill" ? stepModel(routed, "step") : null;
+      showModel(e.stage.kind === "skill" ? "step" : null);
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {
-      progress.model = null;
+      showModel(null);
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = e.ok ? "passed" : "failed";
       try {
@@ -583,10 +589,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
     } else if (e.type === "step-review") {
       progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
-      progress.model = stepModel(routed, "step");
+      showModel("step");
     } else if (e.type === "step-review-result") {
       progress.substate = null;
-      progress.model = null;
+      showModel(null);
     } else if (e.type === "loopback") {
       // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
       const row = progress.stages.find((r) => r.id === e.stage.id);
@@ -594,7 +600,7 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.substate = null;
     } else if (e.type === "repair") {
       progress.repairs += 1;
-      progress.model = stepModel(routed, "repair", config.repairModel);
+      showModel("repair");
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row && row.state !== "passed") row.state = "repaired";
     }
