@@ -43,7 +43,13 @@ export default function RecordingControls({ isRecording, isMirroring, elapsed, o
           </button>
         </>
       ) : (
-        <button type="button" className="btn btn-start" onClick={onStart} aria-label="Start recording">
+        <button
+          type="button"
+          className="btn btn-start"
+          data-tour-id="start-recording"
+          onClick={onStart}
+          aria-label="Start recording"
+        >
           Start Recording
         </button>
       )}

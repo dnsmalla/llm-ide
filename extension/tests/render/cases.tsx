@@ -67,7 +67,7 @@ export function getCases(): { reactVersion: string; cases: RenderCase[] } {
     {
       name: 'RecordingControls (conditional branches)',
       render: () => renderToString(<RecordingControls isRecording={false} elapsed={0} onStart={noop} onStop={noop} />),
-      expect: ['<button'],
+      expect: ['<button', 'data-tour-id="start-recording"'],
     },
     {
       name: 'NotesView (error + empty states)',
@@ -76,6 +76,14 @@ export function getCases(): { reactVersion: string; cases: RenderCase[] } {
           <NotesView notes="" isGenerating={false} error={null} onGenerate={noop} hasTranscript={false} />,
         ),
       expect: ['<button'],
+    },
+    {
+      name: 'NotesView (generated notes result)',
+      render: () =>
+        renderToString(
+          <NotesView notes="## Summary\n\nDecision made." isGenerating={false} error={null} onGenerate={noop} hasTranscript />,
+        ),
+      expect: ['data-tour-id="notes-result"'],
     },
   ];
   return { reactVersion, cases };

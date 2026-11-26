@@ -24,22 +24,9 @@ import Settings from './components/Settings';
 import QuestionsView from './components/QuestionsView';
 import LoginView from './components/LoginView';
 import HelpPanel from './components/HelpPanel';
-
-// Trimmed tab set.  Actions / Plan / Review were moved out of the
-// extension and into the desktop app — they're project-management
-// surfaces that benefit from a bigger window and don't belong in a
-// 280-px-wide side panel.  The extension stays focused on capture
-// (Transcript), the AI surface that operates on it (Notes, Questions,
-// Chat), and the supporting bits (History, Settings).
-type Tab = 'transcript' | 'notes' | 'questions' | 'chat' | 'settings';
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'transcript', label: 'Transcript' },
-  { id: 'notes', label: 'Notes' },
-  { id: 'questions', label: 'Questions' },
-  { id: 'chat', label: 'Chat' },
-  { id: 'settings', label: 'Settings' },
-];
+import { TABS, type Tab } from './tabs';
+import TourOverlay, { useTour } from './help/TourOverlay';
+import type { TourFlow } from './help/tour-model';
 
 function formatDuration(secs: number): string {
   const h = Math.floor(secs / 3600);
@@ -121,6 +108,7 @@ export default function App() {
   const [isMirroring, setIsMirroring] = useState(false);
   const [discoveryDismissed, setDiscoveryDismissed] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
+  const { tour, start: startTour, next: nextTour, back: backTour, skip: skipTour } = useTour();
 
   useEffect(() => {
     chrome.storage?.local
@@ -780,7 +768,8 @@ export default function App() {
         )}
       </main>
 
-      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} />}
+      {showHelp && <HelpPanel onClose={() => setShowHelp(false)} onStartTour={(flow: TourFlow) => { setShowHelp(false); startTour(flow); }} />}
+      {tour && <TourOverlay tour={tour} activeTab={activeTab} onSelectTab={setActiveTab} onNext={nextTour} onBack={backTour} onSkip={skipTour} />}
     </div>
   );
 }

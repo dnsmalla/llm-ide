@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { OVERVIEW } from '../help/topics';
+import { RECORD_NOTES_TOUR } from '../help/tours';
+import type { TourFlow } from '../help/tour-model';
 
 interface Props {
   onClose: () => void;
+  onStartTour?: (flow: TourFlow) => void;
 }
 
 // Inline stroke icons (Feather-style, 24px grid) replacing the old emoji
@@ -190,7 +194,7 @@ const SECTIONS: SectionDef[] = [
   { id: 'troubleshooting', icon: 'tool', title: 'Troubleshoot' },
 ];
 
-export default function HelpPanel({ onClose }: Props) {
+export default function HelpPanel({ onClose, onStartTour }: Props) {
   const [activeSection, setActiveSection] = useState<HelpSection>('overview');
 
   useEffect(() => {
@@ -253,7 +257,7 @@ export default function HelpPanel({ onClose }: Props) {
       </nav>
 
       <div className="help-content">
-        {activeSection === 'overview' && <OverviewSection />}
+        {activeSection === 'overview' && <OverviewSection onStartTour={onStartTour} />}
         {activeSection === 'getting-started' && <GettingStartedSection />}
         {activeSection === 'transcript' && <TranscriptPageSection />}
         {activeSection === 'notes' && <NotesPageSection />}
@@ -272,118 +276,62 @@ export default function HelpPanel({ onClose }: Props) {
    OVERVIEW
    ================================================================ */
 
-function OverviewSection() {
+function OverviewSection({ onStartTour }: { onStartTour?: (flow: TourFlow) => void }) {
   return (
     <div className="help-section">
-      <h3>Welcome to LLM-IDE</h3>
-      <p>
-        Meetings are where important things happen &mdash; decisions get made, tasks get assigned, ideas take shape. But
-        keeping up with everything while you&apos;re actually <em>in</em> the conversation? That&apos;s almost
-        impossible. That&apos;s exactly why LLM-IDE exists.
-      </p>
-      <p>
-        LLM-IDE sits quietly beside your meeting, captures every word, and lets AI do the heavy lifting &mdash;
-        summarizing, analyzing, and answering your questions. You focus on the conversation. We take care of the notes.
-      </p>
+      <h3>{OVERVIEW.heading}</h3>
+      {OVERVIEW.intro.map((p, i) => (
+        <p key={i}>{p}</p>
+      ))}
 
       <div className="help-card">
-        <h4>Your five-tab workspace</h4>
-        <p>
-          LLM-IDE is organized into five pages. Each one handles a different part of the meeting workflow. Here&apos;s a
-          quick map:
-        </p>
+        <h4>{OVERVIEW.pagesHeading}</h4>
+        <p>{OVERVIEW.pagesIntro}</p>
         <div className="help-page-overview">
-          <div className="help-page-pill">
-            <span className="help-pill-icon" aria-hidden="true">
-              <Icon name="mic" />
-            </span>
-            <strong>Transcript</strong> &mdash; A live, scrolling record of everything being said. Words appear as
-            people speak, grouped by who said them.
-          </div>
-          <div className="help-page-pill">
-            <span className="help-pill-icon" aria-hidden="true">
-              <Icon name="note" />
-            </span>
-            <strong>Notes</strong> &mdash; One click turns your raw transcript into polished meeting notes with
-            summaries, decisions, and action items.
-          </div>
-          <div className="help-page-pill">
-            <span className="help-pill-icon" aria-hidden="true">
-              <Icon name="question" />
-            </span>
-            <strong>Questions</strong> &mdash; The AI reads between the lines and flags things that are vague,
-            contradictory, or need follow-up.
-          </div>
-          <div className="help-page-pill">
-            <span className="help-pill-icon" aria-hidden="true">
-              <Icon name="chat" />
-            </span>
-            <strong>Chat</strong> &mdash; Ask the AI anything about your meeting in plain English. &ldquo;What did we
-            decide about the timeline?&rdquo;
-          </div>
-          <div className="help-page-pill">
-            <span className="help-pill-icon" aria-hidden="true">
-              <Icon name="gear" />
-            </span>
-            <strong>Settings</strong> &mdash; Microphone setup, diagnostics, AI persona, connectors, and a searchable
-            knowledge base of all your past meetings.
-          </div>
+          {OVERVIEW.pages.map((page) => (
+            <div key={page.name} className="help-page-pill">
+              <span className="help-pill-icon" aria-hidden="true">
+                <Icon name={page.icon as IconName} />
+              </span>
+              <strong>{page.name}</strong> &mdash; {page.body}
+            </div>
+          ))}
         </div>
-        <p className="help-hint">
-          Click any page name in the navigation above to see a detailed guide with examples and tips.
-        </p>
+        <p className="help-hint">{OVERVIEW.pagesHint}</p>
       </div>
 
       <div className="help-card help-card-highlight">
-        <h4>100% private &mdash; nothing leaves your machine</h4>
-        <p>
-          This isn&apos;t a cloud service. Your audio never gets uploaded. Your transcript never touches a remote
-          server. Everything runs locally &mdash; the extension captures, a small server on <code>localhost:3456</code>{' '}
-          handles AI requests through your own Claude CLI credentials, and the knowledge base is a local SQLite file on
-          your hard drive.
-        </p>
-        <p>
-          No accounts with third parties. No data sharing. No subscriptions. Just your meetings, your notes, your
-          machine.
-        </p>
+        <h4>{OVERVIEW.privacyHeading}</h4>
+        {OVERVIEW.privacy.map((p, i) => (
+          <p key={i}>{p}</p>
+        ))}
       </div>
 
       <div className="help-card">
-        <h4>A typical meeting flow</h4>
+        <h4>{OVERVIEW.flowHeading}</h4>
         <div className="help-flow">
-          <div className="help-flow-step active">
-            <div className="help-flow-icon">1</div>
-            <div className="help-flow-body">
-              <h4>Before the meeting</h4>
-              <p>Make sure the server is running. Open LLM-IDE from the toolbar.</p>
+          {OVERVIEW.flow.map((step, i) => (
+            <div key={step.title}>
+              <div className={`help-flow-step${i < 2 ? ' active' : ''}`}>
+                <div className="help-flow-icon">{i + 1}</div>
+                <div className="help-flow-body">
+                  <h4>{step.title}</h4>
+                  <p>{step.body}</p>
+                </div>
+              </div>
+              {i < OVERVIEW.flow.length - 1 ? <div className="help-flow-arrow">↓</div> : null}
             </div>
-          </div>
-          <div className="help-flow-arrow">↓</div>
-          <div className="help-flow-step active">
-            <div className="help-flow-icon">2</div>
-            <div className="help-flow-body">
-              <h4>Start recording</h4>
-              <p>Click Start. Words flow into the Transcript tab in real time.</p>
-            </div>
-          </div>
-          <div className="help-flow-arrow">↓</div>
-          <div className="help-flow-step">
-            <div className="help-flow-icon">3</div>
-            <div className="help-flow-body">
-              <h4>During the meeting</h4>
-              <p>Glance at the transcript, ask the Chat, or let the co-pilot flag gaps.</p>
-            </div>
-          </div>
-          <div className="help-flow-arrow">↓</div>
-          <div className="help-flow-step">
-            <div className="help-flow-icon">4</div>
-            <div className="help-flow-body">
-              <h4>After the meeting</h4>
-              <p>Generate Notes, export as DOCX, share with your team.</p>
-            </div>
-          </div>
+          ))}
         </div>
       </div>
+
+      {onStartTour && (
+        <div className="help-card">
+          <button type="button" className="btn btn-generate" onClick={() => onStartTour(RECORD_NOTES_TOUR)}>
+            Start tour →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

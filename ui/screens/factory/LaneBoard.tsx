@@ -23,7 +23,7 @@ export function LaneBoard({ lanes, shown, onShowMore, renderCard, onKeyDown }: {
         const cap = shown[lane.id] ?? LANE_PAGE;
         const running = lane.cards.some((c) => c.status === "Working");
         return (
-          <section key={lane.id} className="fx-col" data-kind={kind} data-running={running || undefined} role="group" aria-label={`${lane.label} (${lane.cards.length})`}>
+          <section key={lane.id} className="fx-col" data-kind={kind} data-tour-id={`lane-${lane.id}`} data-running={running || undefined} role="group" aria-label={`${lane.label} (${lane.cards.length})`}>
             <h3 className="fx-col-title">
               <span className="fx-col-step" aria-hidden="true">{n ?? (kind === "done" ? "✓" : "•")}</span>
               <span className="fx-col-name">{lane.label}</span>
