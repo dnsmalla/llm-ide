@@ -15,7 +15,6 @@
 .atn-row { width: calc(100% - 12px); margin: 0 6px; display: flex; align-items: center; gap: 9px; font: inherit; font-size: var(--tok-type-body-size); color: inherit; background: none; border: 0; border-radius: 6px; text-align: left; padding: 8px 10px; cursor: pointer; }
 .atn-row:hover { background: var(--tok-color-row-alt); }
 .atn-row[data-on="true"] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); box-shadow: inset 2px 0 0 var(--tok-color-accent); }
-.atn-model { margin: 6px 12px; padding: 6px 8px; border: 1px solid var(--tok-color-border); border-radius: 4px; background: none; color: var(--tok-color-text-muted); font: inherit; text-align: left; cursor: pointer; }
 .atn-history { border-top: 1px solid var(--tok-color-border); padding: 8px 12px; }
 .atn-history h3 { margin: 0 0 4px; font-size: var(--tok-type-caption-size); }
 .atn-hint { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); font-weight: 400; line-height: 1.4; }

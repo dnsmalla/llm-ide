@@ -2,7 +2,6 @@
 .lib-screen { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
 .lib-screen[hidden] { display: none; }
 .lib-screen-single { display: flex; align-items: center; justify-content: center; }
-.lib-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .lib-muted { color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); margin: 0; }
 .lib-count { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); font-variant-numeric: tabular-nums; }
 .lib-btn { font: inherit; color: inherit; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: var(--tok-space-xs) var(--tok-space-md); cursor: pointer; }
@@ -35,7 +34,6 @@
 .lib-search:focus-within { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
 .lib-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--tok-space-xs); }
 .lib-select select { font: inherit; color: inherit; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); padding: 2px var(--tok-space-xs); }
-.lib-status { min-height: 1.2em; }
 .lib-hits { display: flex; flex-direction: column; gap: var(--tok-space-xs); max-height: 220px; overflow-y: auto; }
 .lib-hits-title { margin: 0; font-size: var(--tok-type-tree-header-size); font-weight: var(--tok-type-tree-header-weight); text-transform: uppercase; letter-spacing: 0.4px; color: var(--tok-color-text-muted); }
 .lib-hits-list { list-style: none; margin: 0; padding: 0; }
@@ -116,8 +114,6 @@
 .lib-project-list { list-style: none; margin: 0; padding: 0; }
 .lib-project-row { line-height: 22px; }
 .lib-project-caret { display: inline-flex; width: 12px; flex: none; justify-content: center; color: var(--tok-color-text-muted); font-size: 10px; }
-.lib-project-file { border: 0; background: none; color: var(--tok-color-text); font: inherit; font-family: var(--tok-type-sans-family); font-size: var(--tok-type-filename-size); text-align: left; cursor: default; padding: 0 var(--tok-space-xs) 0 0; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 4px; height: 22px; box-sizing: border-box; }
-.lib-project-file:hover { background: color-mix(in srgb, var(--tok-color-text) 5%, transparent); }
 .lib-project-icon { width: 16px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
 .lib-project-icon[data-kind="folder"] { color: var(--tok-color-category-amber); }
 .lib-project-icon[data-kind="code"] { color: var(--tok-color-accent2); }
@@ -125,7 +121,6 @@
 .lib-project-icon[data-kind="doc"] { color: var(--tok-color-category-purple); }
 .lib-project-icon[data-kind="image"] { color: var(--tok-color-category-teal); }
 .lib-project-icon[data-kind="data"] { color: var(--tok-color-accent3); }
-.lib-project-file[data-on] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); color: inherit; }
 .lib-project-note { margin: 2px 0 2px 14px; font-size: var(--tok-type-caption-size); }
 .lib-project-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .lib-project-view-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); padding: var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
@@ -140,7 +135,7 @@
 .lib-footer-nav .lib-nav { max-height: none; overflow: visible; border-top: 0; padding: var(--tok-space-sm); }
 
 /* Mac Library is a search field over one sectioned list; these desktop-only controls were never in the Mac. */
-.lib-chips, .lib-status, .lib-nav-head, .lib-nav-foot { display: none; }
+.lib-chips, .lib-nav-head, .lib-nav-foot { display: none; }
 .lib-empty-icon { font-size: 30px; color: var(--tok-color-text-muted); opacity: .7; }
 
 /* Mac Library group headers: chevron + tinted icon + count + add. */

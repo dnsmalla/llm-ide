@@ -7,7 +7,6 @@
 .wc-h1 { margin: 0; font-size: 30px; font-weight: 700; }
 .wc-lead { margin: 0; max-width: 520px; line-height: 1.5; color: var(--tok-color-text-muted); }
 .wc-h2 { margin: 0; font-size: 16px; font-weight: 600; }
-.wc-h3 { margin: var(--tok-space-md) 0 4px; font-size: 14px; font-weight: 600; }
 .wc-text { margin: 0; line-height: 1.5; overflow-wrap: anywhere; }
 .wc-muted { color: var(--tok-color-text-muted); }
 .wc-eyebrow { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tok-color-text-muted); }
@@ -42,7 +41,6 @@
 .wc-modal-card { width: min(640px, 100%); max-height: 86vh; display: flex; flex-direction: column; border: 1px solid var(--tok-color-border); border-radius: 12px; background: var(--tok-color-surface); box-shadow: 0 12px 40px color-mix(in srgb, var(--tok-color-body) 60%, transparent); }
 .wc-modal-head { display: flex; align-items: center; justify-content: space-between; gap: var(--tok-space-md); padding: var(--tok-space-md) var(--tok-space-lg, 16px); border-bottom: 1px solid var(--tok-color-border); }
 .wc-modal-body { overflow-y: auto; padding: var(--tok-space-md) var(--tok-space-lg, 16px) var(--tok-space-lg, 16px); }
-.wc-steps { margin: 6px 0 0; padding-left: 22px; line-height: 1.5; }
 
 /* Help & Support: a beginner guide. Topic rail, a Home page, clickable flowcharts, tick-off steps and question cards. */
 .help-card { width: min(1120px, 100%); height: min(86vh, 860px); max-height: 86vh; color: var(--tok-color-text); }

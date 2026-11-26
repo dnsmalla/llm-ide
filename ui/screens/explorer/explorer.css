@@ -134,6 +134,4 @@
 .chat-dock-mode .chat-dock-head > * { min-width: 0; }
 .chat-dock-mode .chat-composer-bar > * { min-width: 0; }
 .chat-dock-mode .chat-composer-bar .chat-pick { flex: 1 1 145px; max-width: 100%; }
-.chat-dock-mode .chat-notes { display: block; }
-.chat-dock-mode .chat-notes > * { white-space: normal; overflow-wrap: anywhere; }
 .chat-dock-mode .chat-ghost { white-space: normal; overflow-wrap: anywhere; }

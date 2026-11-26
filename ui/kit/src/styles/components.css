@@ -112,15 +112,6 @@
 .ui-select-empty-title { font-size: 28px; font-weight: 600; opacity: 0.6; }
 .ui-select-empty-hint { font-size: 14px; opacity: 0.6; }
 
-
-.ui-section-label {
-  font-size: var(--tok-type-tree-header-size);
-  font-weight: var(--tok-type-tree-header-weight);
-  color: var(--tok-color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
 /* ---- Editor tab strip (EditorTabBar.swift) --------------------------- */
 
 .ui-tabbar {

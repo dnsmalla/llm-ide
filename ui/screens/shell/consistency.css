@@ -2,7 +2,7 @@
    The menu structure and screen internals stay as they are; this layer only normalises the
    shape, density and hierarchy of controls and surfaces so every section reads as one product. */
 
-:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn, .rv-btn) {
+:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn) {
   min-height: 32px;
   box-sizing: border-box;
   padding: 6px 12px;
@@ -12,10 +12,10 @@
   line-height: 1.2;
   transition: border-color .15s ease, background .15s ease, transform .15s ease, color .15s ease;
 }
-:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn, .rv-btn):hover:not(:disabled) {
+:root :is(.iss-btn, .gnt-btn, .dg-btn, .gr-btn, .atn-btn, .lib-btn, .ex-btn, .loop-btn):hover:not(:disabled) {
   transform: translateY(-1px);
 }
-:root :is(.lib-btn-primary, .dg-primary, .loop-btn-primary, .chat-primary, .ex-btn-primary, .gr-primary, .atn-primary, .iss-primary, .gnt-primary, .rv-primary) {
+:root :is(.lib-btn-primary, .dg-primary, .loop-btn-primary, .chat-primary, .ex-btn-primary, .atn-primary, .iss-primary, .gnt-primary) {
   border-color: var(--tok-color-accent);
   background: var(--tok-color-accent);
   color: var(--tok-color-body);
@@ -35,7 +35,7 @@
 }
 
 /* One page-title hierarchy. Existing per-screen margins stay. */
-:root :is(.iss-title, .gnt-title, .dg-title, .gr-title, .ext-title, .lib-viewer-title, .atn-titlebar h1) {
+:root :is(.iss-title, .dg-title, .gr-title, .ext-title, .lib-viewer-title, .atn-titlebar h1) {
   font-size: 22px;
   font-weight: 650;
   letter-spacing: -.03em;
@@ -52,7 +52,7 @@
 }
 
 /* Form controls: same height and focus language as Settings. */
-:root :is(.iss-field input, .iss-field select, .gnt-field input, .gnt-field select, .dg-field input, .dg-field select, .dg-field textarea, .atn-field input, .atn-field select, .atn-field textarea, .gr-field input, .gr-field select, .rv-field input, .rv-field select) {
+:root :is(.iss-field input, .iss-field select, .gnt-field input, .gnt-field select, .dg-field input, .dg-field select, .dg-field textarea, .atn-field input, .atn-field select, .atn-field textarea, .gr-field input, .gr-field select) {
   min-height: 34px;
   box-sizing: border-box;
   border: 1px solid var(--tok-color-border);
@@ -68,7 +68,7 @@
 }
 
 /* Empty states say the same thing with the same rhythm. */
-:root :is(.lib-empty, .atn-empty, .loop-native-empty) {
+:root :is(.lib-empty, .loop-native-empty) {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -78,7 +78,7 @@
   text-align: center;
   color: var(--tok-color-text-muted);
 }
-:root :is(.lib-empty-title, .atn-empty h1, .loop-native-empty h1) {
+:root :is(.lib-empty-title, .loop-native-empty h1) {
   margin: 0;
   font-size: 15px;
   font-weight: 650;

@@ -1,14 +1,8 @@
 /* Chat screen styles: tokens only (--tok-*), no raw colours, no remote resources. */
 .chat-screen { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-sans-family); font-size: var(--tok-type-body-size); }
 .chat-sessions { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
-.chat-group { display: flex; align-items: flex-end; padding: 0 var(--tok-space-md) 4px; font-size: var(--tok-type-caption-size); font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--tok-color-text-muted); box-sizing: border-box; }
-.chat-session { display: flex; align-items: center; gap: var(--tok-space-xs); padding: 0 var(--tok-space-sm); box-sizing: border-box; overflow: hidden; }
-.chat-session[data-active="true"] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
 .chat-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.chat-header { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
-.chat-title { margin: 0; font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-meta { flex: none; color: var(--tok-color-text-muted); font-family: var(--tok-type-mono-family); font-size: 10px; white-space: nowrap; }
-.chat-header .chat-meta { margin-left: 2px; }
 .chat-spacer { flex: 1; }
 .chat-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; padding: 4px 20px 12px; }
 .chat-row { padding: 10px 0; }
@@ -125,8 +119,6 @@
 .chat-context-list li[data-muted] { color: var(--tok-color-text-muted); }
 .chat-composer-bar { flex-wrap: wrap; }
 .chat-composer-bar .chat-pick-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.chat-notes { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); padding: 0 var(--tok-space-md); }
-.chat-notes:empty { display: none; }
 .chat-assistant > .chat-badge { display: inline-block; margin-bottom: var(--tok-space-xs); padding: 0 var(--tok-space-sm); border-radius: 999px; font-size: var(--tok-type-caption-size); font-weight: 600; text-transform: uppercase; color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 12%, transparent); }
 .chat-assistant > .chat-badge:is([data-mode="auto"], [data-mode="execute"]) { color: var(--tok-color-text-muted); background: color-mix(in srgb, var(--tok-color-text-muted) 10%, transparent); }
 .chat-empty-state { display: grid; justify-items: center; align-content: center; gap: var(--tok-space-sm); min-height: 100%; padding: var(--tok-space-lg); text-align: center; }
@@ -167,7 +159,6 @@
 /* Project memory: a viewport modal, never a popover anchored below the chat column. */
 .chat-memory-modal { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; padding: 16px; background: color-mix(in srgb, var(--tok-color-body) 72%, transparent); }
 .chat-memory-sheet { width: min(560px, 94vw); max-height: 82vh; overflow: auto; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); }
-.chat-memory-sheet .mem-view { max-height: none; }
 /* Dock: a long provider/model note must never widen the picker row. */
 .chat-dock-mode .chat-pick .chat-muted { display: none; }
 .chat-dock-mode .chat-composer-bar .chat-error { flex: 1 1 100%; white-space: normal; overflow-wrap: anywhere; }
@@ -198,9 +189,6 @@
 .chat-context-advice .chat-btn { align-self: flex-start; }
 .chat-budget { font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); font-variant-numeric: tabular-nums; padding: 0 var(--tok-space-xs); white-space: nowrap; }
 .chat-budget[data-warn] { color: var(--tok-color-accent4); }
-.chat-budget-warning { margin: 0; padding: 6px var(--tok-space-md); border-bottom: 1px solid color-mix(in srgb, var(--tok-color-accent4) 30%, var(--tok-color-border)); background: color-mix(in srgb, var(--tok-color-accent4) 8%, transparent); color: var(--tok-color-accent4); font-size: var(--tok-type-caption-size); }
-.chat-budget-warning { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
-.chat-budget-warning .chat-btn { flex: none; }
 .chat-model-empty { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chat-model-empty .chat-muted { font-size: var(--tok-type-caption-size); }
 

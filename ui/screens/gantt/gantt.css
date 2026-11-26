@@ -1,6 +1,5 @@
 .gnt-root { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; padding: 18px 20px; overflow: auto; box-sizing: border-box; }
 .gnt-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); }
-.gnt-title { margin: 0 auto 0 0; font-size: var(--tok-type-title-size); font-weight: var(--tok-type-title-weight); letter-spacing: -0.01em; }
 .gnt-field { display: flex; flex-direction: column; gap: 2px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
 .gnt-field input, .gnt-field select { padding: 5px 8px; border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: var(--tok-color-text); font: inherit; }
 .gnt-check { display: flex; align-items: center; gap: 4px; font-size: var(--tok-type-caption-size); color: var(--tok-color-text-muted); }
@@ -29,8 +28,6 @@
 .gnt-bar { position: absolute; top: 4px; height: 22px; border: 0; border-radius: var(--tok-radius-sm); background: var(--tok-color-accent); color: var(--tok-color-body); font: inherit; font-size: 11px; text-align: left; padding: 0 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: pointer; }
 .gnt-bar[data-selected] { outline: 2px solid var(--tok-color-text); }
 .gnt-dep { margin-right: 4px; }
-.gnt-undated { border-top: 1px solid var(--tok-color-border); padding-top: var(--tok-space-sm); }
-.gnt-sub { margin: 0 0 var(--tok-space-xs); font-size: var(--tok-type-caption-size); text-transform: uppercase; letter-spacing: .05em; color: var(--tok-color-text-muted); }
 .gnt-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }
 .gnt-editor { border: 1px solid var(--tok-color-border); border-radius: 10px; background: var(--tok-color-surface); padding: 14px; display: flex; flex-direction: column; gap: var(--tok-space-sm); }
 .gnt-editor-head { display: flex; align-items: baseline; gap: var(--tok-space-sm); }
@@ -38,11 +35,7 @@
 .gnt-editor-grid { display: flex; gap: var(--tok-space-sm); flex-wrap: wrap; }
 .gnt-editor-actions { display: flex; gap: var(--tok-space-sm); }
 .gnt-error { margin: 0; color: var(--tok-color-danger); font-size: var(--tok-type-caption-size); }
-.gnt-foot { margin-top: auto; padding-top: var(--tok-space-sm); }
-
-.gnt-schedule { margin-left: auto; }
 .gnt-grow { flex: 1; min-width: 160px; }
-.gnt-legend { display: flex; gap: var(--tok-space-md); align-items: center; flex-wrap: wrap; padding: var(--tok-space-xs) var(--tok-space-lg); color: var(--tok-color-text-muted); font-size: var(--tok-type-caption-size); }
 .gnt-today { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--tok-color-accent); z-index: 5; pointer-events: none; }
 .gnt-timeline { position: relative; }
 
@@ -63,9 +56,6 @@
 .gnt-seg .gnt-zbtn:first-child { border-radius: var(--tok-radius-sm) 0 0 var(--tok-radius-sm); }
 .gnt-seg .gnt-zbtn:last-child { border-radius: 0 var(--tok-radius-sm) var(--tok-radius-sm) 0; }
 .gnt-bar { top: 14px; height: 30px; background: color-mix(in srgb, var(--tok-color-accent) 72%, var(--tok-color-surface2)); color: var(--tok-color-text); font-weight: 600; border-radius: 6px; }
-.gnt-legend [data-tone="open"] { color: var(--tok-color-accent3); }
-.gnt-legend [data-tone="closed"] { color: var(--tok-color-accent2); }
-.gnt-legend [data-tone="overdue"] { color: var(--tok-color-danger); }
 /* The month band and day header stick to the top of the scroller, so rows scroll under them (the labels column is synced to the same scrollTop). */
 .gnt-thead { position: sticky; top: 0; z-index: 4; background: var(--tok-color-surface); }
 .gnt-header { height: 36px; }

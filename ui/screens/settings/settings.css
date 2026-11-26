@@ -100,7 +100,6 @@
 .st-spacer { flex: 1; }
 .st-grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--st-gap-3); align-items: end; }
 .st-rule { border: 0; border-top: 1px solid var(--tok-color-border); margin: var(--st-gap-2) 0; }
-.st-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .st-empty { padding: 28px; text-align: center; color: var(--tok-color-text-muted); }
 
 /* Text: one sub-heading style (.st-label), one helper style (.st-hint), status colours */
