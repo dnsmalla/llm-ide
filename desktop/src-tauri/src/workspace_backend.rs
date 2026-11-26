@@ -747,10 +747,15 @@ pub async fn dispatch(cmd: &'static str, needs_local_mode: bool, args: Value) ->
 /// a destructive command also goes through the rate limit that remote confirmations share.
 fn run_local(root: &std::path::Path, cmd: &str, args: &Value) -> R<Value> {
     let ask = |spec: &ConfirmSpec, question: &str| crate::confirm::ask(spec.title, question, spec.accept, true);
+    run_local_with(root, cmd, args, &ask, &DESTRUCTIVE_DIALOGS)
+}
+
+/// `run_local` with the dialog and the guard passed in, so a test can answer the question and use its own limit.
+fn run_local_with(root: &std::path::Path, cmd: &str, args: &Value, ask: commands::Ask<'_>, guard: &crate::confirm::DialogGuard) -> R<Value> {
     if is_confirmed_command(cmd) {
-        return DESTRUCTIVE_DIALOGS.run(|| commands::run(root, cmd, args, &ask, &OsTrash));
+        return guard.run(|| commands::run(root, cmd, args, ask, &OsTrash));
     }
-    commands::run(root, cmd, args, &ask, &OsTrash)
+    commands::run(root, cmd, args, ask, &OsTrash)
 }
 
 #[cfg(test)]

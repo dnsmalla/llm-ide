@@ -374,12 +374,146 @@ fn ssh_mode_dispatch_without_folder_is_no_project() {
 #[test]
 fn local_mode_without_a_project_is_no_project() {
     // The local branch is unchanged: it still asks for the active project root, and never the server.
+    let _turn = crate::project::ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
     let _mode = crate::core_host::process_mode_guard();
     crate::core_host::set_process_mode(0);
-    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({})));
-    if let Err(e) = &result {
-        assert_eq!(e.code, "no_project");
+    crate::project::set_active_for_test(None);
+    let result = tauri::async_runtime::block_on(dispatch("fs_list_dir", true, json!({"req": {"path": ""}})));
+    assert_eq!(result.unwrap_err().code, "no_project");
+}
+
+/// A scratch folder that is a git repository with one commit on `main`; removed on drop.
+struct ScratchRepo(PathBuf);
+
+impl ScratchRepo {
+    fn new(tag: &str) -> Option<Self> {
+        let dir = std::env::temp_dir().join(format!("llmide-runlocal-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).ok()?;
+        let dir = std::fs::canonicalize(&dir).ok()?;
+        let repo = Self(dir);
+        repo.git(&["init", "-q", "-b", "main"])?;
+        std::fs::write(repo.0.join("a.txt"), "one\n").ok()?;
+        repo.git(&["add", "a.txt"])?;
+        repo.git(&["commit", "-q", "-m", "first"])?;
+        Some(repo)
     }
+
+    fn git(&self, args: &[&str]) -> Option<()> {
+        let status = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(&self.0)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok()?;
+        status.success().then_some(())
+    }
+
+    fn has_branch(&self, name: &str) -> bool {
+        self.git(&["rev-parse", "--verify", "-q", &format!("refs/heads/{name}")]).is_some()
+    }
+}
+
+impl Drop for ScratchRepo {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// An `Ask` that records every (title, accept label, question) it was shown and answers with `answer`.
+struct Recording {
+    seen: Mutex<Vec<(String, String)>>,
+}
+
+impl Recording {
+    fn new() -> Self {
+        Self { seen: Mutex::new(Vec::new()) }
+    }
+
+    fn ask(&self, answer: bool) -> impl Fn(&ConfirmSpec, &str) -> bool + '_ {
+        move |spec, question| {
+            self.seen.lock().unwrap().push((format!("{}|{}", spec.title, spec.accept), question.to_string()));
+            answer
+        }
+    }
+}
+
+fn open_guard() -> crate::confirm::DialogGuard {
+    crate::confirm::DialogGuard::new(0, 1000)
+}
+
+#[test]
+fn local_unmerged_branch_delete_asks_the_louder_dialog_and_follows_the_answer() {
+    let Some(repo) = ScratchRepo::new("branch") else { return };
+    repo.git(&["switch", "-q", "-c", "feat"]).unwrap();
+    std::fs::write(repo.0.join("b.txt"), "x\n").unwrap();
+    repo.git(&["add", "b.txt"]).unwrap();
+    repo.git(&["commit", "-q", "-m", "feat work"]).unwrap();
+    repo.git(&["switch", "-q", "main"]).unwrap();
+    let guard = open_guard();
+    let rec = Recording::new();
+    let args = json!({"name": "feat", "force": true});
+
+    let no = run_local_with(&repo.0, "git_branch_delete", &args, &rec.ask(false), &guard).unwrap_err();
+    assert_eq!(no.code, "cancelled");
+    assert_eq!(no.message, "branch delete cancelled");
+    assert!(repo.has_branch("feat"), "a refused dialog deletes nothing");
+
+    let yes = run_local_with(&repo.0, "git_branch_delete", &args, &rec.ask(true), &guard).unwrap();
+    assert_eq!(yes["status"], "deleted");
+    assert!(!repo.has_branch("feat"));
+    let seen = rec.seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert!(seen.iter().all(|(spec, _)| spec == "Delete unmerged branch?|Delete anyway"), "{seen:?}");
+}
+
+#[test]
+fn local_discard_cancel_leaves_the_file_and_reports_the_cancel() {
+    let Some(repo) = ScratchRepo::new("discard") else { return };
+    std::fs::write(repo.0.join("a.txt"), "changed\n").unwrap();
+    let rec = Recording::new();
+    let error = run_local_with(&repo.0, "git_discard", &json!({"paths": ["a.txt"]}), &rec.ask(false), &open_guard()).unwrap_err();
+    assert_eq!(error.code, "cancelled");
+    assert_eq!(error.message, "discard cancelled");
+    assert_eq!(std::fs::read_to_string(repo.0.join("a.txt")).unwrap(), "changed\n");
+    assert_eq!(rec.seen.lock().unwrap()[0].0, "Discard changes?|Discard");
+}
+
+#[test]
+fn a_destructive_command_goes_through_the_guard_and_a_plain_one_does_not() {
+    let Some(repo) = ScratchRepo::new("guard") else { return };
+    std::fs::write(repo.0.join("a.txt"), "changed\n").unwrap();
+    let rec = Recording::new();
+    let tight = crate::confirm::DialogGuard::new(60_000, 1);
+    let args = json!({"paths": ["a.txt"]});
+    // The first destructive call uses the guard's one slot (the cancel answer is fine); the second is refused
+    // before any dialog is shown.
+    let _ = run_local_with(&repo.0, "git_discard", &args, &rec.ask(false), &tight);
+    let second = run_local_with(&repo.0, "git_discard", &args, &rec.ask(false), &tight).unwrap_err();
+    assert_eq!(second.code, "rate_limited");
+    assert_eq!(rec.seen.lock().unwrap().len(), 1);
+    let status = run_local_with(&repo.0, "git_status", &json!({}), &rec.ask(false), &tight);
+    assert!(status.is_ok(), "a command that never asks is not rate limited");
+}
+
+#[test]
+fn local_fs_write_then_read_runs_through_the_command_table() {
+    let dir = std::env::temp_dir().join(format!("llmide-runlocal-fs-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = std::fs::canonicalize(&dir).unwrap();
+    let rec = Recording::new();
+    let guard = open_guard();
+    let wrote = run_local_with(&dir, "fs_write_file", &json!({"req": {"path": "n.txt", "text": "hello\n"}}), &rec.ask(false), &guard);
+    assert!(wrote.is_ok(), "{wrote:?}");
+    let read = run_local_with(&dir, "fs_read_file", &json!({"req": {"path": "n.txt"}}), &rec.ask(false), &guard).unwrap();
+    assert!(read.to_string().contains("hello"), "{read}");
+    assert!(rec.seen.lock().unwrap().is_empty(), "fs commands never ask");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
