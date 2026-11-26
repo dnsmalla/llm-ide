@@ -492,7 +492,7 @@ test("the Test loop's step plan is bookkeeping: a skill call or a repair may edi
 
 test("agentRunBody: only plan-writing skills carry role plan", () => {
   const base = { message: "m", repoRoot: "/p", timeoutMs: 1000, projectRoot: "/p", llmDocExists: false };
-  for (const skillId of [f.FACTORY_PLAN_SKILL, "skills/refactor-planner"]) {
+  for (const skillId of [f.FACTORY_PLAN_SKILL, "skills/refactor-planner", "skills/plan-structure-index", "skills/plan-director"]) {
     assert.equal(f.agentRunBody({ ...base, stage: { kind: "skill", skillId } }).role, "plan", skillId);
   }
   for (const skillId of [f.FACTORY_IMPLEMENT_SKILL, f.FACTORY_INTAKE_SKILL, f.FACTORY_REVIEW_SKILL, "skills/step-review", "skills/refactor-apply"]) {

@@ -129,8 +129,8 @@ export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId">): ".factory
   return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_PLAN_SKILL || s.skillId === FACTORY_REVIEW_SKILL || s.skillId === STEP_REVIEW_SKILL) ? ".factory" : null;
 }
 
-/** Skills whose step writes a plan; they run on the Settings → Model routing "Plan" role. */
-const PLAN_SKILLS: ReadonlySet<string> = new Set([FACTORY_PLAN_SKILL, "skills/refactor-planner"]);
+/** Skills whose step writes or maintains a plan (incl. the Plan loop's index and director); they run on the Settings → Model routing "Plan" role. */
+const PLAN_SKILLS: ReadonlySet<string> = new Set([FACTORY_PLAN_SKILL, "skills/refactor-planner", "skills/plan-structure-index", "skills/plan-director"]);
 
 export function isPlanSkill(skillId: string | null | undefined): boolean {
   return !!skillId && PLAN_SKILLS.has(skillId);
