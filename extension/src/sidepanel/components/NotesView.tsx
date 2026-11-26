@@ -16,6 +16,7 @@ export default function NotesView({ notes, isGenerating, error, onGenerate, hasT
       {!notes && !isGenerating && !error && (
         <button
           className="btn btn-generate"
+          data-tour-id="generate-notes"
           onClick={onGenerate}
           disabled={!hasTranscript}
           aria-label={hasTranscript ? 'Generate meeting notes from transcript' : 'Recording required first'}
@@ -38,7 +39,7 @@ export default function NotesView({ notes, isGenerating, error, onGenerate, hasT
         </div>
       )}
       {notes && (
-        <div className="notes-content">
+        <div className="notes-content" data-tour-id="notes-result">
           <ReactMarkdown rehypePlugins={[rehypeSanitize]}>{notes}</ReactMarkdown>
           <button className="btn btn-sm btn-regenerate" onClick={onGenerate} aria-label="Regenerate notes">
             Regenerate
