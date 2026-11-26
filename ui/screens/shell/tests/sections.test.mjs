@@ -57,3 +57,9 @@ test("the local-only notice names a hub in hub mode and an SSH server in ssh mod
   assert.equal(localOnlyNotice("remote"), LOCAL_ONLY_NOTICE);
   assert.equal(localOnlyNotice("ssh"), "This screen reads files or runs processes on the local computer. It is unavailable when the app is connected to an SSH server.");
 });
+
+test("a stored id of the removed Remote screen falls back to Home", async () => {
+  const { initialNav, isSelectable, DEFAULT_SECTION } = await import("../sections.ts");
+  assert.equal(isSelectable("remote"), false);
+  assert.equal(initialNav("remote").active, DEFAULT_SECTION);
+});
