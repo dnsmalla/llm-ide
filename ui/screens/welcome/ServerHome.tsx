@@ -9,6 +9,7 @@ import { useModel, useStore } from "../settings/context.tsx";
 import { Button, ErrorText, Field } from "../settings/ui.tsx";
 import { SshServerModel, SSH_FOREIGN_TEXT, sshServerErrorText, type SshServerIo } from "../settings/ssh-server-model.ts";
 import { StopConfirm } from "../settings/sections/SshServerParts.tsx";
+import { safeText } from "../shell/safe-text.ts";
 import { useStoreSelector } from "../shell/hooks.ts";
 import { coreStatusStore } from "../shell/runtime.ts";
 import type { RemoteProject, WorkspaceIo, OpenFlowDeps } from "../remote-folder/model.ts";
@@ -174,9 +175,9 @@ export function ServerHomeView(p: ServerHomeViewProps): ReactNode {
           <ul className="sh-home-recent">
             {p.recent.map((r) => (
               <li key={r.path} className="sh-home-row" data-missing={r.missing ? "true" : undefined}>
-                <button type="button" className="sh-home-open" disabled={p.busy || r.missing} title={r.path} onClick={() => p.onOpenRecent(r.path)}>
-                  <span className="sh-home-name">{r.name}</span>
-                  <span className="sh-home-path">{r.path}</span>
+                <button type="button" className="sh-home-open" disabled={p.busy || r.missing} title={safeText(r.path, 400)} onClick={() => p.onOpenRecent(r.path)}>
+                  <span className="sh-home-name">{safeText(r.name, 60)}</span>
+                  <span className="sh-home-path">{safeText(r.path, 300)}</span>
                   {r.missing ? <span className="sh-home-note">This folder is no longer on the server.</span> : null}
                 </button>
                 {r.missing ? <Button disabled={p.busy} onClick={() => p.onRemoveRecent(r.path)}>Remove</Button> : null}
