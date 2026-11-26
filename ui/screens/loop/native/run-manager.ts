@@ -5,7 +5,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { detectProjectStructureCommand, detectProjectTestCommand, detectStructureCommand, detectTestCommand } from "./environment.ts";
-import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, isPlanSkill, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
+import { configFor, factoryRole, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedStructure, withDetectedVerify, type RunMode } from "./factory.ts";
 import { TEMPLATE_FILE, applyTemplate, droppedMessage, formatFactoryTemplate, parseFactoryTemplate, readTemplateFile, sameLoop, templateFromLoop, templateProblemMessage, upgradeOldDefault, writeTemplateIfMissing, type FactoryTemplate } from "./factory-template.ts";
 import { appendRunRecord, iterationRecordsWithScores, type LoopRunIndexEntry } from "./history.ts";
 import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
@@ -15,7 +15,7 @@ import { LOOPBACK_STOPPED_CODE, loopbackRecord } from "./loopback.ts";
 import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent } from "./runner.ts";
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
-import { fetchRoutedModels, stepModel, type RoutedRole } from "./step-model.ts";
+import { createModelTracker } from "./step-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -557,16 +557,10 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null, model: null };
   run.live.progress = progress;
   // Not awaited: the routing read may wait for a CLI probe, and a label must never delay the run's first step.
-  let routed: Record<RoutedRole, string | null> = { loop: null, plan: null };
-  // The agent phase running now, so a routing read that lands mid-step (always the first step) still labels it.
-  let agentPhase: "step" | "repair" | null = null;
-  let agentRole: RoutedRole = "loop";
-  const showModel = (phase: "step" | "repair" | null, role: RoutedRole = "loop") => { agentPhase = phase; agentRole = role; progress.model = phase ? stepModel(routed[role], phase, config.repairModel) : null; };
-  void fetchRoutedModels(d.core).then((m) => {
-    routed = m;
-    if (agentPhase && run.live.progress === progress) { showModel(agentPhase, agentRole); emit(); }
-  });
+  const models = createModelTracker(d.core, config.repairModel);
+  models.onChange(() => { if (run.live.progress === progress) { progress.model = models.label(); emit(); } });
   const onProgress = (e: RunProgressEvent) => {
+    progress.model = models.onEvent(e);
     if (e.type === "iteration") progress.iteration = e.iteration;
     else if (e.type === "stage-start") {
       const stage = e.stage.name;
@@ -574,11 +568,9 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
       // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
       progress.substate = null;
-      showModel(e.stage.kind === "skill" ? "step" : null, e.stage.kind === "skill" && isPlanSkill(e.stage.skillId) ? "plan" : "loop");
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {
-      showModel(null);
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row) row.state = e.ok ? "passed" : "failed";
       try {
@@ -590,10 +582,8 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
     } else if (e.type === "step-review") {
       progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
-      showModel("step");
     } else if (e.type === "step-review-result") {
       progress.substate = null;
-      showModel(null);
     } else if (e.type === "loopback") {
       // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
       const row = progress.stages.find((r) => r.id === e.stage.id);
@@ -601,16 +591,12 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
       progress.substate = null;
     } else if (e.type === "repair") {
       progress.repairs += 1;
-      showModel("repair");
       const row = progress.stages.find((r) => r.id === e.stage.id);
       if (row && row.state !== "passed") row.state = "repaired";
     }
     emit();
   };
-  // A reused worktree carries the earlier run's code, which may be red on purpose (send-back, rework): a baseline
-  // check there would stop the run before Implement can fix it. Only a fresh worktree has a baseline worth judging.
-  const { baselineCheck, ...stageDeps } = d.createStageDeps(ctx, loop);
-  const outcome = await d.runLoop(config, { ...stageDeps, ...(run.reuse ? {} : { baselineCheck }), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
+  const outcome = await d.runLoop(config, { ...withBaselineFor(d.createStageDeps(ctx, loop), run.reuse), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
   log(outcome.cancelled ? "Loop cancelled." : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`);
   // Human review mode: a finished run that would auto-ship waits for a person instead. runStatusCode reads the flag.
   const held = holdsForHuman(config, { mode: run.live.mode, statusCode: runStatusCode(outcome), needsDecision: needsDecisionSummary(outcome) !== null, failedRole: outcome.failedStage ? factoryRole(outcome.failedStage) : null });
@@ -619,6 +605,13 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   // cancel, guard block, error and an intake decision keep their own states.
   const stopped = !outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && needsDecisionSummary(outcome) === null && run.live.mode !== "intakeOnly";
   return { loop, info, config, outcome: stopped ? { ...outcome, stoppedAtLimit: true } : outcome };
+}
+
+/** A reused worktree carries the earlier run's code, which may be red on purpose (send-back, rework): a baseline check there would stop the run before Implement can fix it. */
+export function withBaselineFor<T extends { baselineCheck?: unknown }>(deps: T, reusedWorktree: boolean): Omit<T, "baselineCheck"> | T {
+  if (!reusedWorktree) return deps;
+  const { baselineCheck: _skipped, ...rest } = deps;
+  return rest;
 }
 
 /** What the host's `loop_env_prepare` answers (loop_env_cache.rs). */

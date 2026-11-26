@@ -5,6 +5,8 @@ export interface LiveLoopCard {
   runId: string;
   stageName: string;
   startedAt: string;
+  /** The model the running agent step uses; absent for shell steps and unknown routing. */
+  model?: string | null;
 }
 
 const KEY = "llmide.loopLive";
@@ -20,6 +22,17 @@ export function updateLiveStage(runId: string, stageName: string): void {
   setLiveCard({ ...cur, stageName });
 }
 
+export function updateLiveModel(runId: string, model: string | null): void {
+  const cur = readLiveCard();
+  if (!cur || cur.runId !== runId || (cur.model ?? null) === model) return;
+  setLiveCard({ ...cur, model });
+}
+
+/** The live card's status line: `Running now`, plus the model while an agent step runs. */
+export function liveCardNote(card: Pick<LiveLoopCard, "model">): string {
+  return card.model ? `Running now · ${card.model}` : "Running now";
+}
+
 export function clearLiveCard(runId?: string): void {
   const cur = readLiveCard();
   if (runId && cur && cur.runId !== runId) return;
@@ -33,6 +46,6 @@ export function readLiveCard(): LiveLoopCard | null {
     if (!raw) return null;
     const v = JSON.parse(raw) as Partial<LiveLoopCard>;
     return typeof v.loopName === "string" && typeof v.runId === "string" && typeof v.stageName === "string" && typeof v.startedAt === "string"
-      ? { loopName: v.loopName, runId: v.runId, stageName: v.stageName, startedAt: v.startedAt } : null;
+      ? { loopName: v.loopName, runId: v.runId, stageName: v.stageName, startedAt: v.startedAt, ...(typeof v.model === "string" ? { model: v.model } : {}) } : null;
   } catch { return null; }
 }

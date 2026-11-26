@@ -38,7 +38,8 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
-import { liveRuns, subscribe as subscribeRuns, trackExternalRun } from "./run-manager.ts";
+import { liveRuns, subscribe as subscribeRuns, trackExternalRun, withBaselineFor } from "./run-manager.ts";
+import { createModelTracker } from "./step-model.ts";
 import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { copyStateBackIfMissed, copyStateIn, endWorktreeRun } from "./run-end.ts";
 import { branchDiscardRefusal, lastShipUrl, providerSaysMerged } from "./loop-branch.ts";
@@ -52,7 +53,7 @@ import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { decodeWorktreeDiff, decodeWorktreeStatus, shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
-import { clearLiveCard, setLiveCard, updateLiveStage } from "./live-card.ts";
+import { clearLiveCard, setLiveCard, updateLiveModel, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
 import { appendRunLog, capRunLog } from "./run-log.ts";
@@ -688,6 +689,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }
     }
     let prepared: RunInfo | null = null;
+    let reusedWorktree = false;
     // The previous draft MR of a loop restarted after it merged: the core checks with the provider before it lets the first push replace that head.
     let mergedMr: string | null = null;
     if (useWorktree) {
@@ -720,6 +722,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           } catch { /* cut from the local base */ }
         }
       }
+      reusedWorktree = !fresh && worktrees.some((w) => w.runId === slug);
       const task = start ? start.task : `# ${target.name}\n\nLoop run in an isolated worktree. No work item was picked; the loop's goal applies.\n`;
       try {
         prepared = await invokeHost<RunInfo>("loop_worktree_prepare", { repoRel: start ? start.repoRel : workRel, runId: isFactoryLoop(target) ? newRunId(new Date(), Math.random) : slug, base: baseRef, task, loopSlug: isFactoryLoop(target) ? null : slug, fresh });
@@ -827,13 +830,16 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         const stageId = stageIdForLogLine(target.config.stages, line);
         if (stageId !== null) setSelectedStageId(stageId);
       };
+      const models = createModelTracker(core, runConfig.repairModel);
+      models.onChange(() => updateLiveModel(trailRunId, models.label()));
       const runDeps: RunnerDeps = {
-        ...createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken, oneItem ? command?.trim() : undefined), log: followLog }, target),
+        ...withBaselineFor(createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken, oneItem ? command?.trim() : undefined), log: followLog }, target), reusedWorktree),
         isCancelled() { return cancelledRef.current; },
         log: followLog,
         holdWhilePaused,
         onProgress(e) {
           if (e.type === "stage-start") updateLiveStage(trailRunId, e.stage.name);
+          updateLiveModel(trailRunId, models.onEvent(e));
           if (!trail) return;
           if (e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
           else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId: trailRunId, mode: "loop", iteration: e.iteration }));

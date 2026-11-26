@@ -5,7 +5,7 @@ import { shellBus } from "../shell/bus";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops } from "../loop/native/store.ts";
 import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
-import { readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
+import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
 
 export interface LoopRunsProps {
   projectRoot: string;
@@ -102,7 +102,7 @@ export function LoopRuns({ projectRoot, scope, active }: LoopRunsProps): ReactNo
 
   const liveCard: RunCard | null = live && live.loopName === scope ? {
     lane: live.stageName || steps[0] || "Running",
-    note: "Running now",
+    note: liveCardNote(live),
     failed: false,
     live: true,
     run: {

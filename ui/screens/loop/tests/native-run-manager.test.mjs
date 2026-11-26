@@ -1319,3 +1319,11 @@ test("a late routing read labels a running plan step with the plan role's model"
   await settle();
   assert.equal(rm.liveRuns().find((r) => r.runId === a).progress.model, "Opus 5.5");
 });
+
+test("withBaselineFor drops only the baseline check, and only for a reused worktree", () => {
+  const deps = { baselineCheck: async () => null, halt: () => null };
+  assert.equal(rm.withBaselineFor(deps, false), deps);
+  const reused = rm.withBaselineFor(deps, true);
+  assert.equal("baselineCheck" in reused, false);
+  assert.equal(reused.halt, deps.halt);
+});

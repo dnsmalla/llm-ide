@@ -40,3 +40,43 @@ test("a failing routing fetch yields no model", async () => {
   const r = { tiers: { cheap: { model: "small" }, strong: { model: "big" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } };
   assert.deepEqual(await fetchRoutedModels({ request: async () => r }), { loop: "small", plan: "big" });
 });
+
+import { createModelTracker } from "../native/step-model.ts";
+
+const routing = { tiers: { cheap: { model: "claude-haiku-5-5" }, strong: { model: "claude-opus-5-5" } }, featureStatus: { loop: { usable: true, tier: "cheap" }, plan: { usable: true, tier: "strong" } } };
+const coreWith = (r) => ({ request: async () => r });
+const settle = () => new Promise((res) => setTimeout(res, 0));
+const stage = (kind, skillId) => ({ id: "s", name: "S", kind, skillId });
+
+test("tracker: skill step, plan skill, repair and shell steps", async () => {
+  const t = createModelTracker(coreWith(routing), "claude-sonnet-5");
+  await settle();
+  assert.equal(t.onEvent({ type: "stage-start", stage: stage("skill", "skills/x"), index: 1, count: 2, iteration: 1 }), "Haiku 5.5");
+  assert.equal(t.onEvent({ type: "stage-result", stage: stage("skill", "skills/x"), ok: true, iteration: 1 }), null);
+  assert.equal(t.onEvent({ type: "stage-start", stage: stage("skill", "skills/plan-director"), index: 2, count: 2, iteration: 1 }), "Opus 5.5");
+  assert.equal(t.onEvent({ type: "repair", stage: stage("skill", "skills/x") }), "Sonnet 5");
+  for (const kind of ["shellCommand", "testMap", "codeGraph", "regressionSweep", "testPrune", "artifactCheck"]) {
+    assert.equal(t.onEvent({ type: "stage-start", stage: stage(kind), index: 1, count: 1, iteration: 1 }), null, kind);
+  }
+});
+
+test("tracker: a late routing read relabels only the running agent step", async () => {
+  let resolve;
+  const t = createModelTracker({ request: () => new Promise((res) => { resolve = res; }) });
+  let changes = 0;
+  t.onChange(() => { changes += 1; });
+  assert.equal(t.onEvent({ type: "stage-start", stage: stage("skill", "skills/x"), index: 1, count: 1, iteration: 1 }), null);
+  resolve(routing);
+  await settle();
+  assert.equal(t.label(), "Haiku 5.5");
+  assert.equal(changes, 1);
+  t.onEvent({ type: "stage-result", stage: stage("skill", "skills/x"), ok: true, iteration: 1 });
+  const t2 = createModelTracker({ request: () => new Promise((res) => { resolve = res; }) });
+  let changes2 = 0;
+  t2.onChange(() => { changes2 += 1; });
+  t2.onEvent({ type: "stage-start", stage: stage("shellCommand"), index: 1, count: 1, iteration: 1 });
+  resolve(routing);
+  await settle();
+  assert.equal(t2.label(), null);
+  assert.equal(changes2, 0);
+});
