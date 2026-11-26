@@ -106,8 +106,10 @@ the dialog for a new server.
 Connect saves the server, its host key and its entry in the recent list (the entry is written earlier, when the
 host key is trusted). It does not change the mode. To use
 the server, choose **Switch to this server now** (Welcome screen) or the same switch in Settings. That saves SSH
-server mode and restarts the app into SSH mode for this session. The app restarts only after you confirm the
-switch. If you cancel, the app keeps its current mode. The next start after that opens the local Welcome screen.
+server mode and restarts the app into SSH mode for this session. In the Welcome dialog the switch happens by itself
+after Connect; it asks first only when Loop work is running on this computer, because the restart ends that work.
+If you cancel, the app keeps its current mode, and a Connect still running when you cancel does not restart the app.
+The next start after that opens the local Welcome screen.
 
 ## Login methods
 
@@ -129,6 +131,17 @@ entry in that item, keyed by `user@host:port`), so there is no new Keychain item
 never receives a stored password back: it only sends "use the saved one", and the host reads it when it connects.
 The recent list stores only a flag that a password exists, not the password. Connecting a remembered server from the
 list then takes one click. Untick the box on a later connect, or choose **Forget** on the server, to remove it.
+
+Keychain details:
+
+- A Test never changes the Keychain. The tick box is applied only after a Connect that worked.
+- If Connect works but the Keychain refuses the save, the connection stays up and the dialog says "Connected, but the
+  password could not be saved in Keychain."
+- When you trust a different host key for a server, the passwords saved for that server (every login on that host and
+  port) are removed, and you type the password again. A saved password is never sent to a server behind a new key.
+- A saved password is read only after the server shows the pinned host key.
+- The password is removed when its server is pushed out of the recent list (it keeps the 10 newest) and when the login
+  is switched to a key.
 
 The password is used for Connect, Stop server and Uninstall. On a platform without a single shared Keychain item,
 each remembered password is its own Keychain entry.
