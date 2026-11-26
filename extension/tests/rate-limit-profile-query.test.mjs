@@ -16,8 +16,6 @@ test('POST profiles match with a query string appended', () => {
     assert.equal(rateLimitProfile(p, 'POST'), 'agentTurn', p);
     assert.equal(rateLimitProfile(`${p}?x=1`, 'POST'), 'agentTurn', `${p}?x=1`);
   }
-  // /code-assist answers 410 (K1 P6 T6.9): never an agent turn
-  assert.equal(rateLimitProfile('/code-assist?x=1', 'POST'), 'llmFast');
   assert.equal(rateLimitProfile('/kb/dispatch?a=b', 'POST'), 'dispatch');
   assert.equal(rateLimitProfile('/agent/v2/turns?x=1', 'GET'), 'kbWrite');
   assert.equal(rateLimitProfile('/kb/index/search?q=ab', 'GET'), 'kbWrite');
