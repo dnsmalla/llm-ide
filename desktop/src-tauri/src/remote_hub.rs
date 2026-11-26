@@ -246,15 +246,13 @@ fn check_blocking(hub_url: String) -> Result<HubCheck, FsError> {
         Err(ureq::Error::Status(code, _)) => return Err(status_error(code)),
         Err(ureq::Error::Transport(t)) => return Err(transport_error(&t.to_string(), &pin)),
     };
-    let v: serde_json::Value = serde_json::from_str(&text)
-        .map_err(|_| herr("not_a_hub", "That URL answered, but it does not look like an LLM-IDE hub."))?;
-    let status = v.get("status").and_then(|x| x.as_str()).unwrap_or("unknown").to_string();
-    let api_version = v.get("apiVersion").and_then(|x| x.as_u64()).unwrap_or(0) as u32;
-    let hub = v.get("hub").and_then(|x| x.as_bool()).unwrap_or(false);
-    let db_ok = v.get("checks").and_then(|c| c.get("db")).and_then(|x| x.as_bool()).unwrap_or(false);
-    if api_version == 0 {
-        return Err(herr("not_a_hub", "That URL answered, but it does not look like an LLM-IDE hub."));
+    // One /health parser for the check and the deploy gate; a body without status, checks.db or apiVersion is not a hub.
+    let not_a_hub = || herr("not_a_hub", "That URL answered, but it does not look like an LLM-IDE hub.");
+    let health = crate::remote_deploy::parse_health(&text).ok_or_else(not_a_hub)?;
+    if health.api_version == 0 {
+        return Err(not_a_hub());
     }
+    let crate::remote_deploy::Health { status, api_version, hub, db_ok, .. } = health;
     Ok(HubCheck { hub_url: canonical, web_pki: pin.is_empty(), pin, status, api_version, hub, db_ok })
 }
 
