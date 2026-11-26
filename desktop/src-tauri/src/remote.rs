@@ -238,29 +238,45 @@ pub fn valid_key_path(path: &str) -> bool {
         || (bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
 }
 
-/// Pure shape validation. The command's errors are fixed codes; the UI maps them to clear sentences.
-pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
-    let host = target.host.trim();
+/// The one endpoint shape check, shared by `prepare` (hub deploy) and `ssh_transport::prepare_endpoint`
+/// (SSH server mode), so the two cannot drift. `key_path` is `None` for password auth.
+///
+/// Returns the trimmed host, user and key path. Errors carry the fixed codes `invalid_host`,
+/// `invalid_port`, `invalid_user` and `invalid_key_path`; the first failing field in that order wins.
+pub(crate) fn validate_endpoint_fields(
+    host: &str,
+    port: u16,
+    user: &str,
+    key_path: Option<&str>,
+) -> Result<(String, String, Option<String>), FsError> {
+    let host = host.trim();
     if !valid_host(host) {
         return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
     }
-    let user = target.user.trim();
+    if port == 0 {
+        return Err(herr("invalid_port", "the SSH port must be between 1 and 65535"));
+    }
+    let user = user.trim();
     if !valid_user(user) {
         return Err(herr("invalid_user", "enter a plain SSH user name (letters, digits, '.', '_' or '-')"));
     }
-    let key_path = target.key_path.trim();
-    if !valid_key_path(key_path) {
-        return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
-    }
-    if target.port == 0 {
-        return Err(herr("invalid_port", "the SSH port must be between 1 and 65535"));
-    }
-    Ok(PreparedTarget {
-        host: host.to_string(),
-        port: target.port,
-        user: user.to_string(),
-        key_path: key_path.to_string(),
-    })
+    let key_path = match key_path {
+        Some(path) => {
+            let path = path.trim();
+            if !valid_key_path(path) {
+                return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
+            }
+            Some(path.to_string())
+        }
+        None => None,
+    };
+    Ok((host.to_string(), user.to_string(), key_path))
+}
+
+/// Pure shape validation. The command's errors are fixed codes; the UI maps them to clear sentences.
+pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
+    let (host, user, key_path) = validate_endpoint_fields(&target.host, target.port, &target.user, Some(&target.key_path))?;
+    Ok(PreparedTarget { host, port: target.port, user, key_path: key_path.unwrap_or_default() })
 }
 
 /// The deploy/update/uninstall argv (R-034 #7): `StrictHostKeyChecking=yes` against ONE temporary

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use crate::confirm::herr;
 use crate::fs_ops::FsError;
 use crate::pty::shell_env;
-use crate::remote::{valid_host, valid_key_path, valid_user, RawOutput, CONNECT_TIMEOUT_SECS};
+use crate::remote::{validate_endpoint_fields, RawOutput, CONNECT_TIMEOUT_SECS};
 use crate::ssh_askpass::AskpassGrant;
 
 /// How the ssh child authenticates. Key auth is non-interactive; password auth lets ssh prompt the user.
@@ -55,29 +55,17 @@ pub struct SshEndpoint {
 /// Errors:
 ///     `invalid_host`, `invalid_port`, `invalid_user` or `invalid_key_path`, each with a fixed code.
 pub fn prepare_endpoint(host: &str, port: u16, user: &str, auth: SshAuth) -> Result<SshEndpoint, FsError> {
-    let host = host.trim();
-    if !valid_host(host) {
-        return Err(herr("invalid_host", "enter a hostname or IP address without spaces or a leading '-'"));
-    }
-    if port == 0 {
-        return Err(herr("invalid_port", "the SSH port must be between 1 and 65535"));
-    }
-    let user = user.trim();
-    if !valid_user(user) {
-        return Err(herr("invalid_user", "enter a plain SSH user name (letters, digits, '.', '_' or '-')"));
-    }
-    // Trimmed the same way as `remote::prepare`, and the trimmed value is what gets stored and handed to -i.
-    let auth = match auth {
-        SshAuth::Key { path } => {
-            let path = path.trim().to_string();
-            if !valid_key_path(&path) {
-                return Err(herr("invalid_key_path", "enter an absolute path to the private key file"));
-            }
-            SshAuth::Key { path }
-        }
-        SshAuth::Password => SshAuth::Password,
+    // The trimmed key path is what gets stored and handed to -i.
+    let key_path = match &auth {
+        SshAuth::Key { path } => Some(path.as_str()),
+        SshAuth::Password => None,
     };
-    Ok(SshEndpoint { host: host.to_string(), port, user: user.to_string(), auth })
+    let (host, user, key_path) = validate_endpoint_fields(host, port, user, key_path)?;
+    let auth = match key_path {
+        Some(path) => SshAuth::Key { path },
+        None => SshAuth::Password,
+    };
+    Ok(SshEndpoint { host, port, user, auth })
 }
 
 /// The argv after `ssh` for one remote command: a fixed option list, `user@host`, then the command.
