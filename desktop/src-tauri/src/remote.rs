@@ -271,7 +271,16 @@ pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path
         auth: crate::ssh_transport::SshAuth::Key { path: target.key_path.clone() },
     };
     let style = crate::ssh_transport::ArgvStyle { tty: false, verbose: true, keepalive: false };
-    crate::ssh_transport::exec_args_with(&endpoint, known_hosts, !accept_new, command, style)
+    crate::ssh_transport::hub_exec_args(&endpoint, known_hosts, !accept_new, command, style)
+}
+
+/// The temp path goes into a double-quoted `UserKnownHostsFile` option (`ssh_transport::push_host_key_options`), which
+/// no quoting can carry if the path holds a quote or a newline, or is not UTF-8. Such a path is refused, not half-parsed.
+fn require_quotable(dir: &Path) -> Result<(), FsError> {
+    match dir.to_str() {
+        Some(path) if !path.contains(['"', '\n']) => Ok(()),
+        _ => Err(herr("temp_dir_failed", "the temporary folder path cannot be used for host key checks")),
+    }
 }
 
 /// A private temp directory for one SSH child (a known_hosts file, never secrets). The name has a random
@@ -279,6 +288,7 @@ pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path
 pub fn temp_ssh_dir(label: &str) -> Result<PathBuf, FsError> {
     let suffix = crate::fsutil::random_hex(8).map_err(|e| herr("temp_dir_failed", format!("could not create a temporary SSH directory: {e}")))?;
     let dir = std::env::temp_dir().join(format!("llmide-{label}-{}-{suffix}", std::process::id()));
+    require_quotable(&dir)?;
     let mut builder = std::fs::DirBuilder::new();
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
@@ -469,6 +479,13 @@ fn check_observed(target: &PreparedTarget, key_type: &str, fingerprint: &str) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_temp_path_ssh_cannot_quote_is_refused() {
+        assert!(require_quotable(Path::new("/tmp/llmide-ok")).is_ok());
+        assert_eq!(require_quotable(Path::new("/tmp/a\"b")).unwrap_err().code, "temp_dir_failed");
+        assert_eq!(require_quotable(Path::new("/tmp/a\nb")).unwrap_err().code, "temp_dir_failed");
+    }
 
     fn target(host: &str, user: &str, key_path: &str) -> SshTarget {
         SshTarget { host: host.into(), port: 22, user: user.into(), key_path: key_path.into() }
