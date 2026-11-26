@@ -284,41 +284,15 @@ pub fn prepare(target: &SshTarget) -> Result<PreparedTarget, FsError> {
 /// system-wide entry cannot broaden what is trusted. `accept_new` is only for the initial Test SSH,
 /// which never sends a secret.
 pub fn ssh_args_known(target: &PreparedTarget, command: &str, known_hosts: &Path, accept_new: bool) -> Vec<String> {
-    vec![
-        "-v".to_string(),
-        // Nothing from the user's ssh config may forward an agent, X11, ports or run a local command.
-        "-a".to_string(),
-        "-x".to_string(),
-        "-o".to_string(),
-        "ForwardAgent=no".to_string(),
-        "-o".to_string(),
-        "ClearAllForwardings=yes".to_string(),
-        "-o".to_string(),
-        "PermitLocalCommand=no".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        format!("ConnectTimeout={CONNECT_TIMEOUT_SECS}"),
-        "-o".to_string(),
-        if accept_new { "StrictHostKeyChecking=accept-new".to_string() } else { "StrictHostKeyChecking=yes".to_string() },
-        "-o".to_string(),
-        format!("UserKnownHostsFile={}", known_hosts.display()),
-        "-o".to_string(),
-        format!("GlobalKnownHostsFile={}", if cfg!(windows) { "NUL" } else { "/dev/null" }),
-        "-o".to_string(),
-        "IdentitiesOnly=yes".to_string(),
-        "-p".to_string(),
-        target.port.to_string(),
-        "-i".to_string(),
-        target.key_path.clone(),
-        // A user's `ControlMaster auto` must not reuse a connection that skipped the pinned known_hosts.
-        "-o".to_string(),
-        "ControlMaster=no".to_string(),
-        "-o".to_string(),
-        "ControlPath=none".to_string(),
-        format!("{}@{}", target.user, target.host),
-        command.to_string(),
-    ]
+    // The hardened option list lives in `ssh_transport`; `-v` stays because Test SSH parses the host key from it.
+    let endpoint = crate::ssh_transport::SshEndpoint {
+        host: target.host.clone(),
+        port: target.port,
+        user: target.user.clone(),
+        auth: crate::ssh_transport::SshAuth::Key { path: target.key_path.clone() },
+    };
+    let style = crate::ssh_transport::ArgvStyle { tty: false, verbose: true, keepalive: false };
+    crate::ssh_transport::exec_args_with(&endpoint, known_hosts, !accept_new, command, style)
 }
 
 /// A private temp directory for one SSH child (a known_hosts file, never secrets). The name has a random
@@ -641,7 +615,7 @@ mod tests {
         let path = std::path::Path::new("/tmp/llmide-known-hosts-test");
         let args = ssh_args_known(&prepared, REMOTE_COMMAND, path, false);
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1] == "StrictHostKeyChecking=yes"));
-        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("UserKnownHostsFile=/tmp/llmide-known-hosts-test")));
+        assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("UserKnownHostsFile=\"/tmp/llmide-known-hosts-test")));
         assert!(args.windows(2).any(|w| w[0] == "-o" && w[1].starts_with("GlobalKnownHostsFile=")));
         for flag in ["-a", "-x"] { assert!(args.contains(&flag.to_string()), "{flag}"); }
         for opt in ["ForwardAgent=no", "ClearAllForwardings=yes", "PermitLocalCommand=no", "ControlMaster=no", "ControlPath=none"] {

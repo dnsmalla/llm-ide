@@ -83,7 +83,7 @@ pub fn prepare_endpoint(host: &str, port: u16, user: &str, auth: SshAuth) -> Res
 /// Returns:
 ///     The argv, to be passed to `Command::new("ssh").args(...)` with no shell.
 pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str) -> Vec<String> {
-    exec_args_with(ep, known_hosts, strict, command, false)
+    exec_args_with(ep, known_hosts, strict, command, ArgvStyle::SERVER)
 }
 
 /// The same argv as [`exec_args`] with `-tt`, for a remote command that needs a pty (the SSH terminal).
@@ -91,13 +91,36 @@ pub fn exec_args(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'
 /// Why a separate function: the helper channel is a plain pipe, and a pty on it would turn the JSON lines into
 /// echoed, line-edited text. Everything else is identical, so the terminal keeps the same host-key and auth rules.
 pub fn exec_args_tty(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str) -> Vec<String> {
-    exec_args_with(ep, known_hosts, strict, command, true)
+    exec_args_with(ep, known_hosts, strict, command, ArgvStyle { tty: true, ..ArgvStyle::SERVER })
 }
 
-fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &'static str, tty: bool) -> Vec<String> {
-    // No `-v`: nothing reads ssh's debug output, and it would only add noise to a captured stderr.
-    let mut args = vec!["-a".to_string(), "-x".to_string()];
-    if tty {
+/// The per-caller differences of the one hardened exec argv.
+#[derive(Clone, Copy)]
+pub(crate) struct ArgvStyle {
+    /// `-tt`, for a remote command that needs a pty.
+    pub tty: bool,
+    /// `-v` first: the hub Test reads the host key fingerprint from ssh's debug output.
+    pub verbose: bool,
+    /// `ServerAlive*` keepalives, for long silent sessions.
+    pub keepalive: bool,
+}
+
+impl ArgvStyle {
+    /// SSH server mode: no debug output, keepalives on.
+    pub(crate) const SERVER: ArgvStyle = ArgvStyle { tty: false, verbose: false, keepalive: true };
+}
+
+/// The one hardened exec argv. `command` may be a runtime string for the hub deploy stages; those are fixed
+/// constants too (see `remote_deploy`), never webview text.
+pub(crate) fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &str, style: ArgvStyle) -> Vec<String> {
+    // `-v` only where the caller parses ssh's debug output; otherwise it would just add noise to stderr.
+    let mut args = Vec::new();
+    if style.verbose {
+        args.push("-v".to_string());
+    }
+    args.push("-a".to_string());
+    args.push("-x".to_string());
+    if style.tty {
         args.push("-tt".to_string());
     }
     push_option(&mut args, "ForwardAgent=no");
@@ -106,9 +129,11 @@ fn exec_args_with(ep: &SshEndpoint, known_hosts: &Path, strict: bool, command: &
     push_no_connection_sharing(&mut args);
     push_host_key_options(&mut args, known_hosts, if strict { "yes" } else { "accept-new" });
     push_auth_options(&mut args, ep);
-    // Long remote Loop runs sit silent for minutes; keepalives stop idle timeouts and fail a dead link.
-    push_option(&mut args, "ServerAliveInterval=30");
-    push_option(&mut args, "ServerAliveCountMax=4");
+    if style.keepalive {
+        // Long remote Loop runs sit silent for minutes; keepalives stop idle timeouts and fail a dead link.
+        push_option(&mut args, "ServerAliveInterval=30");
+        push_option(&mut args, "ServerAliveCountMax=4");
+    }
     push_endpoint(&mut args, ep);
     args.push(command.to_string());
     args
