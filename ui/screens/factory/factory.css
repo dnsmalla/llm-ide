@@ -81,6 +81,8 @@
 .fx-card-meta { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11px; color: var(--tok-color-text-muted); font-variant-numeric: tabular-nums; }
 .fx-card-line { margin: 0; padding: 6px 8px; border-radius: var(--fx-r-sm); background: var(--tok-color-body); color: var(--tok-color-text-muted); font-family: var(--tok-type-mono-family); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fx-card .fx-hint { font-size: 11px; }
+.fx-link { align-self: flex-start; padding: 0; border: 0; background: none; font: inherit; font-size: 11px; color: var(--tok-color-accent); text-decoration: underline; cursor: pointer; }
+.fx-link:focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
 .fx-card .fx-actions { padding-top: 2px; }
 .fx-card .fx-btn { min-height: 26px; padding: 0 10px; font-size: var(--fx-fs-small); }
 .fx-failure { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: var(--fx-r-sm); background: color-mix(in srgb, var(--tok-color-danger) 8%, transparent); font-size: 11px; }

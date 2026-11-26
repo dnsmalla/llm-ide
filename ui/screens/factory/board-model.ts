@@ -16,6 +16,8 @@ export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   /** The board lane the card sits in (a process step, or backlog / MR / done). */
   lane: string;
+  /** Done cards: the MR as a text link (they have no buttons); the url itself is re-read from the record on click. */
+  request?: { label: string } | null;
   /** The status the card is in (the old column's label), shown as a badge. */
   status: string;
   /** How far a live run is through its steps, 0..1; null when not running or not known. */
@@ -98,10 +100,12 @@ export function laneFor(column: Column, f: ItemFacts, steps: readonly string[]):
   if (column === "done") return LANE_MERGED;
   // An MR closed without merge is not done: back to Backlog, where Discard frees the issue to start again.
   if (rec?.ship && f.ship?.state === "closed") return LANE_BACKLOG;
-  // Finished, not merged: ready to ship, or an MR open (also when CI failed or a reviewer commented).
-  // A run held for a person is finished work waiting on a decision, so it sits in Done, not at its last step.
-  if (rec?.ship || column === "readyToShip" || (column === "needsYou" && rec?.statusCode === "awaiting_review" && !rec.autoShipBlocked)) return LANE_DONE;
+  // Done = an MR exists (open, also when CI failed or a reviewer commented). Finished work with no MR yet (Ship, held for
+  // review) stays at its last step, which is the Review lane for a passed run.
+  if (rec?.ship) return LANE_DONE;
   if (column === "inbox") return LANE_BACKLOG;
+  // A record without a stage name still passed every step: the last one.
+  if (column === "readyToShip" || rec?.statusCode === "awaiting_review") return stageLane(rec?.failingStage?.name ?? rec?.lastStage, steps) ?? (steps.length ? stepLane(steps[steps.length - 1]) : LANE_BACKLOG);
   // Stopped: the failing step, else the last one reached; an interrupted run with no record has none.
   return stageLane(rec?.failingStage?.name ?? rec?.lastStage, steps) ?? (rec && steps[0] ? stepLane(steps[0]) : LANE_BACKLOG);
 }
@@ -184,7 +188,9 @@ export function buildBoard(items: readonly WorkItemRecord[], facts: ReadonlyMap<
   for (const item of items) {
     const { column, note } = columnFor(facts.get(item.key) ?? EMPTY_FACTS);
     const f = facts.get(item.key) ?? EMPTY_FACTS;
-    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane: laneFor(column, f, steps), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null, ...(note === NOTE.stoppedNoMr ? { loopback: f.lastRecord?.loopback ?? null } : {}), ...(f.lastRecord?.stepReviews ? { stepReviews: f.lastRecord.stepReviews } : {}) });
+    const lane = laneFor(column, f, steps);
+    const request = lane === LANE_DONE ? requestLink(f.lastRecord?.ship?.url ?? null) : null;
+    board[column].push({ key: item.key, title: item.title, source: item.source, note, lane, ...(lane === LANE_DONE ? { request } : {}), status: COLUMN_LABELS[column], progress: f.live?.progress && f.live.progress.stageCount > 0 ? Math.min(1, (f.live.progress.stageIndex + 1) / f.live.progress.stageCount) : null, actions: lane === LANE_DONE ? [] : actionsFor(column, note, process), costUsd: f.lastRecord?.costUsd ?? null, durationSeconds: f.lastRecord?.durationSeconds ?? null, progressLabel: f.live?.progress ? progressLabel(f.live.progress, nowMs) : null, lastLine: f.live?.log.at(-1) ?? null, verdict: f.lastRecord?.verdict ?? null, changed: f.lastRecord?.changed ?? null, test: f.lastRecord?.test ?? null, failingStage: f.lastRecord?.failingStage ?? null, readiness: column === "needsDecision" ? f.lastRecord?.readiness ?? null : null, notShipped: note === NOTE.notShipped ? f.lastRecord?.autoShipBlocked ?? null : null, shipOverride: f.lastRecord?.ship?.secretOverride ?? null, ...(note === NOTE.stoppedNoMr ? { loopback: f.lastRecord?.loopback ?? null } : {}), ...(f.lastRecord?.stepReviews ? { stepReviews: f.lastRecord.stepReviews } : {}) });
   }
   return board;
 }
@@ -345,6 +351,15 @@ export function outputEditedSignals(
     out.push({ runId, payload: { extraCommits: extra } });
   }
   return out;
+}
+
+/** The text link a Done card shows for its MR, or null when the url is not one we open. */
+export function requestLink(url: string | null): { label: string } | null {
+  const safe = safeRequestUrl(url);
+  if (!safe) return null;
+  const n = /\/pull\/(\d+)/.exec(safe)?.[1];
+  const m = /\/merge_requests\/(\d+)/.exec(safe)?.[1];
+  return { label: n ? `PR #${n}` : m ? `MR !${m}` : "Open merge request" };
 }
 
 /** A PR/MR link is only opened when it is https on github.com or gitlab.com (Phase A ships to gitlab.com only). */

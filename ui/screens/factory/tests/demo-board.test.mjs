@@ -40,7 +40,7 @@ test("demo data: one item per column keeps its card, actions, note and ship stat
   assert.deepEqual(board.working[0].actions, []);
   assert.deepEqual(board.needsYou[0].actions, ["resume", "openDiff", "discard"]);
   assert.deepEqual(board.readyToShip[0].actions, ["openDiff", "ship", "discard"]);
-  assert.deepEqual(board.shipped[0].actions, ["openRequest", "openDiff"]);
+  assert.deepEqual(board.shipped[0].actions, []);
   assert.deepEqual(board.done[0].actions, ["openRequest", "discard"]);
   assert.equal(board.shipped[0].note, "CI running");
   assert.equal(board.working[0].lastLine, "reading context");
@@ -52,7 +52,7 @@ test("demo data: one item per column keeps its card, actions, note and ship stat
   const where = Object.fromEntries(lanes.flatMap((l) => l.cards.map((c) => [c.title, `${l.label} · ${c.status}`])));
   assert.deepEqual(where, {
     "Demo 101": "Backlog · Inbox", "Demo 102": "Plan · Needs decision", "Free text idea": "Plan · Working", "Demo 104": "Verify · Needs you",
-    "Demo 105": "Done · Ready to ship", "Demo 106": "Done · Shipped",
+    "Demo 105": "Review · Ready to ship", "Demo 106": "Done · Shipped",
   });
 
   const live = assembleFacts(items[2], { projectRoot: "/demo", live: [facts.get(items[2].key).live], records, worktrees: new Map([["r3", {}]]), ship: new Map(), lastKnown: new Map() });
