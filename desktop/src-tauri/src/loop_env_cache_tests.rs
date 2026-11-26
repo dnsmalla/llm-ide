@@ -11,6 +11,11 @@ fn temp(name: &str) -> PathBuf {
     std::fs::canonicalize(dir).unwrap()
 }
 
+/// The restore the tests drive, with the error flattened to its message (production keeps the class).
+fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &str) -> Result<bool, String> {
+    restore_classified(project, worktree, spec, key).map_err(|e| e.message().to_string())
+}
+
 fn spec(setup: &str) -> EnvCacheSpec {
     EnvCacheSpec { key_files: vec!["requirements.txt".into()], setup: setup.into(), paths: vec![".venv".into()] }
 }

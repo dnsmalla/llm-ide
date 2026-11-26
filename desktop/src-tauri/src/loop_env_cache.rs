@@ -420,12 +420,6 @@ fn read_origin(entry: &Path) -> Vec<String> {
     v.get("origins").and_then(|x| x.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_string)).collect()).unwrap_or_default()
 }
 
-/// Copies the cached paths for `key` into `worktree`. `Ok(false)` is a miss. A path that already exists in the worktree
-/// is left alone. Text files that name the folder the environment was built in are pointed at `worktree`.
-pub(crate) fn restore(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &str) -> Result<bool, String> {
-    restore_classified(project, worktree, spec, key).map_err(|e| e.message().to_string())
-}
-
 /// Why a restore failed, so the caller only discards a cache entry that is itself at fault.
 #[derive(Debug)]
 enum RestoreError {
@@ -449,6 +443,8 @@ impl RestoreError {
     }
 }
 
+/// Copies the cached paths for `key` into `worktree`. `Ok(false)` is a miss. A path that already exists in the worktree
+/// is left alone. Text files that name the folder the environment was built in are pointed at `worktree`.
 fn restore_classified(project: &Path, worktree: &Path, spec: &EnvCacheSpec, key: &str) -> Result<bool, RestoreError> {
     let entry = cache_root(project).join(key);
     let files = entry.join("files");
