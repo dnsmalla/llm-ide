@@ -26,8 +26,8 @@ pub const KEY_MAX: usize = 64;
 pub const SEEN_MAX: usize = 256;
 
 /// The section ids the webview may report (`SectionId` in ui/screens/shell/sections.ts; a TS test keeps them in step).
-pub const SECTIONS: [&str; 16] = [
-    "welcome", "chat", "explorer", "library", "live", "settings", "graph", "issues", "gantt", "loop", "remote", "docgen", "visual",
+pub const SECTIONS: [&str; 15] = [
+    "welcome", "chat", "explorer", "library", "live", "settings", "graph", "issues", "gantt", "loop", "docgen", "visual",
     "autotasks", "conflicts", "spike",
 ];
 
