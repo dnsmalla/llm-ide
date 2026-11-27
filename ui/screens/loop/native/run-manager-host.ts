@@ -1,5 +1,6 @@
 // Wires the factory run manager to the real host, core, file API and project store. The Factory board calls
 // installRunManagerHost() on mount; it is idempotent, so runs survive the board unmounting.
+import { withShipLock } from "./ship-lock.ts";
 import { createHostFs } from "../../explorer/fs";
 import { sendToFactory, workItemFromIssue } from "../../factory/intake.ts";
 import { attachRun, readItems, type WorkItemRecord } from "../../factory/items.ts";
@@ -60,23 +61,13 @@ const BUS_POLL_MS = 60_000;
 /** The `autoShip` event of the run manager (also what a non-Factory loop's run end calls): the one shipper for every loop. */
 export type FinishedRunShip = Parameters<NonNullable<Parameters<typeof configureRunManager>[0]["autoShip"]>>[0];
 
-/** Worktrees with a ship in flight through this shipper (board Approve, run-end ship, Factory auto-ship), so the same
- *  branch is never pushed twice at once. */
-const shippingRuns = new Set<string>();
-
 /**
  * Opens the draft MR of a finished run through `autoShipRun`, with every block it has (secret scan in the core, CI/hook
  * files, diff too large, missing GitHub/GitLab setup). Returns "Draft MR: <url>" or "MR not opened: <why>", "" when the
  * run is not one that ships. Used by the Factory and by every other loop; there is no second shipper.
  */
-export async function shipFinishedRun(e: FinishedRunShip): Promise<string> {
-  if (shippingRuns.has(e.runId)) return "MR not opened: this run's branch is already being shipped.";
-  shippingRuns.add(e.runId);
-  try {
-    return await shipFinishedRunOnce(e);
-  } finally {
-    shippingRuns.delete(e.runId);
-  }
+export function shipFinishedRun(e: FinishedRunShip): Promise<string> {
+  return withShipLock(e.runId, () => "MR not opened: this run's branch is already being shipped.", () => shipFinishedRunOnce(e));
 }
 
 async function shipFinishedRunOnce(e: FinishedRunShip): Promise<string> {

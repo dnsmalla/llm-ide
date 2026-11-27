@@ -31,6 +31,7 @@ import { walkOpenIssues } from "./open-issues.ts";
 import { Card } from "./Card.tsx";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { LoopRuns } from "./LoopRuns.tsx";
+import { FinalReviewToggle } from "./FinalReviewToggle.tsx";
 
 
 // Wire the run manager to the real host once, when this chunk loads: startRun throws without it, and runs must
@@ -492,12 +493,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
         </label>
-        <div className="fx-field fx-field-inline" role="group" aria-label="Final review">
-          <span>Final review</span>
-          {(["auto", "human"] as const).map((mode) => (
-            <button key={mode} type="button" className={`fx-btn${reviewMode === mode ? " fx-primary" : ""}`} aria-pressed={reviewMode === mode} disabled={reviewMode === null} title={mode === "auto" ? "AI reviews the change, then it ships" : "The run waits for your approval"} onClick={() => chooseReviewMode(mode)}>{mode === "auto" ? "Auto" : "Human"}</button>
-          ))}
-        </div>
+        <FinalReviewToggle mode={reviewMode} onChoose={chooseReviewMode} />
         <button type="button" className="fx-btn" onClick={() => void (cleanup ? setCleanup(null) : openCleanup())} aria-expanded={cleanup !== null} disabled={worktrees.size === 0}>Clean up…</button>
         <button type="button" className="fx-btn" onClick={() => { setIssuesTick((n) => n + 1); void loadFacts().then(() => refreshStatus(true)); }}>Refresh</button>
         <button type="button" className="fx-btn fx-primary" onClick={() => setAddOpen((v) => !v)} aria-expanded={addOpen}>Add</button>

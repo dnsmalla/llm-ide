@@ -107,6 +107,7 @@ export function shipCopy(result: ShipResult): string {
     const m = typeof result.message === "string" ? result.message : "";
     return /^The branch on (GitHub|GitLab) has commits that are not from the merged MR; nothing was overwritten\.$/.test(m) ? m : "The branch on the provider has commits that are not from the merged MR; nothing was overwritten.";
   }
+  if (!result.ok && result.code === "busy") return "This run's branch is already being shipped (Approve on the board or the run end). Nothing else was pushed; check the board in a moment.";
   switch (shipState(result)) {
     case "shipped": {
       const r = result as Extract<ShipResult, { ok: true }>;

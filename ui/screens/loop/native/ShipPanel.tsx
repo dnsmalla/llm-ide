@@ -3,6 +3,7 @@
 // commits, scans for secrets, pushes and opens a DRAFT pull/merge request. Discard removes the worktree and branch.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { StatusBanner } from "@llmide/ui-kit";
+import { withShipLock } from "./ship-lock.ts";
 import type { FsApi } from "../../explorer/fs";
 import { displayText } from "../../explorer/scm/model";
 import { invokeHost } from "../../shell/host";
@@ -118,7 +119,7 @@ export function ShipPanel({ info, item, initialDiff, passed, reviewedPatchId = n
       if (!diff?.patchId) throw Object.assign(new Error("the reviewed diff has no patch id"), { code: "diff_changed" });
       const baseReq = shipRequest(info, item, repo, review, diff.patchId, processName);
       if (!title.trim()) { setMessage({ severity: "warning", text: "Enter a title first." }); return; }
-      const r = await core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, ...(mergedMr ? { mergedMr } : {}), title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 });
+      const r = await withShipLock(info.runId, () => { throw Object.assign(new Error("this run's branch is already being shipped (Approve on the board or the run end)"), { code: "busy" }); }, () => core.request<{ url?: unknown; commit?: unknown; reused?: unknown; secretOverride?: unknown }>("/kb/loop/ship", { method: "POST", body: { ...baseReq, ...(mergedMr ? { mergedMr } : {}), title: title.trim(), body, ...(allowSecret ? { allowSecret: true } : {}) }, timeoutMs: 5 * 60_000 }));
       const so = r.secretOverride && typeof r.secretOverride === "object" ? r.secretOverride as Record<string, unknown> : null;
       const soHits = Array.isArray(so?.hits) ? so.hits.filter((h): h is { rule: string; file: string | null; line: number } => typeof h === "object" && h !== null && typeof (h as { rule?: unknown }).rule === "string").slice(0, 20) : [];
       result = { ok: true, url: typeof r.url === "string" ? r.url : "", commit: typeof r.commit === "string" ? r.commit : "", reused: r.reused === true, ...(so && typeof so.rule === "string" ? { secretOverride: { rule: so.rule, file: typeof so.file === "string" ? so.file : null, line: typeof so.line === "number" ? so.line : null, hits: soHits, total: typeof so.total === "number" ? so.total : soHits.length } } : {}) };

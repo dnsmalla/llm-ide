@@ -744,6 +744,17 @@ test("shipHeldRun ships a held run through autoShip as a success and starts no r
   assert.equal(rm.liveRuns().length, 0, "approving starts no run");
 });
 
+test("shipHeldRun approves any loop's held run: a loop board passes its name and merged MR through to the shipper", async () => {
+  const shipped = [];
+  setup({ autoShip: async (e) => { shipped.push(e); return "Draft MR: https://example/mr/3"; } });
+  world.list = [{ runId: "test-1", project: "/p", repo: "/p", worktree: "/p/system/loop-worktrees/test-1", branch: "loop/test-1", baseCommit: "abc" }];
+  await rm.shipHeldRun("/p", item(3), { runId: "test-1", entry: { id: "e3", startedAt: "x" }, statusCode: "awaiting_review", shipped: false, awaiting: { held: "success", kind: "passed", failedStage: null }, processName: "Test", mergedMr: "https://example/mr/1" });
+  assert.equal(shipped[0].processName, "Test");
+  assert.equal(shipped[0].mergedMr, "https://example/mr/1");
+  await rm.shipHeldRun("/p", item(3), { runId: "test-1", entry: { id: "e4", startedAt: "x" }, awaiting: { held: "success", kind: "passed", failedStage: null } });
+  assert.equal("processName" in shipped[1] || "mergedMr" in shipped[1], false, "a Factory approve sends neither");
+});
+
 test("shipHeldRun of a failed hold keeps the failed status and the stored kind", async () => {
   const shipped = [];
   setup({ autoShip: async (e) => { shipped.push(e); return ""; } });

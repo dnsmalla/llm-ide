@@ -8,7 +8,8 @@ import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops, saveLoops } from "../loop/native/store.ts";
 import { setReviewMode } from "../loop/native/review-ui.ts";
-import { repoPrefixFor } from "../loop/native/worktree-run.ts";
+import { shipHeldRun } from "../loop/native/run-manager.ts";
+import { FinalReviewToggle } from "./FinalReviewToggle.tsx";
 import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
@@ -376,12 +377,10 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
       if (target.kind !== "ok") { setDiscardMsg({ text: "Not approved: this run's worktree was removed, so there is nothing to ship.", kind: "error" }); return; }
       const info = target.info;
-      const { shipFinishedRun } = await import("../loop/native/run-manager-host.ts");
-      const line = await shipFinishedRun({
-        runId: info.runId, projectRoot, mode: "full",
-        item: { source: "text", id: null, title: `${run.loopName} run ${info.runId}`, body: "", repo: null, key: `loop:${info.runId}`, provider: null },
-        info, entry: run, statusCode: "success", needsDecision: false, failedStage: null, kind: "passed",
-        processName: run.loopName, mergedMr: held.mergedMr, runPrefix: repoPrefixFor(projectRoot, info.worktree),
+      // The same Approve as the Factory board: shipHeldRun, through the one shipper with all its blocks.
+      const line = await shipHeldRun(projectRoot, { source: "text", id: null, title: `${run.loopName} run ${info.runId}`, body: "", repo: null, key: `loop:${info.runId}`, provider: null }, {
+        runId: info.runId, entry: run, statusCode: run.statusCode, shipped: false,
+        awaiting: { held: "success", kind: "passed", failedStage: null }, processName: run.loopName, mergedMr: held.mergedMr,
       });
       setDiscardMsg({ text: line || "Not approved: nothing was shipped.", kind: line.startsWith("Draft MR:") ? "info" : "error" });
       setReload((n) => n + 1);
@@ -400,13 +399,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
           <p className="fx-summary">{shownCards.length} run{shownCards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
-        <div className="fx-field fx-field-inline" role="group" aria-label="Final review">
-          <span>Final review</span>
-          {(["auto", "human"] as const).map((mode) => {
-            const current = boardLoop?.config.reviewMode === "human" ? "human" : "auto";
-            return <button key={mode} type="button" className={`fx-btn${boardLoop && current === mode ? " fx-primary" : ""}`} aria-pressed={boardLoop ? current === mode : undefined} disabled={!boardLoop || modeBusy} title={mode === "auto" ? "AI reviews the change, then it ships" : "The run waits for your approval"} onClick={() => void chooseReviewMode(mode)}>{mode === "auto" ? "Auto" : "Human"}</button>;
-          })}
-        </div>
+        <FinalReviewToggle mode={boardLoop ? (boardLoop.config.reviewMode === "human" ? "human" : "auto") : null} busy={modeBusy} onChoose={(mode) => void chooseReviewMode(mode)} />
         <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
       </header>
       {boardLoop && bar ? (
