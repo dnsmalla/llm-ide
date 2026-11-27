@@ -238,13 +238,18 @@ outside your server home folder, and a project folder that would itself be a bro
 In **Settings → Project**, **Paths** lists the project folders and **Memory** lists its memory files and graph.
 Opening an empty server folder sets it up as a project, as it does locally. Opening a folder that already has
 files writes nothing. **Rebuild missing folders** works in any open server folder. It creates the folders and files
-that are missing, including the project marker, and never overwrites one that exists.
+that are missing, including the project marker, and never overwrites one that exists. Rebuild stops without
+writing anything if a folder it has to create or write into is a link that leads outside the open folder, or a
+broken link. A linked folder it writes nothing into, such as `code` linked to another disk, does not stop it.
+
+If Rebuild or a clone answers "The server part is older than this app, so it cannot set up this folder.", the
+server still runs a helper from before this behaviour. Connect again from **Settings → Server** to update it.
 
 ### Clone a repository on the server
 
 **Repositories** can clone a repository into the open server folder. The folder does not need to be a project. The
 clone goes to `code/<name>` inside the open folder, for example `code/Hello-World`, and the app shows the server path
-when it finishes.
+when it finishes. A clone is refused if `code` is a link that leads outside the open folder.
 
 The clone runs on the server, so the server needs `git` and outbound https access. Only GitHub and GitLab
 https URLs are accepted. If `git` is missing or the network blocks the host, the clone stops with a message that

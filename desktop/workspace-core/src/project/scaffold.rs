@@ -47,6 +47,9 @@ pub(crate) const REQUIRED_DIRECTORIES: [&str; 17] = [
     ".claude",
 ];
 
+/// Note templates under `templates/<folder>/template.md`; the one list for both the pre-flight check and the writes.
+const TEMPLATES: [(&str, &str); 2] = [("meeting-note", MEETING_TEMPLATE), ("email-note", EMAIL_TEMPLATE)];
+
 const GITKEEP_DIRS: [&str; 7] = ["llm-doc", "llm-doc/plans", "llm-doc/loop", "data", "source/meetings", "source/emails", "source/documents"];
 
 const WINDOWS_RESERVED: [&str; 22] = [
@@ -156,8 +159,21 @@ fn fill(template: &str, p: &NewProject) -> String {
     template.replace("@ID@", &p.id).replace("@LANG@", &p.language.to_uppercase()).replace("@DATE@", &p.created_iso).replace("@NAME@", &p.display_name)
 }
 
+/// Folders `scaffold` creates files in besides `GITKEEP_DIRS` (the template folders are listed in `TEMPLATES`).
+const WRITTEN_INTO: [&str; 2] = ["system", ".claude"];
+
+/// The folders to check for a link out of `root` before `scaffold` writes anything. Only a folder that is created
+/// (missing) or written into can carry a write out, so an existing linked folder that receives nothing (say
+/// `code -> ~/src`) stays allowed; files need no check because `write_if_absent` (create_new) never follows a link.
+pub(crate) fn preflight_dirs(root: &Path) -> Vec<String> {
+    let receives = |d: &&&str| !root.join(**d).is_dir() || WRITTEN_INTO.contains(*d) || GITKEEP_DIRS.contains(*d);
+    let dirs = REQUIRED_DIRECTORIES.iter().filter(receives).map(|d| d.to_string());
+    dirs.chain(TEMPLATES.iter().map(|(f, _)| format!("templates/{f}"))).collect()
+}
+
 /// Scaffolds `root` (which must exist) for `project`. Idempotent: every file is written only when absent.
 pub fn scaffold(root: &Path, project: &NewProject) -> Result<(), String> {
+    preflight_dirs(root).iter().try_for_each(|rel| crate::fs::ensure_writable_inside(root, rel))?;
     for dir in REQUIRED_DIRECTORIES {
         fs::create_dir_all(root.join(dir)).map_err(|e| format!("cannot create {dir}: {e}"))?;
     }
@@ -175,7 +191,7 @@ pub fn scaffold(root: &Path, project: &NewProject) -> Result<(), String> {
     for name in ["CLAUDE.md", "AGENTS.md", "GEMINI.md", ".cursorrules"] {
         write_if_absent(&root.join(name), &entry)?;
     }
-    for (folder, body) in [("meeting-note", MEETING_TEMPLATE), ("email-note", EMAIL_TEMPLATE)] {
+    for (folder, body) in TEMPLATES {
         let dir = root.join("templates").join(folder);
         fs::create_dir_all(&dir).map_err(|e| format!("cannot create templates/{folder}: {e}"))?;
         write_if_absent(&dir.join("template.md"), body)?;

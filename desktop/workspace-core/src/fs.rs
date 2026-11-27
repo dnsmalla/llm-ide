@@ -104,6 +104,28 @@ fn inside(p: &Path, root: &Path) -> bool {
     p.starts_with(root)
 }
 
+/// Refuses a write or create at `root/rel` that would land outside `root` through a symlink.
+///
+/// Pre: `root` exists; `rel` is a relative path that is about to be written or created (it need not exist yet).
+/// Post: `Ok(())` only when the deepest EXISTING ancestor of `root/rel` (the path itself when it exists, a
+/// dangling link counting as existing) canonicalises to a path inside the canonicalised `root`; a link that stays
+/// inside the root passes. Otherwise `Err("<rel> resolves outside the project root")`. Nothing is created.
+/// Why: project setup (scaffold, clone) runs in any opened folder, and `create_dir_all` / `create` follow links.
+pub(crate) fn ensure_writable_inside(root: &Path, rel: &str) -> Result<(), String> {
+    let refused = || format!("{rel} resolves outside the project root");
+    let real_root = std::fs::canonicalize(root).map_err(|e| format!("cannot resolve the project root: {e}"))?;
+    let mut probe = root.join(rel);
+    while std::fs::symlink_metadata(&probe).is_err() {
+        if !probe.pop() || !probe.starts_with(root) {
+            return Err(refused());
+        }
+    }
+    match std::fs::canonicalize(&probe) {
+        Ok(real) if inside(&real, &real_root) => Ok(()),
+        _ => Err(refused()),
+    }
+}
+
 /// Canonical path of an EXISTING entry, required to lie inside the root.
 pub fn resolve_existing(root: &Path, rel: &str) -> R<PathBuf> {
     let parts = split_rel(rel)?;

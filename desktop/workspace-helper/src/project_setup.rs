@@ -74,6 +74,8 @@ pub(crate) fn graph_read_capped(root: &Path, path: &str, max_file: u64, max_answ
 fn scaffold_error(message: String) -> FsError {
     let code = if message.contains("already exists") {
         "already_exists"
+    } else if message.contains("resolves outside the project root") {
+        "outside_root"
     } else if message.contains("too broad") {
         "root_too_broad"
     } else {
