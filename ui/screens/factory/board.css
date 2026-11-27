@@ -1,19 +1,2 @@
-
-/* Non-Factory loops: run cards from system/loop-runs. */
-.fx-lanes { display: flex; gap: 12px; padding: 4px 20px 24px; overflow-x: auto; align-items: flex-start; }
-.fx-lane { min-width: 248px; width: 248px; background: var(--tok-color-surface2); border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 10px; }
-.fx-lane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.fx-lane-head h3 { margin: 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--tok-color-text-muted); }
-.fx-lane-head span { margin-left: auto; font-size: 11px; color: var(--tok-color-text-muted); }
-.fx-lane-cards { display: flex; flex-direction: column; gap: 8px; }
-.fx-run { background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-.fx-run[data-status="failed"] { border-left: 3px solid var(--tok-color-danger); }
-.fx-run[data-status="success"] { border-left: 3px solid var(--tok-color-accent3); }
-.fx-run-head { display: flex; align-items: center; gap: 8px; }
-.fx-run-status { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--tok-color-text-muted); }
-.fx-run-time { margin-left: auto; font-size: 11px; color: var(--tok-color-text-muted); }
-.fx-run-summary { margin: 0; font-size: 13px; line-height: 1.4; }
-.fx-run-meta { margin: 0; font-size: 11px; color: var(--tok-color-text-muted); }
+/* Shared overrides for the board screens; the loop boards draw through LaneBoard + Card (factory.css). */
 .fx-empty { color: var(--tok-color-text-muted); padding: 24px; }
-.fx-run[data-status="running"] { border-left: 3px solid var(--tok-color-accent); box-shadow: 0 0 0 1px var(--tok-color-accent) inset; }
-.fx-run[data-live] .fx-run-status { color: var(--tok-color-accent); }

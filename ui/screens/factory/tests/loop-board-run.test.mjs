@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { WAITING_LANE, afterSend, buildRunEvent, discardTarget, heldState, orderLanes, loopReadTargets, runBarState, loadHiddenRunIds, loadRunBarInput, saveHiddenRunIds, saveRunBarInput } from "../loop-board-run.ts";
+import { WAITING_LANE, afterSend, buildRunEvent, discardTarget, heldState, orderLanes, loopRunCardView, loopRunLanes, loopReadTargets, runBarState, loadHiddenRunIds, loadRunBarInput, saveHiddenRunIds, saveRunBarInput } from "../loop-board-run.ts";
+import { ACTION_LABELS, LANE_DONE, LANE_WAITING, stepLane } from "../board-model.ts";
 
 const stage = (over) => ({ id: "s", name: "S", kind: "skill", order: 0, enabled: true, skillId: "skills/refactor-apply", targetPath: null, ...over });
 const loop = (stages, over = {}) => ({ id: "L1", inputPath: "src", config: { stages, ...(over.workMode ? { workMode: over.workMode } : {}) } });
@@ -113,4 +114,78 @@ test("lanes keep the loop's steps in order, then other lanes, then Waiting for y
   assert.deepEqual(orderLanes(["Plan", "Write"], ["Done", "Write", "Old step", WAITING_LANE]), ["Plan", "Write", "Old step", WAITING_LANE, "Done"]);
   assert.deepEqual(orderLanes([], []), ["Done"]);
   assert.deepEqual(orderLanes(["Plan"], ["Done"]), ["Plan", "Done"]);
+});
+
+const NOW = Date.parse("2026-11-27T12:00:00Z");
+const entry = (over = {}) => ({ id: "r1", loopId: "L", loopName: "Test", startedAt: "2026-11-27T11:55:00Z", durationSeconds: 42, iterationsUsed: 2, statusCode: "success", statusSummary: "All good.", trigger: "manual", ...over });
+const wt = { runId: "test-1", branch: "loop/test", baseCommit: "c0", repo: "r" };
+const card = (over, record = null, held = null, steps = ["Plan", "Write"]) => loopRunCardView({ run: entry(over), record, steps, held, now: NOW });
+
+test("a passed run is a Done card with the facts the Factory card shows", () => {
+  const v = card({}, { costUsd: 0.5, worktree: wt, diffSummary: { files: ["a", "b"], additions: 3, deletions: 1, truncated: false } });
+  assert.equal(v.key, "r1");
+  assert.equal(v.title, "Test · 5m ago");
+  assert.equal(v.source, "text");
+  assert.equal(v.lane, LANE_DONE);
+  assert.equal(v.status, "passed");
+  assert.equal(v.note, "All good.");
+  assert.equal(v.durationSeconds, 42);
+  assert.equal(v.costUsd, 0.5);
+  assert.equal(v.progressLabel, "2 iterations");
+  assert.deepEqual(v.changed, { files: 2, additions: 3, deletions: 1, truncated: false });
+  assert.deepEqual(v.actions, ["openLog", "discard"]);
+});
+
+test("a failed run sits at the stage that failed, with its loopback and failing stage", () => {
+  const record = { worktree: wt, stages: [{ stageName: "Plan", run: { exitCode: 0 } }, { stageName: "Write", run: { exitCode: 1, stdout: "boom" } }, { stageName: "Later", run: { exitCode: 0 } }], loopback: { rounds: 3, maxRounds: 3, reason: "tests", findings: "x fails" } };
+  const v = card({ statusCode: "failed", statusSummary: "Verify failed", durationSeconds: 0 }, record);
+  assert.equal(v.lane, stepLane("Write"));
+  assert.equal(v.status, "failed");
+  assert.equal(v.durationSeconds, null);
+  assert.equal(v.loopback?.reason, "tests");
+  assert.equal(v.failingStage?.name, "Write");
+  assert.deepEqual(v.actions, ["openLog", "discard"]);
+  assert.equal(card({ statusCode: "failed" }, null).lane, stepLane("Plan"), "no record: the first step");
+});
+
+test("held runs: waiting approves, reviewDiff waits without Approve, superseded and shipped are Done", () => {
+  const base = { statusCode: "awaiting_review", statusSummary: "Passed. Waiting for your review." };
+  const waiting = card(base, { worktree: wt }, { kind: "waiting", worktreeRunId: "test-1", mergedMr: null });
+  assert.deepEqual([waiting.lane, waiting.status, waiting.actions], [LANE_WAITING, "awaiting review", ["approve", "openLog", "discard"]]);
+  const diff = card(base, { worktree: wt }, { kind: "reviewDiff" });
+  assert.deepEqual([diff.lane, diff.status, diff.actions], [LANE_WAITING, "review the diff", ["openLog", "discard"]]);
+  const old = card(base, { worktree: wt }, { kind: "superseded" });
+  assert.deepEqual([old.lane, old.status], [LANE_DONE, "not shipped"]);
+  assert.match(old.note, /^Passed\. Not shipped: a later run/);
+  const shipped = card(base, { worktree: wt }, { kind: "shipped" });
+  assert.deepEqual([shipped.lane, shipped.status, shipped.note], [LANE_DONE, "shipped", "Passed. Shipped."]);
+});
+
+test("the live card sits at its stage with no actions", () => {
+  const v = loopRunCardView({ run: entry({ statusCode: "running", statusSummary: "Running now" }), record: null, steps: ["Plan"], held: null, live: { lane: "Write", note: "Writing" }, now: NOW });
+  assert.deepEqual([v.lane, v.status, v.note, v.actions], [stepLane("Write"), "running", "Writing", []]);
+});
+
+test("loopRunLanes orders steps, other lanes, Waiting for you, then Done, and keeps card order", () => {
+  const a = card({ id: "a" });
+  const b = card({ id: "b", statusCode: "failed" }, { stages: [{ stageName: "Old step", run: { exitCode: 1 } }] });
+  const c = card({ id: "c", statusCode: "awaiting_review" }, { worktree: wt }, { kind: "waiting", worktreeRunId: "test-1", mergedMr: null });
+  const d = card({ id: "d" });
+  const lanes = loopRunLanes(["Plan", "Write"], [a, b, c, d]);
+  assert.deepEqual(lanes.map((l) => [l.id, l.label, l.cards.map((x) => x.key)]), [
+    [stepLane("Plan"), "Plan", []], [stepLane("Write"), "Write", []], [stepLane("Old step"), "Old step", ["b"]],
+    [LANE_WAITING, WAITING_LANE, ["c"]], [LANE_DONE, "Done", ["a", "d"]],
+  ]);
+  assert.deepEqual(loopRunLanes([], []).map((l) => l.id), [LANE_DONE]);
+  assert.equal(ACTION_LABELS.openLog, "Open run log & plan");
+});
+
+test("each Discard confirm carries its own action, so a later check of another card cannot redirect it", async () => {
+  const { readFileSync } = await import("node:fs");
+  const loopRuns = readFileSync(new URL("../LoopRuns.tsx", import.meta.url), "utf8");
+  const cardSrc = readFileSync(new URL("../Card.tsx", import.meta.url), "utf8");
+  assert.match(loopRuns, /onConfirm: \(\) => confirmDiscard\(run\.id, worktreeRunId\)/);
+  assert.match(loopRuns, /onConfirm: \(\) => confirmHide\(run\.id\)/);
+  assert.equal(/pendingDiscard/.test(loopRuns), false, "no shared ref between cards");
+  assert.match(cardSrc, /if \(confirm\) void confirm\(\); else onAction\("discard"\);/);
 });

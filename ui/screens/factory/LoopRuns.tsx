@@ -11,12 +11,14 @@ import { setReviewMode } from "../loop/native/review-ui.ts";
 import { shipHeldRun } from "../loop/native/run-manager.ts";
 import { FinalReviewToggle } from "./FinalReviewToggle.tsx";
 import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
-import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
-import { WAITING_LANE, afterSend, buildRunEvent, discardTarget, heldState, orderLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
+import { afterSend, buildRunEvent, discardTarget, heldState, loopRunCardView, loopRunLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
+import { LaneBoard } from "./LaneBoard.tsx";
+import { Card, type DiscardCheck } from "./Card.tsx";
+import type { CardAction } from "./board-model.ts";
 
 export interface LoopRunsProps {
   projectRoot: string;
@@ -26,44 +28,13 @@ export interface LoopRunsProps {
   active: boolean;
 }
 
-const DONE = "Done";
-const when = (iso: string): string => {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return iso;
-  const mins = Math.max(0, Math.round((Date.now() - t) / 60_000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const h = Math.round(mins / 60);
-  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
-};
-const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code.startsWith("stopped") ? "stopped" : code === "aborted" ? "cancelled" : code === "awaiting_review" ? "awaiting review" : code === "running" ? "running" : "failed";
-
-interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean; held?: HeldState["kind"] }
+interface RunCard { run: LoopRunIndexEntry; record: Record<string, unknown> | null; held: HeldState | null }
 
 const storage = (): Storage | null => { try { return window.localStorage; } catch { return null; } };
 
-/** The lane a run belongs to: Done on success, else its last executed or failed stage. */
-const HELD_WORD: Record<HeldState["kind"], string> = { waiting: "awaiting review", reviewDiff: "review the diff", superseded: "not shipped", shipped: "shipped" };
-const HELD_SUFFIX = / (Waiting for your review\.|Held: .*)$/;
-
-function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[], held: HeldState | null): { lane: string; note: string } {
-  if (run.statusCode === "success") return { lane: DONE, note: run.statusSummary };
-  if (held?.kind === "waiting" || held?.kind === "reviewDiff") return { lane: WAITING_LANE, note: run.statusSummary };
-  if (held?.kind === "shipped") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Shipped.` };
-  if (held?.kind === "superseded") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Not shipped: a later run of this loop has its branch now, or the branch was discarded.` };
-  const rows = Array.isArray(record?.stages) ? record.stages : [];
-  let last: string | null = null;
-  let failed: string | null = null;
-  for (const row of rows) {
-    if (typeof row !== "object" || row === null) continue;
-    const name = (row as { stageName?: unknown }).stageName;
-    if (typeof name === "string" && name.trim()) last = name.trim();
-    const exit = ((row as { run?: { exitCode?: unknown } }).run?.exitCode);
-    if (typeof exit === "number" && exit !== 0) failed = last;
-  }
-  const name = failed ?? last ?? steps[0] ?? DONE;
-  return { lane: name, note: run.statusSummary };
-}
+// A loop board lists at most 41 cards (40 journal runs + the live one), under LaneBoard's default page of 100, so "Show more" never appears.
+const NO_CAP: Readonly<Record<string, number>> = {};
+const noop = (): void => undefined;
 
 export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
@@ -87,15 +58,8 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   // Run ids this viewer discarded: hidden here only, the journal entry itself is never deleted.
   const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
   useEffect(() => setHidden(loadHiddenRunIds(scope, storage())), [scope]);
-  const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null);
-  const [confirmWorktreeRunId, setConfirmWorktreeRunId] = useState<string | null>(null);
-  // True when the confirm bar is for a run with no worktree at all (it worked on the main tree): Discard then only
-  // hides the card, after saying so — never auto-hidden, unlike a confirmed-gone shared worktree.
-  const [confirmHideOnly, setConfirmHideOnly] = useState(false);
-  const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
-  const [discardProvider, setDiscardProvider] = useState<"github" | "gitlab" | null>(null);
-  const [readingDiscard, setReadingDiscard] = useState(false);
-  const [discardBusy, setDiscardBusy] = useState(false);
+  // A ref, not state: a confirm callback made in an earlier render must still see a removal that started since.
+  const discardBusy = useRef(false);
   const [discardMsg, setDiscardMsg] = useState<{ text: string; kind: "error" | "info" } | null>(null);
   const loopId = boardLoop?.id ?? null;
 
@@ -140,8 +104,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         setError(null);
         setCards(shown.map((run, i) => {
           const held = heldState(run, loaded[i], shown);
-          const at = laneOf(run, loaded[i], names, held);
-          return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" && run.statusCode !== "awaiting_review", ...(held ? { held: held.kind } : {}) };
+          return { run, record: loaded[i], held };
         }));
       }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }).finally(() => { inFlight = false; });
     };
@@ -218,22 +181,18 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     saveRunBarInput(scope, next, storage());
   };
 
-  const liveCard: RunCard | null = live && live.loopName === scope ? {
-    lane: live.stageName || steps[0] || "Running",
-    note: liveCardNote(live),
-    failed: false,
-    live: true,
-    run: {
-      id: live.runId, loopId: scope, loopName: live.loopName, startedAt: live.startedAt,
-      durationSeconds: Math.max(0, Math.round((Date.now() - Date.parse(live.startedAt)) / 1000)),
-      iterationsUsed: 1, statusCode: "running", statusSummary: "Running now", trigger: "manual",
-    },
+  const liveRun: LoopRunIndexEntry | null = live && live.loopName === scope ? {
+    id: live.runId, loopId: scope, loopName: live.loopName, startedAt: live.startedAt,
+    durationSeconds: Math.max(0, Math.round((Date.now() - Date.parse(live.startedAt)) / 1000)),
+    iterationsUsed: 1, statusCode: "running", statusSummary: "Running now", trigger: "manual",
   } : null;
 
   const shownCards = cards.filter((c) => !hidden.has(c.run.id));
-  const allCards = liveCard ? [liveCard, ...shownCards.filter((c) => c.run.id !== liveCard.run.id)] : shownCards;
-
-  const lanes = useMemo(() => orderLanes(steps, allCards.map((c) => c.lane)), [steps, allCards]);
+  const listed = shownCards.filter((c) => c.run.id !== liveRun?.id);
+  const runById = new Map<string, LoopRunIndexEntry>([...(liveRun ? [liveRun] : []), ...listed.map((c) => c.run)].map((r) => [r.id, r]));
+  const liveView = liveRun && live ? loopRunCardView({ run: liveRun, record: null, steps, held: null, live: { lane: live.stageName || steps[0] || "Running", note: liveCardNote(live) } }) : null;
+  const views = [...(liveView ? [liveView] : []), ...listed.map((c) => loopRunCardView({ ...c, steps }))];
+  const lanes = loopRunLanes(steps, views);
 
   const openRun = async (id: string, startedAt: string) => {
     try {
@@ -270,7 +229,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
    *  (history.ts), so `null` has to be treated as "unreadable" here, not as "no worktree" — the record genuinely
    *  having no `worktree` field (decodeFactoryFields(record).worktree === null for a record that DID load) is the
    *  only thing that means "no-worktree". */
-  const openDiscard = async (run: LoopRunIndexEntry) => {
+  const openDiscard: (run: LoopRunIndexEntry) => ReturnType<DiscardCheck> = async (run) => {
     setDiscardMsg(null);
     const record = await loadRunRecord(fs, run.id, run.startedAt).catch(() => null);
     const fields = record === null ? { ok: false as const } : { ok: true as const, ...decodeFactoryFields(record) };
@@ -279,36 +238,30 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       .catch(() => ({ ok: false as const }));
     const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
     const target = discardTarget(run, fields, worktrees, cards.map((c) => c.run), runningLoopId);
-    if (target.kind === "unreadable") { setDiscardMsg({ text: "Could not check this run's worktree; try again.", kind: "error" }); return; }
-    if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
+    if (target.kind === "unreadable") { setDiscardMsg({ text: "Could not check this run's worktree; try again.", kind: "error" }); return { kind: "stop" }; }
+    if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return { kind: "stop" }; }
     if (target.kind === "gone") {
       hideRun(run.id);
       setDiscardMsg({ text: "Nothing to revert for this run — its worktree is already gone (removed by discarding another run of the same loop). The card is hidden.", kind: "info" });
-      return;
+      return { kind: "stop" };
     }
     if (target.kind === "no-worktree") {
-      setConfirmDiscardId(run.id);
-      setConfirmWorktreeRunId(null);
-      setConfirmHideOnly(true);
-      return;
+      // No worktree at all (it worked on the main tree): Discard only hides the card, after saying so — never auto-hidden.
+      return { kind: "confirm", label: "Hide card", onConfirm: () => confirmHide(run.id), text: "This run worked directly on the main tree: Discard cannot revert it through a worktree, and any uncommitted edits it left are still there. This only hides the card." };
     }
     const worktreeRunId = target.info.runId;
-    setConfirmDiscardId(run.id);
-    setConfirmWorktreeRunId(worktreeRunId);
-    setConfirmHideOnly(false);
-    setDiscardStatus(null);
-    setDiscardProvider(fields.ok ? fields.ship?.provider ?? null : null);
-    setReadingDiscard(true);
-    void invokeHost<unknown>("loop_worktree_status", { runId: worktreeRunId }).then(decodeWorktreeStatus).catch(() => null)
-      .then((status) => setDiscardStatus(status)).finally(() => setReadingDiscard(false));
+    return {
+      kind: "confirm",
+      onConfirm: () => confirmDiscard(run.id, worktreeRunId),
+      text: "Remove this run's worktree and branch? This reverts every change it made that is not already shipped.",
+      readStatus: () => invokeHost<unknown>("loop_worktree_status", { runId: worktreeRunId }),
+      provider: fields.ok ? fields.ship?.provider ?? null : null,
+    };
   };
 
   /** This run never had a worktree (it worked directly on the main tree): Discard can only hide the card, after
    *  saying so in the confirm bar — any uncommitted edits it left are untouched. */
   const confirmHide = (entryId: string) => {
-    setConfirmDiscardId(null);
-    setConfirmWorktreeRunId(null);
-    setConfirmHideOnly(false);
     setDiscardMsg({ text: "The card is hidden. Its edits, if any, are still in the working tree — Discard did not revert anything.", kind: "info" });
     hideRun(entryId);
   };
@@ -316,19 +269,23 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   /** Removes the run's worktree and branch (reverting every change it made that was never shipped), then hides its
    *  card: the Loop journal is append-only, so there is nothing to delete there. */
   const confirmDiscard = async (entryId: string, worktreeRunId: string) => {
-    if (discardBusy) return;
-    setDiscardBusy(true);
+    if (discardBusy.current) { setDiscardMsg({ text: "Another worktree is still being removed; confirm again when it is done.", kind: "info" }); return; }
+    discardBusy.current = true;
+    setDiscardMsg({ text: "Removing the worktree…", kind: "info" });
     try {
       await invokeHost("loop_worktree_remove", { runId: worktreeRunId });
-      setConfirmDiscardId(null);
-      setConfirmWorktreeRunId(null);
       setDiscardMsg(null);
       hideRun(entryId);
     } catch (e) {
       setDiscardMsg({ text: `The worktree could not be removed: ${e instanceof Error ? e.message : String(e)}`, kind: "error" });
     } finally {
-      setDiscardBusy(false);
+      discardBusy.current = false;
     }
+  };
+
+  const onAction = (run: LoopRunIndexEntry, action: CardAction) => {
+    if (action === "approve") void approve(run);
+    else if (action === "openLog") void openRun(run.id, run.startedAt);
   };
 
   /** Final review: the same Auto / Human switch as the Factory board, saved in this loop's own setting. An open
@@ -423,48 +380,30 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}
       {discardMsg ? <p className={discardMsg.kind === "error" ? "fx-error" : "fx-hint"} role="status">{discardMsg.text}</p> : null}
-      <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
-        {lanes.map((lane) => {
-          const inLane = allCards.filter((c) => c.lane === lane);
-          return (
-            <section className="fx-lane" key={lane} role="listitem" aria-label={`${lane} runs`}>
-              <header className="fx-lane-head"><h3>{lane}</h3><span>{inLane.length}</span></header>
-              <div className="fx-lane-cards">
-                {inLane.length === 0 ? <p className="fx-empty">No runs.</p> : null}
-                {inLane.map(({ run, note, failed, live: isLive, held }) => (
-                  <article key={run.id} className="fx-run" data-status={isLive ? "running" : failed ? "failed" : "success"} data-live={isLive || undefined}>
-                    <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{held ? HELD_WORD[held] : statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
-                    <p className="fx-run-summary">{note}</p>
-                    <p className="fx-run-meta">{run.durationSeconds ? `${run.durationSeconds}s` : "—"} · {run.iterationsUsed} iteration{run.iterationsUsed === 1 ? "" : "s"}</p>
-                    {isLive ? null : confirmDiscardId === run.id ? (
-                      <div className="fx-actions" role="group" aria-label="Confirm discard">
-                        <span className="fx-hint" role="alert">
-                          {confirmHideOnly
-                            ? "This run worked directly on the main tree: Discard cannot revert it through a worktree, and any uncommitted edits it left are still there. This only hides the card."
-                            : <>Remove this run's worktree and branch? This reverts every change it made that is not already shipped.{" "}
-                                {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, discardProvider ? { provider: discardProvider } : null)}</>}
-                        </span>
-                        <button
-                          type="button" className="fx-btn fx-danger" disabled={discardBusy || readingDiscard || (!confirmHideOnly && !confirmWorktreeRunId)}
-                          onClick={() => (confirmHideOnly ? confirmHide(run.id) : confirmWorktreeRunId && void confirmDiscard(run.id, confirmWorktreeRunId))}
-                        >
-                          {confirmHideOnly ? "Hide card" : "Discard"}
-                        </button>
-                        <button type="button" className="fx-btn" onClick={() => { setConfirmDiscardId(null); setConfirmWorktreeRunId(null); setConfirmHideOnly(false); }}>Cancel</button>
-                      </div>
-                    ) : (
-                      <div className="fx-actions">
-                        {held === "waiting" ? <button type="button" className="fx-btn fx-primary" disabled={approving !== null} title="Open the draft MR for this run's branch" onClick={() => void approve(run)}>{approving === run.id ? "Shipping…" : "Approve & ship"}</button> : null}
-                        <button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button>
-                        <button type="button" className="fx-btn" onClick={() => void openDiscard(run)}>Discard…</button>
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </section>
-          );
-        })}
+      <div className="fx-body">
+        <LaneBoard
+          label={`${scope} board`}
+          emptyText="No runs."
+          lanes={lanes}
+          shown={NO_CAP}
+          onShowMore={noop}
+          renderCard={(view) => {
+            const run = runById.get(view.key);
+            if (!run) return null;
+            const isLive = run.id === liveRun?.id;
+            return (
+              <Card
+                key={view.key}
+                view={view}
+                selected={false}
+                onOpen={isLive ? noop : () => void openRun(run.id, run.startedAt)}
+                onAction={(action) => onAction(run, action)}
+                busy={approving === run.id}
+                discardCheck={() => openDiscard(run)}
+              />
+            );
+          }}
+        />
       </div>
     </div>
   );

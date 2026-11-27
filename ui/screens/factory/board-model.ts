@@ -12,7 +12,7 @@ export { factoryAnchor, focusKeyFromAnchor } from "./anchor.ts";
 
 export const STATUS_REFRESH_MS = 5 * 60 * 1000;
 export const SHIP_STATUS_BATCH = 20;
-export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer" | "approve" | "requestChanges" | "retryRecord";
+export type CardAction = "start" | "openDiff" | "ship" | "sendBack" | "discard" | "openRequest" | "resume" | "finishChecks" | "rerun" | "intake" | "answer" | "approve" | "requestChanges" | "retryRecord" | "openLog";
 export interface CardView {
   key: string; title: string; source: WorkItemRecord["source"]; note: string | null; actions: CardAction[];
   /** The board lane the card sits in (a process step, or backlog / MR / done). */
@@ -43,7 +43,7 @@ export function loopbackTitle(l: LoopbackFacts): string {
   if (l.reason === "nochange") return "No code was changed and the tests fail";
   return `Stopped at its limit in round ${l.rounds} of ${l.maxRounds}`;
 }
-export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes", retryRecord: "Retry record" };
+export const ACTION_LABELS: Readonly<Record<CardAction, string>> = { start: "Start", openDiff: "Open diff", ship: "Ship", sendBack: "Send back", discard: "Discard", openRequest: "Open PR/MR", resume: "Resume", finishChecks: "Continue", rerun: "Run again from start", intake: "Run intake", answer: "Answer & continue", approve: "Approve", requestChanges: "Request changes", retryRecord: "Retry record", openLog: "Open run log & plan" };
 export const SOURCE_LABELS: Readonly<Record<WorkItemRecord["source"], string>> = { issue: "Issue", spec: "Spec", text: "Text" };
 export const EMPTY_FACTS: ItemFacts = { live: null, lastRecord: null, worktreeExists: false, ship: null, shipStatusError: false, lastKnownColumn: null };
 
@@ -84,6 +84,8 @@ function doneActions(note: string | null): CardAction[] {
 
 export const LANE_BACKLOG = "backlog";
 export const LANE_DONE = "done";
+/** A non-Factory loop board's lane for runs held for a person's approval (just before Done). */
+export const LANE_WAITING = "waiting";
 /** Merged work leaves the board: Done holds finished work that is not merged yet. */
 export const LANE_MERGED = "merged";
 export const stepLane = (name: string): string => `step:${name}`;
@@ -163,10 +165,11 @@ export type CardTone = "run" | "alert" | "warn" | "ok" | "ghost" | "idle";
 /** The colour family of a card, from its status. */
 export function cardTone(status: string): CardTone {
   switch (status) {
-    case "Working": return "run";
-    case "Needs you": return "alert";
+    case "Working": case "running": return "run";
+    case "Needs you": case "awaiting review": case "review the diff": case "failed": case "blocked": case "stopped": case "cancelled": return "alert";
+    case "passed": return "ok";
     case "Needs decision": return "warn";
-    case "Ready to ship": case "Shipped": case "Done": return "ok";
+    case "Ready to ship": case "Shipped": case "Done": case "shipped": return "ok";
     case "Open issue": return "ghost";
     default: return "idle";
   }

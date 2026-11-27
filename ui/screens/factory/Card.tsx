@@ -4,7 +4,13 @@ import { ACTION_LABELS, SOURCE_LABELS, cardTone, formatDuration, loopbackTitle, 
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import { formatStepReviews } from "../loop/native/issue-trail.ts";
 
-export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null, busy = false }: {
+/** A board's own answer to "may this card be discarded?": confirm with its text, or stop (the board said why itself). */
+export type DiscardCheck = () => Promise<
+  | { kind: "confirm"; text: string; /** The confirm button's label (default "Discard"). */ label?: string; /** Reads the worktree status the confirm states; absent = no status line. */ readStatus?: () => Promise<unknown>; provider?: "github" | "gitlab" | null; /** Runs on confirm instead of `onAction("discard")`, so each open confirm acts on its own card. */ onConfirm?: () => void | Promise<void> }
+  | { kind: "stop" }
+>;
+
+export function Card({ view, selected, onOpen, onAction, onDiscardStatus, requestProvider = null, busy = false, discardCheck }: {
   view: CardView;
   selected: boolean;
   onOpen: () => void;
@@ -14,15 +20,19 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
   requestProvider?: "github" | "gitlab" | null;
   /** Approve is shipping: it cannot be clicked again. */
   busy?: boolean;
+  /** A board with its own Discard cases (refused, already gone, hide-only) decides here before the confirm shows. */
+  discardCheck?: DiscardCheck;
 }): ReactNode {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [custom, setCustom] = useState<Extract<Awaited<ReturnType<DiscardCheck>>, { kind: "confirm" }> | null>(null);
+  const [checking, setChecking] = useState(false);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
   const [readingDiscard, setReadingDiscard] = useState(false);
   const [noteFor, setNoteFor] = useState<"sendBack" | "requestChanges" | null>(null);
   const [note, setNote] = useState("");
   const [answer, setAnswer] = useState("");
   return (
-    <li className="fx-card" data-key={view.key} data-selected={selected} data-tone={cardTone(view.status)} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setNoteFor(null); setNote(""); } }}>
+    <li className="fx-card" data-key={view.key} data-selected={selected} data-tone={cardTone(view.status)} onKeyDown={(e) => { if (e.key === "Escape") { setConfirmDiscard(false); setCustom(null); setNoteFor(null); setNote(""); } }}>
       <div className="fx-card-top">
         <span className="fx-status">{view.status}</span>
         {view.note ? <span className="fx-note">{view.note}</span> : null}
@@ -65,21 +75,33 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : null}
       {confirmDiscard ? (
         <div className="fx-actions" role="group" aria-label="Confirm discard">
-          <span className="fx-hint" role="alert">Remove this card and its worktree? {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, requestProvider ? { provider: requestProvider } : null)}</span>
-          <button type="button" className="fx-btn fx-danger" disabled={readingDiscard} onClick={() => { setConfirmDiscard(false); onAction("discard"); }}>Discard</button>
-          <button type="button" className="fx-btn" onClick={() => { setConfirmDiscard(false); setDiscardStatus(null); }}>Cancel</button>
+          <span className="fx-hint" role="alert">{custom ? custom.text : "Remove this card and its worktree?"}{!custom || custom.readStatus ? <> {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, (custom ? custom.provider ?? null : requestProvider) ? { provider: (custom ? custom.provider : requestProvider) as "github" | "gitlab" } : null)}</> : null}</span>
+          <button type="button" className="fx-btn fx-danger" disabled={readingDiscard} onClick={() => { const confirm = custom?.onConfirm; setConfirmDiscard(false); setCustom(null); if (confirm) void confirm(); else onAction("discard"); }}>{custom?.label ?? "Discard"}</button>
+          <button type="button" className="fx-btn" onClick={() => { setConfirmDiscard(false); setCustom(null); setDiscardStatus(null); }}>Cancel</button>
         </div>
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" data-tour-id={`card-action-${a}`} disabled={busy && a === "approve"} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" data-tour-id={`card-action-${a}`} disabled={(busy && a === "approve") || (checking && a === "discard")} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
+                const readStatus = (read: () => Promise<unknown>) => {
+                  setReadingDiscard(true);
+                  void read().then((raw) => setDiscardStatus(decodeWorktreeStatus(raw))).catch(() => setDiscardStatus(null)).finally(() => setReadingDiscard(false));
+                };
+                if (discardCheck) {
+                  setChecking(true);
+                  void discardCheck().then((r) => {
+                    if (r.kind === "stop") return;
+                    setCustom(r);
+                    setConfirmDiscard(true);
+                    setDiscardStatus(null);
+                    if (r.readStatus) readStatus(r.readStatus);
+                  }).catch(() => undefined).finally(() => setChecking(false));
+                  return;
+                }
                 setConfirmDiscard(true);
                 setDiscardStatus(null);
-                if (onDiscardStatus) {
-                  setReadingDiscard(true);
-                  void onDiscardStatus().then((raw) => setDiscardStatus(decodeWorktreeStatus(raw))).catch(() => setDiscardStatus(null)).finally(() => setReadingDiscard(false));
-                }
+                if (onDiscardStatus) readStatus(onDiscardStatus);
                 return;
               }
               if (a === "sendBack" || a === "requestChanges") setNoteFor(a);

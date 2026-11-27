@@ -6,6 +6,8 @@ import { branchDiscardRefusal, isNewestRunOfLoop } from "../loop/native/loop-bra
 import { decodeFactoryFields, type FactoryRunFields, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
+import { LANE_DONE, LANE_WAITING, stepLane, type CardAction, type CardView, type Lane } from "./board-model.ts";
+import { decodeRunRecordFacts } from "./columns.ts";
 
 export type BoardRunLoop = Pick<LoopDefinition, "id" | "config" | "inputPath">;
 
@@ -187,4 +189,90 @@ export function orderLanes(steps: readonly string[], cardLanes: readonly string[
   if (cardLanes.includes(WAITING_LANE)) out.push(WAITING_LANE);
   if (cardLanes.includes(done) && !out.includes(done)) out.push(done);
   return out.length ? out : [done];
+}
+
+const DONE = "Done";
+
+/** "just now" / "5m ago" / "3h ago" / "2d ago"; an unparseable value is shown as is. */
+export function whenText(iso: string, now = Date.now()): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const mins = Math.max(0, Math.round((now - t) / 60_000));
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.round(mins / 60);
+  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
+export const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code.startsWith("stopped") ? "stopped" : code === "aborted" ? "cancelled" : code === "awaiting_review" ? "awaiting review" : code === "running" ? "running" : "failed";
+/** The status word of a held run. */
+export const HELD_WORD: Record<HeldState["kind"], string> = { waiting: "awaiting review", reviewDiff: "review the diff", superseded: "not shipped", shipped: "shipped" };
+const HELD_SUFFIX = / (Waiting for your review\.|Held: .*)$/;
+
+/** The lane a run belongs to (by name): Done on success, Waiting for you when held, else its last executed or failed stage. */
+export function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[], held: HeldState | null): { lane: string; note: string } {
+  if (run.statusCode === "success") return { lane: DONE, note: run.statusSummary };
+  if (held?.kind === "waiting" || held?.kind === "reviewDiff") return { lane: WAITING_LANE, note: run.statusSummary };
+  if (held?.kind === "shipped") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Shipped.` };
+  if (held?.kind === "superseded") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Not shipped: a later run of this loop has its branch now, or the branch was discarded.` };
+  const rows = Array.isArray(record?.stages) ? record.stages : [];
+  let last: string | null = null;
+  let failed: string | null = null;
+  for (const row of rows) {
+    if (typeof row !== "object" || row === null) continue;
+    const name = (row as { stageName?: unknown }).stageName;
+    if (typeof name === "string" && name.trim()) last = name.trim();
+    const exit = ((row as { run?: { exitCode?: unknown } }).run?.exitCode);
+    if (typeof exit === "number" && exit !== 0) failed = last;
+  }
+  return { lane: failed ?? last ?? steps[0] ?? DONE, note: run.statusSummary };
+}
+
+const laneIdOf = (name: string): string => (name === DONE ? LANE_DONE : name === WAITING_LANE ? LANE_WAITING : stepLane(name));
+const laneNameOf = (id: string): string => (id === LANE_DONE ? DONE : id === LANE_WAITING ? WAITING_LANE : id.slice("step:".length));
+
+export interface LoopRunCardInput {
+  run: LoopRunIndexEntry;
+  record: Record<string, unknown> | null;
+  steps: readonly string[];
+  held: HeldState | null;
+  /** The loop's running card: it sits at `lane`, shows `note` and offers no action. */
+  live?: { lane: string; note: string };
+  now?: number;
+}
+
+/** One run as a board card: the same CardView the Factory draws, so both boards render through Card. */
+export function loopRunCardView(input: LoopRunCardInput): CardView {
+  const { run, record, steps, held, live, now } = input;
+  const at = live ?? laneOf(run, record, steps, held);
+  const facts = decodeRunRecordFacts(record);
+  const diff = decodeFactoryFields(record).diffSummary;
+  const stopped = run.statusCode !== "success" && !held;
+  const actions: CardAction[] = live ? [] : held?.kind === "waiting" ? ["approve", "openLog", "discard"] : ["openLog", "discard"];
+  const cost = typeof record?.costUsd === "number" && Number.isFinite(record.costUsd) ? record.costUsd : facts?.costUsd ?? null;
+  const changed = facts?.changed ?? (diff ? { files: diff.files.length, additions: null, deletions: null, truncated: diff.truncated } : null);
+  return {
+    key: run.id,
+    title: `${run.loopName} · ${whenText(run.startedAt, now)}`,
+    source: "text",
+    note: at.note,
+    lane: laneIdOf(at.lane),
+    status: held ? HELD_WORD[held.kind] : statusWord(run.statusCode),
+    actions,
+    durationSeconds: run.durationSeconds > 0 ? run.durationSeconds : null,
+    costUsd: cost,
+    progressLabel: `${run.iterationsUsed} iteration${run.iterationsUsed === 1 ? "" : "s"}`,
+    ...(changed ? { changed } : {}),
+    ...(facts?.stepReviews ? { stepReviews: facts.stepReviews } : {}),
+    ...(stopped && facts?.loopback ? { loopback: facts.loopback } : {}),
+    ...(facts?.failingStage ? { failingStage: facts.failingStage } : {}),
+  };
+}
+
+/** The board's lanes for a loop: its steps, other lanes, Waiting for you, Done last, each holding its cards in order. */
+export function loopRunLanes(steps: readonly string[], cards: readonly CardView[]): Lane[] {
+  return orderLanes(steps, cards.map((c) => laneNameOf(c.lane))).map((name) => {
+    const id = laneIdOf(name);
+    return { id, label: name, cards: cards.filter((c) => c.lane === id) };
+  });
 }

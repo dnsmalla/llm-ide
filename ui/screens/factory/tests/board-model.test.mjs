@@ -300,7 +300,8 @@ test("Start and Run intake start their own run plan; only Finish checks reviews 
 test("D4: the board markup uses a region, labelled lists and a log", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../Board.tsx", import.meta.url), "utf8") + readFileSync(new URL("../LaneBoard.tsx", import.meta.url), "utf8");
-  assert.match(src, /role="region" aria-label="Factory board"/);
+  assert.match(src, /role="region" aria-label=\{label\}/);
+  assert.match(src, /label = "Factory board"/, "the Factory keeps its own region name by default");
   assert.match(src, /<ul className="fx-cards" role="list"/);
   assert.match(src, /role="log"/);
   assert.doesNotMatch(src, /className="fx-board" role="list"/);
