@@ -1,0 +1,29 @@
+# Paths published to the GitLab partial mirror (git filter-repo --paths-from-file).
+# GitHub stays the source of truth; scripts/export-gitlab.sh rewrites history to
+# only these paths. Changing this list rewrites the exported history, so the
+# next push to GitLab must be forced (workflow_dispatch input `force`); the
+# automatic run for the commit that changes this list fails non-fast-forward
+# until then. Exported `make` targets that need web/ or ios_app/ need ALLOW_SKIP=1.
+#
+# Kept: extension core, desktop app (incl. SSH mode) and what they need to build.
+extension/
+desktop/
+ui/
+schema/
+scripts/
+graph-kit
+# desktop/src-tauri/src/remote_deploy.rs include_str!s these; desktop tests run them.
+deploy/hub/
+# extension/tests/sync-own-server.test.mjs + helpers/fake-nginx-sync.mjs read these two.
+deploy/vps/50-llmidesync.conf
+deploy/vps/llm-ide.com.nginx
+# desktop/scripts/desktop-release-workflow.test.mjs reads it (inert on GitLab).
+.github/workflows/desktop-release.yml
+.gitmodules
+.gitignore
+.gitattributes
+.editorconfig
+Makefile
+setup.sh
+README.md
+LICENSE

@@ -1,0 +1,64 @@
+name: gitlab-export
+
+# One-way partial mirror: GitHub main -> GitLab, only the paths in
+# scripts/gitlab-export-paths.txt (with history). Setup: create an empty GitLab
+# project, then add repository secrets GITLAB_EXPORT_URL (https://gitlab.com/<group>/<project>.git)
+# and GITLAB_EXPORT_TOKEN (project access token, write_repository). Until both
+# exist the job is skipped, so it never goes red before setup.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force-push (needed once after the path list changes)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: gitlab-export
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    # The script exports the local `main` branch; a dispatch from another ref has none.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      # Only a yes/no flag at job level: the token itself reaches the push step alone,
+      # never checkout or the package install.
+      EXPORT_READY: ${{ secrets.GITLAB_EXPORT_URL != '' && secrets.GITLAB_EXPORT_TOKEN != '' }}
+    steps:
+      - name: Skip until secrets are set
+        if: env.EXPORT_READY != 'true'
+        run: echo "::notice::GITLAB_EXPORT_URL / GITLAB_EXPORT_TOKEN not set; skipping export"
+
+      - uses: actions/checkout@v4
+        if: env.EXPORT_READY == 'true'
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Install git-filter-repo
+        if: env.EXPORT_READY == 'true'
+        # Pinned: a different version could rewrite history differently.
+        # pipx, because the runner's system Python is externally managed (PEP 668).
+        run: pipx install git-filter-repo==2.45.0
+
+      - name: Export and push
+        if: env.EXPORT_READY == 'true'
+        env:
+          GITLAB_EXPORT_URL: ${{ secrets.GITLAB_EXPORT_URL }}
+          GITLAB_EXPORT_TOKEN: ${{ secrets.GITLAB_EXPORT_TOKEN }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          git config --global credential.helper \
+            '!f() { echo username=oauth2; echo "password=$GITLAB_EXPORT_TOKEN"; }; f'
+          force=()
+          [ "$FORCE" = "true" ] && force=(--force)
+          EXPORT_BRANCH=main scripts/export-gitlab.sh "$RUNNER_TEMP/export" \
+            --push "$GITLAB_EXPORT_URL" "${force[@]}"
