@@ -1,4 +1,4 @@
-// Paths and Memory on a server folder (ssh mode): a plain folder shows only the notice; a project and local mode are unchanged.
+// Paths and Memory on a server folder (ssh mode): a plain server folder gets the full cards, same as a project and local mode.
 import { test, before } from "node:test";
 import assert from "node:assert/strict";
 import { join, resolve, dirname } from "node:path";
@@ -59,73 +59,78 @@ const env = () => ({
 const wrap = (el) => h(m.context.SettingsEnvProvider, { env: env() }, el);
 const pathsData = (isProject) => ({ root: "/srv/home/docs", id: "", folders: [{ name: "system", exists: false }], isProject });
 const memoryData = { root: "/srv/home/docs", graph: null, files: [] };
-const NOTICE = () => m.projectModel.PATHS_TEXT.plainFolder;
 
 const withSsh = (on, fn) => {
   m.shellHost.setSshModeProvider(() => on);
   try { return fn(); } finally { m.shellHost.setSshModeProvider(() => false); }
 };
 
-test("paths_shows_notice_for_plain_server_folder: ssh plain folder renders only the notice", () => {
+test("paths_plain_server_folder_gets_full_card: ssh folder with isProject false renders the full card with Rebuild", () => {
   const out = withSsh(true, () => html(wrap(h(m.paths.default, { initial: pathsData(false) }))));
-  assert.ok(out.includes(NOTICE()), "notice text");
-  assert.ok(!out.includes("Rebuild missing folders"), "no Rebuild button");
-  assert.ok(!out.includes(m.projectModel.PATHS_TEXT.hint), "no generic hint");
-  assert.ok(!out.includes("data-partial-note"), "no partial note");
-  assert.ok(!out.includes("Project root"), "no project root row");
-  assert.ok(!out.includes("Export Project Data"), "no export");
+  assert.ok(out.includes("Rebuild missing folders"), "Rebuild button");
+  assert.ok(out.includes(m.projectModel.PATHS_TEXT.hint), "generic hint");
+  assert.ok(out.includes("Project root"), "project root row");
+  assert.ok(!out.includes("not an LLM-IDE project"), "no plain-folder notice");
 });
 
-test("memory_shows_notice_for_plain_server_folder: ssh plain folder renders only the notice", () => {
-  const out = withSsh(true, () => html(wrap(h(m.memory.default, { initial: { data: memoryData, plainFolder: true } }))));
-  assert.ok(out.includes(NOTICE()), "notice text");
-  assert.ok(!out.includes("Ask Chat about memory"), "no Ask Chat button");
-  assert.ok(!out.includes(m.projectModel.MEMORY_TEXT.hint), "no generic hint");
+test("memory_plain_server_folder_gets_full_card: ssh memory card renders normally", () => {
+  const out = withSsh(true, () => html(wrap(h(m.memory.default, { initial: { data: memoryData } }))));
+  assert.ok(out.includes("Ask Chat about memory"), "Ask Chat button");
+  assert.ok(out.includes(m.projectModel.MEMORY_TEXT.graph), "knowledge graph row");
+  assert.ok(!out.includes("not an LLM-IDE project"), "no plain-folder notice");
 });
 
-test("paths_unchanged_in_local_mode: a plain folder in local mode keeps the full card", () => {
-  const out = withSsh(false, () => html(wrap(h(m.paths.default, { initial: pathsData(false) }))));
-  assert.ok(!out.includes(NOTICE()), "no notice in local mode");
-  assert.ok(out.includes("Rebuild missing folders"));
-  assert.ok(out.includes(m.projectModel.PATHS_TEXT.hint));
-  assert.ok(out.includes("Project root"));
+test("paths_rebuild_and_root_in_both_modes: ssh and local both render Rebuild and Project root", () => {
+  const ssh = withSsh(true, () => html(wrap(h(m.paths.default, { initial: pathsData(false) }))));
+  const local = withSsh(false, () => html(wrap(h(m.paths.default, { initial: pathsData(false) }))));
+  assert.ok(local.includes("Rebuild missing folders"));
+  assert.ok(ssh.includes("Rebuild missing folders"));
+  assert.ok(ssh.includes("Project root") && local.includes("Project root"));
 });
 
-test("paths_unchanged_in_local_mode: a project in ssh mode keeps the full card", () => {
+test("paths_project_in_ssh_mode_keeps_full_card: a real project still shows the full card", () => {
   const out = withSsh(true, () => html(wrap(h(m.paths.default, { initial: pathsData(true) }))));
-  assert.ok(!out.includes(NOTICE()));
   assert.ok(out.includes("Rebuild missing folders"));
   assert.ok(out.includes("Project root"));
 });
 
-test("memory_unchanged_in_local_mode: a plain folder in local mode keeps the full card", () => {
-  const out = withSsh(false, () => html(wrap(h(m.memory.default, { initial: { data: memoryData, plainFolder: true } }))));
-  assert.ok(!out.includes(NOTICE()));
+test("memory_local_mode_full_card: local memory card renders normally", () => {
+  const out = withSsh(false, () => html(wrap(h(m.memory.default, { initial: { data: memoryData } }))));
   assert.ok(out.includes("Ask Chat about memory"));
 });
 
-// Repositories: the clone destination follows the project. A plain server folder has no clone destination in ssh mode.
-test("codeDirOf: a plain server folder in ssh mode offers no code/ destination, even when code/ exists", () => {
-  const data = { root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: true }], isProject: false };
-  assert.equal(m.projectModel.codeDirOf(data, true), null);
+// Repositories: the clone destination is <root>/code in every mode and for every open folder.
+test("codeDirOf: a plain server folder gets <root>/code, same as a project", () => {
+  const plain = { root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: true }], isProject: false };
+  assert.equal(m.projectModel.codeDirOf(plain), "/srv/home/docs/code");
+  const project = { ...plain, isProject: true };
+  assert.equal(m.projectModel.codeDirOf(project), "/srv/home/docs/code");
 });
 
-test("codeDirOf: a project in ssh mode gives its code/ folder", () => {
-  const data = { root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: true }], isProject: true };
-  assert.equal(m.projectModel.codeDirOf(data, true), "/srv/home/docs/code");
+test("codeDirOf: no code/ folder listed, no destination", () => {
+  const none = { root: "/Users/me/docs", id: "", folders: [{ name: "system", exists: true }] };
+  assert.equal(m.projectModel.codeDirOf(none), null);
 });
 
-test("codeDirOf: local mode is unchanged, plain folder included", () => {
-  const plain = { root: "/Users/me/docs", id: "", folders: [{ name: "code", exists: false }], isProject: false };
-  assert.equal(m.projectModel.codeDirOf(plain, false), "/Users/me/docs/code");
-  const none = { root: "/Users/me/docs", id: "", folders: [{ name: "system", exists: true }], isProject: true };
-  assert.equal(m.projectModel.codeDirOf(none, false), null, "no code/ folder, no destination");
-});
-
-test("codeDirOf: an older host that omits isProject keeps the destination (decoded as a project)", () => {
+test("codeDirOf: an older host that omits isProject keeps the destination", () => {
   const old = m.projectModel.decodePaths({ root: "/srv/p", id: "x", folders: [{ name: "code", exists: true }] });
-  assert.equal(old.isProject, true);
-  assert.equal(m.projectModel.codeDirOf(old, true), "/srv/p/code");
+  assert.equal(m.projectModel.codeDirOf(old), "/srv/p/code");
+});
+
+test("paths_export_needs_a_project: isProject false disables both Export buttons with the hint; true or omitted enables them", () => {
+  const hint = "Press Rebuild missing folders first: this folder is not a project yet.";
+  const btn = (out, label) => out.match(new RegExp(`<button[^>]*>${label}</button>`))?.[0] ?? "";
+  const render = (initial) => withSsh(true, () => html(wrap(h(m.paths.default, { initial }))));
+  const labels = ["Export Project Data", "Export Plans"];
+  const none = render({ ...pathsData(false), id: "p1" });
+  for (const label of labels) assert.ok(/disabled/.test(btn(none, label)), `${label} disabled`);
+  assert.ok(none.includes(hint), "hint shown");
+  const ok = render({ ...pathsData(true), id: "p1" });
+  for (const label of labels) assert.ok(btn(ok, label) && !/disabled/.test(btn(ok, label)), `${label} enabled`);
+  assert.ok(!ok.includes(hint), "no hint");
+  const { isProject, ...omitted } = { ...pathsData(true), id: "p1" };
+  const old = render(m.projectModel.decodePaths(omitted));
+  for (const label of labels) assert.ok(btn(old, label) && !/disabled/.test(btn(old, label)), `${label} enabled when omitted`);
 });
 
 // Server errors reach the sentence: a string, an Error and the SSH { code, message } object all keep the host's text.

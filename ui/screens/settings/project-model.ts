@@ -29,24 +29,15 @@ export function decodePaths(v: unknown): ProjectPaths | null {
     folders.push({ name, exists: row.exists });
     if (folders.length >= 50) break;
   }
-  // NOTE: only an explicit `false` marks a plain folder; an older host omits the field and must keep the full Paths card.
+  // NOTE: only an explicit `false` marks a plain folder, because an older host omits the field.
   return { root: clean(v.root, 4096), id: clean(v.id, 200), folders, isProject: v.isProject !== false };
 }
 
 /**
- * What the Paths card shows: a plain server folder in ssh mode gets only the notice (no folders, no Rebuild, no
- * export, since those need a project). Local mode always shows the full card.
+ * The project's code/ folder: the clone destination for Repositories, or null when the folder list has none. One rule
+ * for local and ssh mode, because a clone creates `code/` in any open folder, so the destination is always offered.
  */
-export function pathsIsNoticeOnly(data: ProjectPaths, sshMode: boolean): boolean {
-  return sshMode && !data.isProject;
-}
-
-/**
- * The project's code/ folder: the clone destination for Repositories, or null when there is none. In ssh mode a plain
- * server folder has none, because clone needs a project (the host refuses it there too), so the card offers no clone.
- */
-export function codeDirOf(data: ProjectPaths, sshMode: boolean): string | null {
-  if (sshMode && !data.isProject) return null;
+export function codeDirOf(data: ProjectPaths): string | null {
   return data.folders.some((f) => f.name === "code") ? `${data.root.replace(/\/+$/, "")}/code` : null;
 }
 
@@ -131,8 +122,6 @@ export const PATHS_TEXT = {
   partial:
     "The layout is read-only here. This group shows the folders, opens them in Finder, re-creates missing folders, and links to Library for the index rebuild.",
   noProject: "Open a project to see its folders.",
-  plainFolder:
-    "This folder is not an LLM-IDE project. To use project features, create one with New project in the server folder picker.",
 } as const;
 
 export const MEMORY_TEXT = {
