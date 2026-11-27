@@ -90,6 +90,38 @@ cd llm-ide-app
 If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive graph-kit`
 before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
 
+## Install from a DMG (no build needed)
+
+1. Open the project's **Releases** page on GitLab and download the `.dmg` for your Mac:
+
+   | Your Mac | File | `uname -m` prints |
+   |---|---|---|
+   | Apple silicon (M1 or later) | `LLM-IDE-<version>-arm64.dmg` | `arm64` |
+   | Intel | `LLM-IDE-<version>-x64.dmg` | `x86_64` |
+
+2. Open the `.dmg` and drag **LLM-IDE** onto **Applications**.
+3. The app is **not signed or notarized**, so macOS blocks the first launch. Do one of:
+   - Run `xattr -dr com.apple.quarantine /Applications/LLM-IDE.app` and open it normally. This also
+     clears the flag on the bundled Node, so it is the more reliable route.
+   - Or open it once, then go to System Settings > Privacy & Security and click **Open Anyway**.
+4. Install the Claude CLI and run `claude login`; the app uses it for AI features.
+
+Each release lists the SHA-256 of every file; compare with `shasum -a 256 <file>.dmg`.
+
+### Publishing a release (maintainers)
+
+```bash
+scripts/release-dmg.sh <version>            # e.g. 0.1.0; add --dry-run to preview
+```
+
+It builds both DMGs on GitHub Actions (`desktop-dmg.yml`), uploads them to the GitLab package
+registry and creates the GitLab Release. Needs `gh` and `glab` logged in, and `jq`. No signing
+secrets are involved.
+
+- `--yes` — continue without asking when this checkout differs from GitHub `main`.
+- `--run-id <id>` — resume a failed release from an already finished build (no rebuild; files
+  already uploaded are skipped).
+
 ## Build and install the desktop app
 
 ```bash
