@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { idHex8, loopBranchSlug, nameSlug, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage } from "../native/worktree-run.ts";
+import { readFileSync } from "node:fs";
+import { heldFields, idHex8, loopBranchSlug, nameSlug, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage } from "../native/worktree-run.ts";
 import { copyStateBackIfMissed, copyStateIn, endWorktreeRun } from "../native/run-end.ts";
 import { configWithSetup, isSetupStage, markSetupDone, setupNeeded, withSetupStage } from "../native/loop-setup.ts";
 import { branchDiscardRefusal, isNewestRunOfLoop, lastShipUrl, providerSaysMerged } from "../native/loop-branch.ts";
@@ -365,4 +366,15 @@ test("a rejected lease says which provider and that nothing was overwritten, and
   const msg = "The branch on GitLab has commits that are not from the merged MR; nothing was overwritten.";
   assert.equal(shipCopy({ ok: false, code: "lease_rejected", message: msg }), msg);
   assert.equal(shipCopy({ ok: false, code: "lease_rejected", message: "git said: token ghp_secret" }), "The branch on the provider has commits that are not from the merged MR; nothing was overwritten.");
+});
+
+test("a run held for a person is recorded as awaiting review, with why and what the board's Approve needs to ship it", () => {
+  assert.deepEqual(heldFields(null, "human"), { awaiting: { held: "success", kind: "passed", failedStage: null, reason: "human" } });
+  assert.deepEqual(heldFields("https://gitlab.com/x/-/merge_requests/1", "leftoverFiles"), { awaiting: { held: "success", kind: "passed", failedStage: null, reason: "leftoverFiles" }, mergedMr: "https://gitlab.com/x/-/merge_requests/1" });
+  // The Loop page's run end writes these for a hold (a source check: the screen needs React to run).
+  const screen = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  assert.match(screen, /statusCode: runStatusCode\(\{ \.\.\.outcome, awaitingReview: end === "hold" \}\)/);
+  assert.match(screen, /end === "hold" \? heldFields\(mergedMr, heldReason\)/);
+  // Leftovers from an earlier run win over Human: they must be reviewed in the diff, never shipped with one click.
+  assert.match(screen, /const heldReason: HeldReason = leftoverFiles === null \|\| \(leftoverFiles \?\? 0\) > 0 \? "leftoverFiles" : "human";/);
 });

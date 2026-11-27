@@ -2,8 +2,8 @@
 // "run-loop" request that the Loop page executes through its own approval, worktree and queue path.
 import { loopUsesInputPath, normalizeInputPath } from "../loop/native/input-path.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
-import { branchDiscardRefusal } from "../loop/native/loop-branch.ts";
-import type { FactoryRunFields, LoopRunIndexEntry } from "../loop/native/history.ts";
+import { branchDiscardRefusal, isNewestRunOfLoop } from "../loop/native/loop-branch.ts";
+import { decodeFactoryFields, type FactoryRunFields, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
 
@@ -145,4 +145,46 @@ export function discardTarget(
   if (!info) return { kind: "gone" };
   const refusal = branchDiscardRefusal(info, runsOfThisLoop, run, runningLoopId);
   return refusal ? { kind: "refused", reason: refusal } : { kind: "ok", info };
+}
+
+/** The lane of a run held for a person's approval (Final review: Human), placed just before Done. */
+export const WAITING_LANE = "Waiting for you";
+
+/**
+ * What the board shows for a run recorded as `awaiting_review` (a held run), or null for any other run (or a record
+ * that could not be read). Every run of a loop shares one branch, so only the loop's newest run still holds it:
+ * - `waiting`: held for your approval (Final review: Human); Approve ships the branch.
+ * - `reviewDiff`: held because the worktree had files an earlier run left; it ships only after a person looks at the
+ *   diff (the Loop page's Ship panel), never with one click.
+ * - `superseded`: a later run of the loop has the branch now, or the branch was discarded: nothing left to approve.
+ * - `shipped`: already shipped (from this board or the Ship panel).
+ */
+export type HeldState =
+  | { kind: "waiting"; worktreeRunId: string; mergedMr: string | null }
+  | { kind: "reviewDiff" }
+  | { kind: "superseded" }
+  | { kind: "shipped" };
+
+export function heldState(
+  run: Pick<LoopRunIndexEntry, "id" | "loopId" | "statusCode">,
+  record: Record<string, unknown> | null,
+  runsOfLoop: readonly Pick<LoopRunIndexEntry, "id" | "loopId" | "startedAt">[],
+): HeldState | null {
+  if (run.statusCode !== "awaiting_review" || record === null) return null;
+  const fields = decodeFactoryFields(record);
+  if (fields.ship) return { kind: "shipped" };
+  if (!fields.worktree || !isNewestRunOfLoop(runsOfLoop, run)) return { kind: "superseded" };
+  const awaiting = typeof record.awaiting === "object" && record.awaiting !== null ? record.awaiting as Record<string, unknown> : {};
+  if (awaiting.reason === "leftoverFiles") return { kind: "reviewDiff" };
+  return { kind: "waiting", worktreeRunId: fields.worktree.runId, mergedMr: typeof record.mergedMr === "string" && record.mergedMr ? record.mergedMr : null };
+}
+
+/** The board's lanes: the loop's steps, any other lane a card is in, then Waiting for you, then Done last. */
+export function orderLanes(steps: readonly string[], cardLanes: readonly string[]): string[] {
+  const done = "Done";
+  const out = [...steps];
+  for (const lane of cardLanes) if (!out.includes(lane) && lane !== done && lane !== WAITING_LANE) out.push(lane);
+  if (cardLanes.includes(WAITING_LANE)) out.push(WAITING_LANE);
+  if (cardLanes.includes(done) && !out.includes(done)) out.push(done);
+  return out.length ? out : [done];
 }

@@ -19,7 +19,10 @@ export type ShellEvent =
   /** Start or stop live capture (the tray's quick action); the Live screen toggles its own Start/Stop. */
   | { type: "live-capture" }
   /** Ask the Loop page to run a non-Factory loop (the loop's Board has no runner of its own). */
-  | { type: "run-loop"; loopId: string; inputPath?: string; task?: string };
+  | { type: "run-loop"; loopId: string; inputPath?: string; task?: string }
+  // A loop board changed a loop's Final review in system/loop.json (from the file at `fromHash` to `hash`): an open
+  // Loop page whose copy is that same file takes the change, so its own next save does not conflict.
+  | { type: "loop-review-mode"; loopId: string; mode: "auto" | "human"; fromHash: string; hash: string };
 
 export type ShellEventType = ShellEvent["type"];
 type Handler<T extends ShellEventType> = (ev: Extract<ShellEvent, { type: T }>) => void;

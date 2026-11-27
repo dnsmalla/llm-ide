@@ -107,6 +107,16 @@ export function runChanged(diff: { files: readonly string[]; truncated: boolean 
 
 export type RunEnd = "ship" | "hold" | "discard" | "keep";
 
+/** Record fields of a run held for a person (RunEnd "hold"): the same `awaiting` fact the Factory writes, why it was
+ *  held (Final review: Human, or files an earlier run left in the worktree), and the merged MR a restarted branch may
+ *  replace, so the board can ship it the way the run end would have. */
+export function heldFields(mergedMr: string | null, reason: HeldReason): { awaiting: { held: "success"; kind: "passed"; failedStage: null; reason: HeldReason }; mergedMr?: string } {
+  return { awaiting: { held: "success", kind: "passed", failedStage: null, reason }, ...(mergedMr ? { mergedMr } : {}) };
+}
+
+/** Why a passed run was held: the loop's Final review is Human, or its worktree held files an earlier run left. */
+export type HeldReason = "human" | "leftoverFiles";
+
 /**
  * What happens to a worktree run's branch when it ends (one rule for every loop). `changed` is null when the diff could
  * not be read: nothing is ever deleted or shipped on doubt.

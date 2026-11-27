@@ -45,7 +45,7 @@ import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadR
 import { copyStateBackIfMissed, copyStateIn, endWorktreeRun } from "./run-end.ts";
 import { branchDiscardRefusal, lastShipUrl, providerSaysMerged } from "./loop-branch.ts";
 import { configWithSetup, isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
-import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { changedPathArgs, heldFields, type HeldReason, loopBranchSlug, newRunId, repoPrefixFor, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
@@ -413,7 +413,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (refusal) { setNotice(refusal); return; }
     const w = fields.workItem;
     const item: WorkItem = w ? { source: w.source, id: w.id, title: w.title, body: "", repo: null } : { source: "text", id: null, title: entry.loopName, body: "", repo: null };
-    setShipRun({ info, item, entry, passed: entry.statusCode === "success", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null, processName: fields.workItem ? undefined : entry.loopName, branchDiscard: info.branch.startsWith("loop/") });
+    setShipRun({ info, item, entry, passed: entry.statusCode === "success" || entry.statusCode === "awaiting_review", reviewedPatchId: fields.diffSummary?.patchId ?? null, requestProvider: fields.ship?.provider ?? null, processName: fields.workItem ? undefined : entry.loopName, branchDiscard: info.branch.startsWith("loop/") });
   };
 
   // ssh mode: the run records and worktree are on the server, so the buttons copy the server path instead.
@@ -487,6 +487,18 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     void approvalStatus(loop.id).then((s) => { if (live) setApprovalState(s); }).catch(() => { if (live) setApprovalState(null); });
     return () => { live = false; };
   }, [loop?.id]);
+
+  // A loop board's Final review toggle saved loop.json; take it when this page's copy is the file the board changed.
+  useEffect(() => shellBus.subscribe("loop-review-mode", (ev) => {
+    setLoad((cur) => {
+      if (cur?.kind !== "ok" || cur.hash !== ev.fromHash) return cur;
+      const next = cloneStore(cur.store);
+      const target = next.loops.find((l) => l.id === ev.loopId);
+      if (!target) return cur;
+      setReviewMode(target.config, ev.mode);
+      return { kind: "ok", store: next, hash: ev.hash };
+    });
+  }), []);
 
   const mutateStore = (fn: (store: LoopProjectStore) => void) => {
     if (!store) return;
@@ -938,7 +950,9 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         ? runEndAction({ passed: outcome.passed, cancelled: outcome.cancelled === true, changed: runChanged(worktreeDiff), humanReview: reviewModeOf(target.config) === "human", leftoverFiles, openMergeRequest: target.config.openMergeRequest })
         : null;
       // factoryRunId + factoryMode: the board finds a card's last run through these fields (the run manager writes them too).
-      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode(outcome), statusSummary: end === "discard" ? `${outcome.statusSummary} No changes.` : outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
+      // Leftovers win over Human: an earlier run's edits must be seen in the diff, never shipped with one click.
+      const heldReason: HeldReason = leftoverFiles === null || (leftoverFiles ?? 0) > 0 ? "leftoverFiles" : "human";
+      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode({ ...outcome, awaitingReview: end === "hold" }), statusSummary: end === "discard" ? `${outcome.statusSummary} No changes.` : end === "hold" ? `${outcome.statusSummary} ${heldReason === "human" ? "Waiting for your review." : "Held: its worktree had files an earlier run left; open the run (Open run log & plan) and review its diff in the Ship panel before shipping."}` : outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
       const factoryFields: FactoryRunFields = {
         workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
         worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
@@ -948,7 +962,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       };
       const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
       // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
+      const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...(end === "hold" ? heldFields(mergedMr, heldReason) : {}), ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
       const saveRecord = () => appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch((e: unknown) => { setRunLog((l) => [...l, `run record not written: ${e instanceof Error ? e.message : String(e)}`]); });
       const manualShip = (item: WorkItem) => activeRun && setShipRun({ info: activeRun, item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, branchDiscard: !isFactoryLoop(target), mergedMr, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
       const afterRecord = () => {
@@ -1400,7 +1414,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             {!isFactoryLoop(loop) ? <>
               <label className="loop-field"><span>Work</span><select value={loop.config.workMode === "one" ? "one" : "all"} onChange={(e) => patchLoop((l) => { if (e.target.value === "one") l.config.workMode = "one"; else delete l.config.workMode; })}><option value="all">Everything it finds</option><option value="one">One item I name</option></select></label>
               {loop.config.workMode !== "one" && runsInWorktree(loop.config, false) ? (loop.defaultKey === "refactor" || loop.defaultKey === "test") ? <label className="loop-field"><span>Steps per run (1–50)</span><input type="number" min={1} max={50} title="One step is one small change, verified and rolled back if it fails. The time budget and cost ceiling still end the run early; the plan continues next run." value={loop.defaultKey === "test" ? stepLimitOf(loop.config) : (loop.config.refactorBatchesPerRun ?? 3)} onChange={(e) => patchLoop((l) => { const n = Math.min(50, Math.max(1, Math.floor(Number(e.target.value)) || 1)); if (l.defaultKey === "test") l.config.maxPassesPerRun = n; else l.config.refactorBatchesPerRun = n; })} /></label> : <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
-              <label className="loop-field"><span>Approval</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
+              <label className="loop-field"><span>Final review</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
             </> : null}
             <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>
             <label className="loop-field"><span>Time budget (min)</span><input type="number" min={0} step={15} placeholder="none" title="Empty = no time limit" value={loop.config.wallClockBudgetSeconds === null ? "" : Math.round(loop.config.wallClockBudgetSeconds / 60)} onChange={(e) => patchLoop((l) => { l.config.wallClockBudgetSeconds = e.target.value === "" ? null : Math.max(0, Number(e.target.value)) * 60; })} /></label>

@@ -6,12 +6,14 @@ import { shellBus } from "../shell/bus";
 import { invokeHost } from "../shell/host";
 import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
-import { loadLoops } from "../loop/native/store.ts";
+import { loadLoops, saveLoops } from "../loop/native/store.ts";
+import { setReviewMode } from "../loop/native/review-ui.ts";
+import { repoPrefixFor } from "../loop/native/worktree-run.ts";
 import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
-import { afterSend, buildRunEvent, discardTarget, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
+import { WAITING_LANE, afterSend, buildRunEvent, discardTarget, heldState, orderLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
 
@@ -35,13 +37,19 @@ const when = (iso: string): string => {
 };
 const statusWord = (code: string): string => code === "success" ? "passed" : code.startsWith("blocked") ? "blocked" : code.startsWith("stopped") ? "stopped" : code === "aborted" ? "cancelled" : code === "awaiting_review" ? "awaiting review" : code === "running" ? "running" : "failed";
 
-interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean }
+interface RunCard { run: LoopRunIndexEntry; lane: string; note: string; failed: boolean; live?: boolean; held?: HeldState["kind"] }
 
 const storage = (): Storage | null => { try { return window.localStorage; } catch { return null; } };
 
 /** The lane a run belongs to: Done on success, else its last executed or failed stage. */
-function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[]): { lane: string; note: string } {
+const HELD_WORD: Record<HeldState["kind"], string> = { waiting: "awaiting review", reviewDiff: "review the diff", superseded: "not shipped", shipped: "shipped" };
+const HELD_SUFFIX = / (Waiting for your review\.|Held: .*)$/;
+
+function laneOf(run: LoopRunIndexEntry, record: Record<string, unknown> | null, steps: readonly string[], held: HeldState | null): { lane: string; note: string } {
   if (run.statusCode === "success") return { lane: DONE, note: run.statusSummary };
+  if (held?.kind === "waiting" || held?.kind === "reviewDiff") return { lane: WAITING_LANE, note: run.statusSummary };
+  if (held?.kind === "shipped") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Shipped.` };
+  if (held?.kind === "superseded") return { lane: DONE, note: `${run.statusSummary.replace(HELD_SUFFIX, "")} Not shipped: a later run of this loop has its branch now, or the branch was discarded.` };
   const rows = Array.isArray(record?.stages) ? record.stages : [];
   let last: string | null = null;
   let failed: string | null = null;
@@ -123,14 +131,16 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         const loaded = await Promise.all(shown.map(async (r) => {
           if (records.has(r.id)) return records.get(r.id)!;
           const rec = await loadRunRecord(fs, r.id, r.startedAt).catch(() => null);
-          if (r.statusCode !== "running" && rec !== null) records.set(r.id, rec);
+          // A held record changes when it ships (here or in the Loop page's Ship panel), so it is re-read each tick.
+          if (r.statusCode !== "running" && r.statusCode !== "awaiting_review" && rec !== null) records.set(r.id, rec);
           return rec;
         }));
         if (!alive) return;
         setError(null);
         setCards(shown.map((run, i) => {
-          const at = laneOf(run, loaded[i], names);
-          return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" };
+          const held = heldState(run, loaded[i], shown);
+          const at = laneOf(run, loaded[i], names, held);
+          return { run, lane: at.lane, note: at.note, failed: run.statusCode !== "success" && run.statusCode !== "awaiting_review", ...(held ? { held: held.kind } : {}) };
         }));
       }, (e) => { if (alive) setError(e instanceof Error ? e.message : String(e)); }).finally(() => { inFlight = false; });
     };
@@ -222,12 +232,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const shownCards = cards.filter((c) => !hidden.has(c.run.id));
   const allCards = liveCard ? [liveCard, ...shownCards.filter((c) => c.run.id !== liveCard.run.id)] : shownCards;
 
-  const lanes = useMemo(() => {
-    const out = [...steps];
-    for (const c of allCards) if (!out.includes(c.lane)) out.push(c.lane);
-    if (allCards.some((c) => c.lane === DONE) && !out.includes(DONE)) out.push(DONE);
-    return out.length ? out : [DONE];
-  }, [steps, allCards]);
+  const lanes = useMemo(() => orderLanes(steps, allCards.map((c) => c.lane)), [steps, allCards]);
 
   const openRun = async (id: string, startedAt: string) => {
     try {
@@ -325,6 +330,68 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     }
   };
 
+  /** Final review: the same Auto / Human switch as the Factory board, saved in this loop's own setting. An open
+   *  Loop page takes the change through the bus, so its next save of loop.json does not conflict. */
+  const [modeBusy, setModeBusy] = useState(false);
+  const chooseReviewMode = async (mode: "auto" | "human") => {
+    // boardLoop, not loop: with two loops of the same name, `loop` may not be the one whose runs are shown.
+    if (!boardLoop || modeBusy) return;
+    setModeBusy(true);
+    try {
+      const r = await loadLoops(fs);
+      if (r.kind !== "ok") throw new Error("the loop file could not be read");
+      const target = r.store.loops.find((l) => l.id === boardLoop.id);
+      if (!target) throw new Error("this loop is no longer in the loop file");
+      setReviewMode(target.config, mode);
+      const saved = await saveLoops(fs, r.store, r.hash);
+      shellBus.publish({ type: "loop-review-mode", loopId: boardLoop.id, mode, fromHash: r.hash, hash: saved.hash });
+      setLoop(target);
+    } catch (e) {
+      setError(`Final review was not changed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setModeBusy(false);
+    }
+  };
+
+  /** Ships a run held for your approval through the same shipper as a run that ends in Auto mode (secret scan, CI/hook
+   *  files, diff size, repository setup). Only the loop's newest run, and never while the loop runs: every run of a
+   *  loop shares one branch, so an older card would ship a newer run's work. */
+  const [approving, setApproving] = useState<string | null>(null);
+  const approve = async (run: LoopRunIndexEntry) => {
+    if (approving !== null || !projectRoot) return;
+    setDiscardMsg(null);
+    setApproving(run.id);
+    try {
+      // Fresh reads, not the board's 5 s snapshot: a newer run of this loop may have taken the shared branch since.
+      const record = await loadRunRecord(fs, run.id, run.startedAt).catch(() => null);
+      const runs = await readRecentRuns(fs, 100).catch(() => null);
+      if (runs === null) { setDiscardMsg({ text: "Could not read this loop's runs; try again.", kind: "error" }); return; }
+      const runsOfLoop = runs.filter((r) => r.loopId === run.loopId);
+      const held = heldState(run, record, runsOfLoop);
+      if (held?.kind !== "waiting" || record === null) { setDiscardMsg({ text: "This run is no longer waiting for approval. Refresh the board.", kind: "error" }); return; }
+      const worktrees = await invokeHost<RunInfo[]>("loop_worktree_list").then((list) => ({ ok: true as const, list })).catch(() => ({ ok: false as const }));
+      const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
+      const target = discardTarget(run, { ok: true, worktree: decodeFactoryFields(record).worktree }, worktrees, runsOfLoop, runningLoopId);
+      if (target.kind === "unreadable") { setDiscardMsg({ text: worktrees.ok ? "Could not check this run's worktree; try again." : "This run's worktree could not be listed (in SSH mode, approve it on the Loop page).", kind: "error" }); return; }
+      if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
+      if (target.kind !== "ok") { setDiscardMsg({ text: "Not approved: this run's worktree was removed, so there is nothing to ship.", kind: "error" }); return; }
+      const info = target.info;
+      const { shipFinishedRun } = await import("../loop/native/run-manager-host.ts");
+      const line = await shipFinishedRun({
+        runId: info.runId, projectRoot, mode: "full",
+        item: { source: "text", id: null, title: `${run.loopName} run ${info.runId}`, body: "", repo: null, key: `loop:${info.runId}`, provider: null },
+        info, entry: run, statusCode: "success", needsDecision: false, failedStage: null, kind: "passed",
+        processName: run.loopName, mergedMr: held.mergedMr, runPrefix: repoPrefixFor(projectRoot, info.worktree),
+      });
+      setDiscardMsg({ text: line || "Not approved: nothing was shipped.", kind: line.startsWith("Draft MR:") ? "info" : "error" });
+      setReload((n) => n + 1);
+    } catch (e) {
+      setDiscardMsg({ text: `Not approved: ${e instanceof Error ? e.message : String(e)}`, kind: "error" });
+    } finally {
+      setApproving(null);
+    }
+  };
+
   return (
     <div className="fx-board-root">
       <header className="fx-head">
@@ -333,6 +400,13 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
           <p className="fx-summary">{shownCards.length} run{shownCards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
+        <div className="fx-field fx-field-inline" role="group" aria-label="Final review">
+          <span>Final review</span>
+          {(["auto", "human"] as const).map((mode) => {
+            const current = boardLoop?.config.reviewMode === "human" ? "human" : "auto";
+            return <button key={mode} type="button" className={`fx-btn${boardLoop && current === mode ? " fx-primary" : ""}`} aria-pressed={boardLoop ? current === mode : undefined} disabled={!boardLoop || modeBusy} title={mode === "auto" ? "AI reviews the change, then it ships" : "The run waits for your approval"} onClick={() => void chooseReviewMode(mode)}>{mode === "auto" ? "Auto" : "Human"}</button>;
+          })}
+        </div>
         <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
       </header>
       {boardLoop && bar ? (
@@ -364,9 +438,9 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
               <header className="fx-lane-head"><h3>{lane}</h3><span>{inLane.length}</span></header>
               <div className="fx-lane-cards">
                 {inLane.length === 0 ? <p className="fx-empty">No runs.</p> : null}
-                {inLane.map(({ run, note, failed, live: isLive }) => (
+                {inLane.map(({ run, note, failed, live: isLive, held }) => (
                   <article key={run.id} className="fx-run" data-status={isLive ? "running" : failed ? "failed" : "success"} data-live={isLive || undefined}>
-                    <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
+                    <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{held ? HELD_WORD[held] : statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
                     <p className="fx-run-summary">{note}</p>
                     <p className="fx-run-meta">{run.durationSeconds ? `${run.durationSeconds}s` : "—"} · {run.iterationsUsed} iteration{run.iterationsUsed === 1 ? "" : "s"}</p>
                     {isLive ? null : confirmDiscardId === run.id ? (
@@ -387,6 +461,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
                       </div>
                     ) : (
                       <div className="fx-actions">
+                        {held === "waiting" ? <button type="button" className="fx-btn fx-primary" disabled={approving !== null} title="Open the draft MR for this run's branch" onClick={() => void approve(run)}>{approving === run.id ? "Shipping…" : "Approve & ship"}</button> : null}
                         <button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button>
                         <button type="button" className="fx-btn" onClick={() => void openDiscard(run)}>Discard…</button>
                       </div>

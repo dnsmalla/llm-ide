@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterSend, buildRunEvent, discardTarget, loopReadTargets, runBarState, loadHiddenRunIds, loadRunBarInput, saveHiddenRunIds, saveRunBarInput } from "../loop-board-run.ts";
+import { WAITING_LANE, afterSend, buildRunEvent, discardTarget, heldState, orderLanes, loopReadTargets, runBarState, loadHiddenRunIds, loadRunBarInput, saveHiddenRunIds, saveRunBarInput } from "../loop-board-run.ts";
 
 const stage = (over) => ({ id: "s", name: "S", kind: "skill", order: 0, enabled: true, skillId: "skills/refactor-apply", targetPath: null, ...over });
 const loop = (stages, over = {}) => ({ id: "L1", inputPath: "src", config: { stages, ...(over.workMode ? { workMode: over.workMode } : {}) } });
@@ -91,4 +91,26 @@ test("the task is whitespace-collapsed in the event", () => {
 
 test("afterSend keeps the path and clears the task", () => {
   assert.deepEqual(afterSend({ inputPath: "src", task: "do x" }), { inputPath: "src", task: "" });
+});
+
+test("a held run waits for approval only while it is the loop's newest and unshipped; a leftover-files hold needs the diff", () => {
+  const worktree = { runId: "test-1", branch: "loop/test-1", baseCommit: "abc", repo: "/r" };
+  const run = { id: "r2", loopId: "L", statusCode: "awaiting_review", startedAt: "2026-11-27T02:00:00Z" };
+  const older = { id: "r1", loopId: "L", statusCode: "success", startedAt: "2026-11-27T01:00:00Z" };
+  const newer = { id: "r3", loopId: "L", statusCode: "failed", startedAt: "2026-11-27T03:00:00Z" };
+  const record = { worktree, mergedMr: "https://gitlab.com/x/-/merge_requests/1", awaiting: { held: "success", kind: "passed", failedStage: null, reason: "human" } };
+  assert.deepEqual(heldState(run, record, [older, run]), { kind: "waiting", worktreeRunId: "test-1", mergedMr: "https://gitlab.com/x/-/merge_requests/1" });
+  assert.deepEqual(heldState(run, { worktree }, [run]), { kind: "waiting", worktreeRunId: "test-1", mergedMr: null }, "an older record without a reason is a Human hold");
+  assert.deepEqual(heldState(run, record, [older, run, newer]), { kind: "superseded" }, "a later run has the shared branch");
+  assert.deepEqual(heldState(run, {}, [run]), { kind: "superseded" }, "no worktree left to ship");
+  assert.deepEqual(heldState(run, { ...record, awaiting: { ...record.awaiting, reason: "leftoverFiles" } }, [run]), { kind: "reviewDiff" });
+  assert.deepEqual(heldState(run, { ...record, ship: { provider: "gitlab", url: "https://gitlab.com/x/-/merge_requests/2", commit: "c" } }, [run]), { kind: "shipped" });
+  assert.equal(heldState({ ...run, statusCode: "success" }, record, [run]), null);
+  assert.equal(heldState(run, null, [run]), null, "an unreadable record is never offered for approval");
+});
+
+test("lanes keep the loop's steps in order, then other lanes, then Waiting for you, then Done last", () => {
+  assert.deepEqual(orderLanes(["Plan", "Write"], ["Done", "Write", "Old step", WAITING_LANE]), ["Plan", "Write", "Old step", WAITING_LANE, "Done"]);
+  assert.deepEqual(orderLanes([], []), ["Done"]);
+  assert.deepEqual(orderLanes(["Plan"], ["Done"]), ["Plan", "Done"]);
 });
