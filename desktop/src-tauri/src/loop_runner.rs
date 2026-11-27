@@ -777,10 +777,6 @@ fn version_of(program: &str, args: &[&str]) -> Option<String> {
     if text.is_empty() { None } else { Some(text.chars().take(160).collect()) }
 }
 
-/// Fixed environment probe: no command comes from the page. Used by the Mac-style Environment card.
-/// Runs the repo's own `mac/Scripts/feature-boundaries.sh` when present, in the git root, and parses its
-/// `total: N` line. Absent/too-slow script returns None; the report is informational.
-/// Changed paths in the run's worktree, from a fixed `git status --porcelain`. Used by the Loop run record.
 /// Reverts a bounded set of repo-relative paths in the resolved worktree. The page supplies paths only; the host
 /// rejects absolute/parent traversal and never accepts a command. Used by the protected-path and scope guard.
 /// Tracked paths are restored from the index (`git checkout --`). An untracked path is removed only when it is in

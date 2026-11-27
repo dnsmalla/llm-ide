@@ -62,8 +62,8 @@ truth for these paths; its header comment states the same rule.
 │   │                    out and kept here as chat-memory.md.bak)
 │   ├── self-improvement/ everything the system learned, shareable as one folder:
 │   │                    memory.md (project memory, rewritten in place); lessons,
-│   │                    accepted Loop changes and Self-Heal notes follow (plan
-│   │                    2026-11-19-self-improvement-folder). Agents cannot edit it.
+│   │                    accepted Loop changes and Self-Heal notes follow.
+│   │                    Agents cannot edit it.
 │   │                    manifest.json names the project it belongs to; a folder
 │   │                    copied from another project is moved to inbox/<name>/
 │   │                    and each item waits for Adopt or Dismiss.

@@ -1,5 +1,5 @@
 // Loop step lessons (a stage's `promptAddendum`) live in `<project>/system/self-improvement/lessons.json`, the one
-// home of learned knowledge (docs/superpowers/plans/2026-11-19-self-improvement-folder.md, phase 2). In memory they
+// home of learned knowledge. In memory they
 // stay on the stage as `promptAddendum`, so prompt building, accept/revert and the editor are unchanged; store.ts puts
 // them there on load and takes them out of loop.json on save. Pure.
 import type { LoopProjectStore } from "./model.ts";

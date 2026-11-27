@@ -11,7 +11,7 @@
 // `claude` CLI.  No Anthropic SDK, no API-key plumbing here — same
 // path as planner.mjs, risk.mjs, codegen.mjs.
 //
-// This file is the Day 5–7 milestone of docs/meeting-agent-plan.md.
+// This file is the Day 5–7 milestone of the meeting agent (docs/explanation/meeting-agent.md).
 // It currently returns deterministically structured drafts; the
 // loop integration in meeting-agent.mjs will land in the same slice.
 

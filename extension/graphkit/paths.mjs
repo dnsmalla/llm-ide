@@ -10,7 +10,7 @@
 //   <project>/system/graph/index.md          code graph overview (one repo)
 //   <project>/system/graph/<child>/index.md  code graph per repo (2+ code/ repos)
 //   <project>/system/self-improvement/memory.md  LLM-curated durable facts (all learned knowledge lives in
-//                                                self-improvement/, docs/superpowers/plans/2026-11-19-self-improvement-folder.md)
+//                                                self-improvement/)
 //   <project>/system/memory/graph-notes.md   cross-links + dependency hubs
 //   <project>/system/memory/doc-notes.md     doc/InfiniteBrain sections
 //   <project>/system/repo.md                 hand-authored project facts

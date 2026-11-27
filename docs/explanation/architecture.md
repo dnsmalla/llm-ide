@@ -226,7 +226,7 @@ user applies or skips it. Applying writes the file and posts a synthetic
 ## Out of scope (today)
 
 - **Cloud deployment.** The architecture is local-first by design. Self-hosting on a VPS is possible but not the default path.
-- **Self-hosted in-meeting bot.** Earlier drafts of the README described a `bot-worker/` Playwright service. That code is not yet in the tree; the [`meeting-agent`](https://github.com/dnsmalla/llm-ide/blob/main/extension/docs/meeting-agent-plan.md) currently ships as a co-pilot only (questions appear as `[agent ?]` rows in your transcript, never typed into the meeting).
+- **Self-hosted in-meeting bot.** Earlier drafts of the README described a `bot-worker/` Playwright service. That code is not yet in the tree; the [`meeting-agent`](meeting-agent.md) currently ships as a co-pilot only (questions appear as `[agent ?]` rows in your transcript, never typed into the meeting).
 
 ## See also
 

@@ -37,8 +37,8 @@ export function _setTickDepsForTests({ draftQuestion: d = null, getPlan: g = nul
 export function _tickForTests(sessionId) { const run = runs.get(sessionId); return run ? tickRun(run) : null; }
 
 // ── Question-loop tunables ────────────────────────────────────────────
-// Held in module scope so tests can override.  Numbers come from §6 of
-// docs/meeting-agent-plan.md.
+// Held in module scope so tests can override.  Design notes:
+// docs/explanation/meeting-agent.md.
 const TICK_MS                = 1500;     // how often we re-evaluate
 const QUESTION_COOLDOWN_MS   = 90_000;   // min gap between asked questions
 const MIN_SILENCE_MS         = 2500;     // wait after the last word
