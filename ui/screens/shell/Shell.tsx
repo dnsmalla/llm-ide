@@ -38,6 +38,7 @@ import { getHubError, remoteBanner, subscribeHubError } from "./remote-status";
 import { bindRemoteSession } from "./remote-session";
 import { bindLocalSession, signOutExplicitly } from "./local-session";
 import { landingFor, readHome, selectHome } from "./landing";
+import { markGuideSeen, shouldOpenGuideOnFirstRun } from "./first-run";
 import { activityStore, core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { inboxStore } from "./approvals/inbox-store";
@@ -215,7 +216,12 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, []);
   useEffect(() => { if (shellHost.isAvailable()) void reportSection(nav.active); }, [nav.active]);
 
-  const [guideOpen, setGuideOpen] = useState(false);
+  // First launch of an install opens the guide by itself. Pure initializer (StrictMode runs it twice); the screenshot
+  // launch override must land on its section untouched.
+  const [guideFirstRun, setGuideFirstRun] = useState(() => initialSection == null && shouldOpenGuideOnFirstRun());
+  const [guideOpen, setGuideOpen] = useState(guideFirstRun);
+  // Marked when shown, not on Close, so quitting without pressing Close still counts as seen.
+  useEffect(() => { if (guideFirstRun) markGuideSeen(); }, [guideFirstRun]);
   const { tour, start: startTour, next: nextTour, back: backTour, skip: skipTour } = useTour();
   const [quickOpen, setQuickOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
@@ -547,7 +553,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
       {pickerOpen && sshServer ? (
         <FolderPicker io={pickerIo} deps={pickerDeps} onOpened={() => { setPickerOpen(false); goHomeAfterOpen(); }} onClose={() => setPickerOpen(false)} />
       ) : null}
-      {guideOpen ? <GuideDialog onClose={() => setGuideOpen(false)} onNavigate={(section, anchor) => { setGuideOpen(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} onStartTour={(flow) => { setGuideOpen(false); startTour(flow); }} /> : null}
+      {guideOpen ? <GuideDialog closeLabel={guideFirstRun ? "Get started" : undefined} onClose={() => { setGuideOpen(false); setGuideFirstRun(false); }} onNavigate={(section, anchor) => { setGuideOpen(false); setGuideFirstRun(false); if (anchor) shellBus.publish({ type: "goto-section", section, anchor }); else onSelect(section); }} onStartTour={(flow) => { setGuideOpen(false); setGuideFirstRun(false); startTour(flow); }} /> : null}
       {tour ? <TourOverlay tour={tour} activeSection={nav.active} onSelectSection={onSelect} onNext={nextTour} onBack={backTour} onSkip={skipTour} /> : null}
       {permissionsOpen ? <div className="sh-modal" role="dialog" aria-modal="true" aria-labelledby="sh-permissions-title"><div className="sh-modal-card"><h2 id="sh-permissions-title" className="sh-panel-title">Permissions</h2><p className="sh-panel-text">Accessibility, Screen Recording and Microphone permissions belong to the Mac app’s live-capture engine. The desktop has no capture engine, so there is nothing to grant here.</p><div className="sh-form-actions"><button type="button" className="sh-button" onClick={() => setPermissionsOpen(false)}>Close</button></div></div></div> : null}
       {leave ? <LeaveProjectDialog labels={leave.labels} onStay={cancelLeave} onLeave={confirmLeave} /> : null}

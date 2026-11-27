@@ -151,7 +151,7 @@ function Home({ open }: { open: (id: string) => void }): ReactNode {
   );
 }
 
-export function GuideDialog({ onClose, onNavigate, onStartTour, initialTopic }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void; onStartTour?: (flow: TourFlow) => void; /** Open on this topic id instead of Home. */ initialTopic?: string }): ReactNode {
+export function GuideDialog({ onClose, onNavigate, onStartTour, initialTopic, closeLabel = "Close" }: { onClose: () => void; onNavigate?: (target: NonNullable<HelpTopic["target"]>, settingsGroup?: string) => void; onStartTour?: (flow: TourFlow) => void; /** Open on this topic id instead of Home. */ initialTopic?: string; closeLabel?: string }): ReactNode {
   const close = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
@@ -176,7 +176,7 @@ export function GuideDialog({ onClose, onNavigate, onStartTour, initialTopic }: 
             <h2 id="wc-guide-title" className="wc-h2">Help &amp; Support</h2>
             <p className="help-sub">Every screen and setting, explained simply, with flowcharts you can click.</p>
           </div>
-          <button ref={close} type="button" className="sh-button" onClick={onClose}>Close</button>
+          <button ref={close} type="button" className="sh-button" onClick={onClose}>{closeLabel}</button>
         </div>
         <div className="help-search">
           <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search: “Factory”, “API key”, “offline”…" aria-label="Search help" autoComplete="off" />
