@@ -40,6 +40,72 @@ test("native runner stops at the repair budget and ignores advisory failures", a
   assert.equal(advisory.passed, true);
 });
 
+test("a cheap deterministic stage (testMap/codeGraph) gets one direct, no-repair recheck before the non-improving stop, a shellCommand/skill stage never does", async () => {
+  // A testMap stage repeating its own failure text after a repair that reported success gets one direct recheck of
+  // just that stage (no repair call, no re-running earlier stages): it passes here because the recheck call itself
+  // now succeeds, same as if a repair's own file write only became visible a moment later. Only 2 repairs run, not
+  // 3 — the recheck must never trigger its own repair, or it is not actually free.
+  {
+    let runs = 0, repairs = 0;
+    const out = await runNativeLoop(cfg([stage("a", "A", { kind: "testMap" })], { maxIterations: 3, maxRepairsPerStage: 5, consecutiveFailureStop: 2 }), {
+      async runStage() { runs += 1; return { ok: runs > 2, output: runs > 2 ? "" : "0 test root(s)" }; },
+      async repair() { repairs += 1; return { ok: true, output: "repaired" }; }, log() {},
+    });
+    assert.equal(out.passed, true, "the direct recheck let the next, now-passing check through");
+    assert.equal(repairs, 2, "the recheck itself never triggers a repair");
+    assert.equal(out.iterationsUsed, 3, "iteration 3 still re-runs the stage normally, from the top, like any other iteration");
+  }
+  // A testMap stage that never actually gets fixed still stops at the ordinary count — the recheck buys one extra
+  // free LOOK, not an extra repair attempt, so the message and repair count are unchanged from the non-graced case.
+  {
+    let repairs = 0, runs = 0;
+    const out = await runNativeLoop(cfg([stage("a", "A", { kind: "testMap" })], { maxIterations: 3, maxRepairsPerStage: 5, consecutiveFailureStop: 2 }), {
+      async runStage() { runs += 1; return { ok: false, output: "0 test root(s)" }; },
+      async repair() { repairs += 1; return { ok: true, output: "repaired" }; }, log() {},
+    });
+    assert.equal(out.passed, false);
+    assert.match(out.statusSummary, /A failed 2 times without improvement/);
+    assert.equal(repairs, 2, "the direct recheck that also failed never consumed a 3rd repair");
+    assert.equal(out.iterationsUsed, 2, "the recheck does not consume an iteration slot");
+    assert.equal(runs, 3, "the two normal checks plus exactly one direct recheck, confirming it really ran");
+  }
+  // codeGraph gets the same recheck as testMap.
+  {
+    const out = await runNativeLoop(cfg([stage("a", "A", { kind: "codeGraph" })], { maxIterations: 3, maxRepairsPerStage: 5, consecutiveFailureStop: 2 }), {
+      async runStage() { return { ok: false, output: "stale" }; },
+      async repair() { return { ok: true, output: "repaired" }; }, log() {},
+    });
+    assert.equal(out.passed, false);
+    assert.match(out.statusSummary, /A failed 2 times without improvement/);
+    assert.equal(out.iterationsUsed, 2);
+  }
+  // A shellCommand (or skill) stage never gets a recheck: identical failures stop at exactly consecutiveFailureStop,
+  // unchanged from before this change — re-running an actual test command is not free.
+  {
+    let runs = 0;
+    const out = await runNativeLoop(cfg([stage("a", "A", { kind: "shellCommand" })], { maxIterations: 3, maxRepairsPerStage: 5, consecutiveFailureStop: 2 }), {
+      async runStage() { runs += 1; return { ok: false, output: "same" }; },
+      async repair() { return { ok: true, output: "repaired" }; }, log() {},
+    });
+    assert.equal(out.passed, false);
+    assert.match(out.statusSummary, /A failed 2 times without improvement/);
+    assert.equal(out.iterationsUsed, 2);
+    assert.equal(runs, 2, "no extra recheck call for a non-deterministic-kind stage");
+  }
+  // At the last allowed iteration there is no iteration slot left for a `continue` to land on if the recheck passed,
+  // so a cheap deterministic stage gets no recheck there either — same stop as without this change.
+  {
+    let runs = 0;
+    const out = await runNativeLoop(cfg([stage("a", "A", { kind: "testMap" })], { maxIterations: 2, maxRepairsPerStage: 5, consecutiveFailureStop: 2 }), {
+      async runStage() { runs += 1; return { ok: false, output: "same" }; },
+      async repair() { return { ok: true, output: "repaired" }; }, log() {},
+    });
+    assert.equal(out.passed, false);
+    assert.match(out.statusSummary, /A failed 2 times without improvement/);
+    assert.equal(runs, 2, "no recheck call: no iteration is left to continue into if it had passed");
+  }
+});
+
 test("native runner stops at the wall-clock budget", async () => {
   const out = await runNativeLoop(cfg([stage("a", "A")], { wallClockBudgetSeconds: 0.001, maxIterations: 3 }), {
     async runStage() { await new Promise((r) => setTimeout(r, 5)); return { ok: false, output: "no" }; },

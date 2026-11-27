@@ -196,6 +196,14 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
   const repairs = new Map<string, number>();
   let lastFailure = "";
   let nonImproving = 0;
+  /** A cheap deterministic check (testMap/codeGraph: no agent call, a fast fs/graph recompute) gets ONE direct,
+   *  in-place recheck before the non-improving stop counts it, per stage per run: these have been seen to repeat a
+   *  check's own stale failure text right after a repair that reported success (the check not yet seeing a file the
+   *  repair just wrote). The recheck is only that one stage, with no repair and no re-running of earlier stages, so
+   *  it costs nothing extra when the stage is genuinely fixed. A blocking shellCommand/skill stage never gets this —
+   *  a repair that twice leaves its own failure unchanged there is a real, worth-stopping-for signal, and re-running
+   *  one of those (a full test command, say) is not free. */
+  const cheapRecheckGranted = new Set<string>();
   let iterationsUsed = 0;
   const outcomes: StageOutcome[] = [];
   const iterations: LoopIterationOutcome[] = [];
@@ -517,6 +525,32 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
     if (signature === lastFailure) nonImproving += 1; else nonImproving = 1;
     lastFailure = signature;
     if (nonImproving >= Math.max(1, config.consecutiveFailureStop)) {
+      const isCheapDeterministic = failed.stage.kind === "testMap" || failed.stage.kind === "codeGraph";
+      // `continue`-ing the outer loop would also need another iteration slot for the stages after this one to run;
+      // without one left, fall through to the ordinary stop instead of granting a recheck that can't be followed up.
+      const iterationLeft = iteration < clampIterations(config.maxIterations);
+      if (isCheapDeterministic && iterationLeft && !cheapRecheckGranted.has(failed.stage.id)) {
+        cheapRecheckGranted.add(failed.stage.id);
+        if (deps.isCancelled?.()) return cancelledOutcome();
+        if (expired()) return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: null, statusSummary: "wall-clock budget reached" };
+        // The recheck is a direct, in-place call to the SAME stage only — no repair, no re-running earlier stages,
+        // no agent call (testMap/codeGraph never carry one): that is what makes it actually free of real cost, even
+        // though a large repo's graph/test-map recompute (testOp "map", or any codeGraph op) still takes real time.
+        // Continuing the outer loop (as a full extra iteration would) re-runs every stage from the top AND repairs
+        // this one again on a repeat failure, which is not free at all.
+        deps.log(`↻ ${failed.stage.name} repeated the same failure right after a repair that reported success; rechecking it directly, once, before giving up`);
+        deps.onProgress?.({ type: "stage-start", stage: failed.stage, index: stages.indexOf(failed.stage) + 1, count: stages.length, iteration });
+        const recheckT0 = Date.now();
+        const recheck = await deps.runStage(failed.stage, outcomes);
+        const recheckDurationMs = recheck.durationMs ?? Date.now() - recheckT0;
+        const recheckOutcome = { stage: failed.stage, ok: recheck.ok, output: recheck.output, durationMs: recheckDurationMs, usage: recheck.usage };
+        spentUsd += recheck.usage?.costUsd ?? 0;
+        outcomes.push(recheckOutcome);
+        deps.onProgress?.({ type: "stage-result", stage: failed.stage, ok: recheck.ok, iteration, durationMs: recheckDurationMs, costUsd: recheck.usage?.costUsd });
+        deps.log(`${recheck.ok ? "✓" : "✗"} ${failed.stage.name}: ${recheck.ok ? "passed" : "failed"} (direct recheck)`);
+        if (recheck.ok) continue;
+        // Still broken on a fresh, free look: stop now with the same message a non-graced stage would get.
+      }
       return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: failed.stage, statusSummary: `${failed.stage.name} failed ${nonImproving} times without improvement` };
     }
   }
