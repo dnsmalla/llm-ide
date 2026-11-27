@@ -358,36 +358,15 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
     }
   };
 
-  if (!projectRoot && serverFiles) {
-    // A server folder is picked by the server folder picker (the shell's handler); with no handler the card has no action.
-    return (
-      <div className="ex-root" data-active={active}>
-        <NoProjectCard
-          title="Open a server folder to browse files."
-          hint="The files are on the SSH server. Choose a folder there to browse and edit them."
-          actions={onOpenServerFolder ? { openProject: onOpenServerFolder, openLabel: "Open server folder…" } : {}}
-        />
-      </div>
-    );
-  }
-  if (!projectRoot) {
-    return (
-      <div className="ex-root" data-active={active}>
-        <NoProjectCard what="browse files" hint="Open a project folder to browse and edit its files." />
-      </div>
-    );
-  }
-
-  const name = nativeBaseName(projectRoot) || projectRoot;
   const chatFits = dockFits(viewportW, width);
   const chatVisible = chatDock.open && chatFits;
   useEffect(() => {
+    if (!projectRoot) return; // the no-project cards below render no chat dock, so there is no state to announce
     globalThis.dispatchEvent?.(new CustomEvent("llmide:code-assistant-state", { detail: { open: chatVisible, fits: chatFits } }));
-  }, [chatVisible, chatFits]);
-
-  const chatWidth = clampDockWidth(chatDock.width, viewportW, width);
+  }, [chatVisible, chatFits, projectRoot]);
 
   const loadFolders = useCallback(async () => {
+    if (!projectRoot) return;
     setFoldersBusy(true);
     setFoldersError(null);
     try {
@@ -410,6 +389,30 @@ export function ExplorerScreen({ active, projectRoot, mode, onOpenServerFolder, 
       setFoldersBusy(false);
     }
   }, [projectRoot]);
+
+  if (!projectRoot && serverFiles) {
+    // A server folder is picked by the server folder picker (the shell's handler); with no handler the card has no action.
+    return (
+      <div className="ex-root" data-active={active}>
+        <NoProjectCard
+          title="Open a server folder to browse files."
+          hint="The files are on the SSH server. Choose a folder there to browse and edit them."
+          actions={onOpenServerFolder ? { openProject: onOpenServerFolder, openLabel: "Open server folder…" } : {}}
+        />
+      </div>
+    );
+  }
+  if (!projectRoot) {
+    return (
+      <div className="ex-root" data-active={active}>
+        <NoProjectCard what="browse files" hint="Open a project folder to browse and edit its files." />
+      </div>
+    );
+  }
+
+  const name = nativeBaseName(projectRoot) || projectRoot;
+
+  const chatWidth = clampDockWidth(chatDock.width, viewportW, width);
 
   const openFolders = () => {
     setFoldersOpen(true);
