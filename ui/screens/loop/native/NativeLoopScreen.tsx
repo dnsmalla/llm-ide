@@ -14,20 +14,17 @@ import { core } from "../../shell/runtime";
 import { SkillIdField, decodeSkillChoices, type SkillChoice } from "./SkillIdField";
 import { isBatchSkill, isManualOnly, loadLoops, batchRollbackReason, primaryLoop, saveLoops, type LoopLoad } from "./store.ts";
 import { persistEnsuredDefaults } from "./defaults-save.ts";
-import { TEST_PLAN_PATH } from "./protected.ts";
 import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, maxPassesOf, reviewEveryRunsOf, stepLimitOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
-import { hasRealProgress, runAllPasses } from "./all-passes.ts";
 import { RUN_COMMAND_MAX, isOneItemRun } from "./run-command.ts";
 import { loopbackLogLine } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { pickInputPath } from "./pick-input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
 import { detectProjectTestCommand, detectTestCommand } from "./environment.ts";
-import { runNativeLoop, runStatusCode, type RunnerDeps } from "./runner.ts";
-import { runRefactorBatches } from "./refactor-batches.ts";
-import { runTestSteps } from "./test-steps.ts";
+import { runStatusCode, type RunnerDeps } from "./runner.ts";
+import { runLoopWithDriver, withBaselineFor } from "./loop-drivers.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
@@ -38,7 +35,7 @@ import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
-import { liveRuns, subscribe as subscribeRuns, trackExternalRun, withBaselineFor } from "./run-manager.ts";
+import { liveRuns, subscribe as subscribeRuns, trackExternalRun } from "./run-manager.ts";
 import { createModelTracker } from "./step-model.ts";
 import { appendRunRecord, decodeFactoryFields, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { copyStateBackIfMissed } from "./run-end.ts";
@@ -53,7 +50,7 @@ import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
-import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
+import { shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
 import { clearLiveCard, setLiveCard, updateLiveModel, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
@@ -591,38 +588,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     ...(runCommand ? { runCommand } : {}),
   });
 
-  /** The step driver's rollback and plan access for one worktree run (Refactoring: REFACTOR.md; the Test loop passes TEST_PLAN_PATH). */
-  const refactorBatchOpts = (run: RunInfo, planRel = "llm-doc/loop/refactor/REFACTOR.md") => {
-    const prefix = repoPrefixFor(projectRoot ?? "", run.worktree);
-    const planPath = prefix ? `${prefix}/${planRel}` : planRel;
-    return {
-      checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
-      restore: async (tree: string) => { await invokeHost("loop_worktree_restore", { runId: run.runId, tree }); },
-      readPlan: async (): Promise<string | null> => {
-        try {
-          const r = await fs.read(planPath, 2_000_000);
-          return r.status === "ok" ? (r.text ?? null) : null;
-        } catch (e) {
-          if (["not_found", "missing"].includes(String((e as { code?: unknown } | null)?.code ?? ""))) return null;
-          throw e;
-        }
-      },
-      writePlan: async (text: string) => { await fs.write(planPath, text, { expected_hash: null, force: true }); },
-      log: (line: string) => setRunLog((l) => [...l, line]),
-    };
-  };
-
-  /** The Everything mode's checkpoint and progress check for one worktree run: progress = a changed path outside the loop's own folders. */
-  const allPassesOpts = (run: RunInfo, log: (line: string) => void) => ({
-    checkpoint: async () => invokeHost<string>("loop_worktree_checkpoint", { runId: run.runId }),
-    progressed: async (before: string) => {
-      const d = decodeWorktreeDiff(await invokeHost<unknown>("loop_worktree_diff", { runId: run.runId, since: before }));
-      if (!d) throw new Error("the worktree diff could not be read");
-      return hasRealProgress(d.files);
-    },
-    log,
-  });
-
   /** Cancels the active run: shell and fault stages through loop_cancel, agent calls through their abort signal. */
   const cancelActiveRun = () => {
     cancelledRef.current = true;
@@ -792,14 +757,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId: trailRunId, mode: "loop", iteration: e.iteration }));
         },
       };
-      const outcome = target.defaultKey === "refactor" && activeRun
-        ? await runRefactorBatches(runConfig, runDeps, { ...refactorBatchOpts(activeRun), ...(oneItem ? { maxBatches: 1 } : {}) })
-        // "One item I name" is the person's own task, not the plan's next step: it runs as one plain pass.
-        : target.defaultKey === "test" && activeRun && !oneItem
-          ? await runTestSteps(runConfig, runDeps, refactorBatchOpts(activeRun, TEST_PLAN_PATH))
-        : activeRun && !isFactoryLoop(target) && !oneItem && target.defaultKey !== "refactor" && maxPassesOf(runConfig) > 1
-          ? await runAllPasses(runConfig, runDeps, allPassesOpts(activeRun, followLog))
-          : await runNativeLoop(isFactoryLoop(target) ? configFor("full", runConfig) : runConfig, runDeps);
+      const outcome = await runLoopWithDriver({
+        target, runConfig, runDeps, activeRun, oneItem, projectRoot: projectRoot ?? "", fs, host: invokeHost,
+        batchLog: (line) => setRunLog((l) => [...l, line]), passesLog: followLog,
+      });
       const setupStage = target.config.stages.find((st) => isSetupStage(st));
       if (activeRun && setupStage && outcome.stages.some((o) => isSetupStage(o.stage) && o.ok)) await markSetupDone(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setupStage.command ?? "");
       if (!outcome.passed && !outcome.cancelled && outcome.failedStage && isSetupStage(outcome.failedStage)) outcome.statusSummary = `Setting up the project's dependencies (${setupStage?.command ?? "install"}) failed, so the run stopped before its other steps.${activeRun ? ` Branch ${activeRun.branch} is kept.` : ""}`;

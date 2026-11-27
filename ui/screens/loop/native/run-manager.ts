@@ -16,6 +16,8 @@ import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent a
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
 import { createModelTracker } from "./step-model.ts";
+import { runLoopRequest, type LoopRunHost, type LoopRunRequest } from "./run-manager-loop.ts";
+import { withBaselineFor } from "./loop-drivers.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
 import { initialProjectStore } from "./templates.ts";
@@ -25,9 +27,16 @@ import { stepReviewRecords } from "./review.ts";
 import { countStepReviews, summarizeSteps, type StepReviewCounts } from "./issue-trail.ts";
 
 export type { RunMode } from "./factory.ts";
+export type { LoopRunRequest } from "./run-manager-loop.ts";
+export { withBaselineFor };
 
-/** The work item fields a run needs. Task 4's WorkItemRecord is a superset. */
-export interface RunItem { key: string; source: "issue" | "spec" | "text"; id: string | null; title: string; body: string; repo: string | null; provider: "github" | "gitlab" | null }
+/** The work item fields a run needs. Task 4's WorkItemRecord is a superset. `loop` set = a non-Factory loop run (see `loopRunItem`). */
+export interface RunItem { key: string; source: "issue" | "spec" | "text"; id: string | null; title: string; body: string; repo: string | null; provider: "github" | "gitlab" | null; loop?: LoopRunRequest }
+
+/** The run item of a non-Factory loop: its key names the loop, so a loop's runs share one board card and one worktree. */
+export function loopRunItem(loop: { id: string; name: string }, request: Omit<LoopRunRequest, "loopId"> = {}): RunItem {
+  return { key: `loop:${loop.id}`, source: "text", id: null, title: loop.name, body: "", repo: null, provider: null, loop: { loopId: loop.id, ...request } };
+}
 
 export interface LiveRun {
   runId: string;
@@ -69,6 +78,8 @@ export interface RunManagerDeps {
   loadFactoryLoop(fs: FsApi): Promise<LoopDefinition | null>;
   /** The host approval token for the loop's shell commands; null = the user declined. */
   approve(loopId: string): Promise<string | null>;
+  /** What a non-Factory loop run needs beyond the deps above; absent = such runs refuse to start. */
+  loopRun?: LoopRunHost;
   createStageDeps: typeof createStageDeps;
   runLoop: typeof runNativeLoop;
   appendRecord(fs: FsApi, entry: LoopRunIndexEntry, record: Record<string, unknown>): Promise<void>;
@@ -95,7 +106,7 @@ export interface RunManagerDeps {
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
 interface WorktreeInfo { runId: string; project: string; repo: string; worktree: string; branch: string; baseCommit: string }
-interface ManagedRun { live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void; /** Mirrors the log to system/loop-runs/logs/<runId>.log once the worktree exists; execute flushes it before the run is dropped. */ logWriter?: RunLogWriter }
+interface ManagedRun { /** Non-Factory loop runs: the worktree id host calls carry (null = no worktree), undefined until the worktree is prepared. */ loopRunId?: string | null; live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void; /** Mirrors the log to system/loop-runs/logs/<runId>.log once the worktree exists; execute flushes it before the run is dropped. */ logWriter?: RunLogWriter }
 interface Finished { loop: LoopDefinition; info: WorktreeInfo; config: LoopEngineConfig; outcome: LoopRunOutcome }
 
 export const CONCURRENCY_KEY = "llmide.factory.concurrency";
@@ -368,6 +379,14 @@ export function startRun(projectRoot: string, item: RunItem, mode: RunMode, opts
     postRunNotice("This run's record is still being saved; try again in a moment.");
     return runId;
   }
+  // A loop's runs share one worktree (its slug), so a second run of the same loop would work in the first one's tree.
+  if (item.loop) {
+    const same = [...runs.values()].find((other) => other.item.loop?.loopId === item.loop?.loopId && other.live.projectRoot === projectRoot);
+    if (same) {
+      postRunNotice(`“${item.title}” already has a run in progress.`);
+      return same.live.runId;
+    }
+  }
   // A new run for a work item that already has a live run of the same kind would cut a second worktree, branch and
   // draft MR for it (a double click, or the phone starting an issue whose card is already running).
   if (opts.runId === undefined) {
@@ -397,6 +416,9 @@ function pump(): void {
     if (running >= limit) break;
     const run = runs.get(runId);
     if (!run) { queue = queue.filter((id) => id !== runId); continue; }
+    // Loop runs of one project copy the loop state in and out of the main tree, and a later finisher would delete what an
+    // earlier one saved: one at a time, the rest wait (a Factory run behind them is not held up).
+    if (run.item.loop && loopRunActive(run.live.projectRoot)) continue;
     // Starting needs the open project: the worktree is cut, loop.json read and the loop approved through active-root host commands.
     if (run.live.projectRoot !== active) continue;
     queue = queue.filter((id) => id !== runId);
@@ -407,6 +429,11 @@ function pump(): void {
     void execute(run);
   }
   if (changed) emit();
+}
+
+/** True while a non-Factory loop run of this project is running (or held for its project): the next one waits. Every loop run copies the shared loop state in and back out, so two at once would overwrite each other's. */
+export function loopRunActive(projectRoot: string): boolean {
+  return [...runs.values()].some((r) => r.item.loop !== undefined && r.live.projectRoot === projectRoot && r.live.state !== "queued");
 }
 
 export function cancelRun(runId: string): void {
@@ -421,7 +448,10 @@ export function cancelRun(runId: string): void {
   run.cancelled = true;
   run.abort.abort();
   run.wake?.();
-  void requireDeps().host("loop_cancel", { runId }).catch(() => undefined);
+  // A loop run is pinned by its worktree id (none: the main tree); before that exists nothing is running to cancel.
+  if (run.item.loop) {
+    if (run.loopRunId !== undefined) void requireDeps().host("loop_cancel", run.loopRunId ? { runId: run.loopRunId } : {}).catch(() => undefined);
+  } else void requireDeps().host("loop_cancel", { runId }).catch(() => undefined);
   emit();
 }
 
@@ -461,6 +491,7 @@ async function execute(run: ManagedRun): Promise<void> {
   const d = requireDeps();
   const started = d.now();
   const fs = d.fsFor(run.live.projectRoot);
+  if (run.item.loop) { await executeLoopRun(d, run, fs, run.item.loop); return; }
   let finished: Finished | null = null;
   try {
     finished = await runInWorktree(d, run, fs);
@@ -497,6 +528,33 @@ async function execute(run: ManagedRun): Promise<void> {
         durationSeconds: (d.now().getTime() - started.getTime()) / 1000, costUsd: o.costUsd ?? null, shipLine,
       });
     } catch { /* a listener must never change the run's own outcome */ }
+  }
+  await boundedFlush(run.logWriter);
+  runs.delete(run.live.runId);
+  emit();
+  pump();
+}
+
+/** A non-Factory loop run: the Loop page's steps (run-manager-loop.ts). It writes its own record; a thrown error is the run's failure. */
+async function executeLoopRun(d: RunManagerDeps, run: ManagedRun, fs: FsApi, request: LoopRunRequest): Promise<void> {
+  try {
+    await runLoopRequest(d, {
+      fs, projectRoot: run.live.projectRoot, runId: run.live.runId, request,
+      log: (line) => appendLog(run, line),
+      notice: postRunNotice,
+      refuse: (message) => fail(run, message),
+      isCancelled: () => run.cancelled,
+      markCancelled: () => { run.cancelled = true; },
+      signal: run.abort.signal,
+      holdWhilePaused: holdForProject(d, run),
+      onPrepared: (worktreeRunId) => { run.loopRunId = worktreeRunId; },
+      startLogFile: () => { run.logWriter = createRunLogWriter(fs, runLogPath(run.live.runId), run.live.log); },
+    });
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    fail(run, message);
+    // The runner itself failed (not a stage verdict), as on the Loop page.
+    try { d.loopRun?.reportIncident?.(message); d.loopRun?.notify?.(false); } catch { /* a listener must not stop the run's end */ }
   }
   await boundedFlush(run.logWriter);
   runs.delete(run.live.runId);
@@ -605,13 +663,6 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
   // cancel, guard block, error and an intake decision keep their own states.
   const stopped = !outcome.passed && !outcome.cancelled && !outcome.blocked && !outcome.errored && needsDecisionSummary(outcome) === null && run.live.mode !== "intakeOnly";
   return { loop, info, config, outcome: stopped ? { ...outcome, stoppedAtLimit: true } : outcome };
-}
-
-/** A reused worktree carries the earlier run's code, which may be red on purpose (send-back, rework): a baseline check there would stop the run before Implement can fix it. */
-export function withBaselineFor<T extends { baselineCheck?: unknown }>(deps: T, reusedWorktree: boolean): Omit<T, "baselineCheck"> | T {
-  if (!reusedWorktree) return deps;
-  const { baselineCheck: _skipped, ...rest } = deps;
-  return rest;
 }
 
 /** What the host's `loop_env_prepare` answers (loop_env_cache.rs). */

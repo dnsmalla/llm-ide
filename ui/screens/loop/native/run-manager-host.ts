@@ -9,7 +9,9 @@ import { invokeHost } from "../../shell/host";
 import { projectStore } from "../../shell/project-store";
 import { core } from "../../shell/runtime";
 import { readRepoConfig } from "../../settings/repo-config";
-import { approveLoop } from "./approvals.ts";
+import { approvalStatus, approveLoop } from "./approvals.ts";
+import { notifyTask } from "../../shell/notify/notify";
+import { reportUiIncident } from "../../shell/self-heal";
 import { factoryRole, repoForIssue } from "./factory.ts";
 import { autoShipKind, decodeWorktreeDiff } from "./ship-model.ts";
 import { setRunRecordAutoShip, setRunRecordShip } from "./history.ts";
@@ -109,6 +111,15 @@ export function installRunManagerHost(): void {
     core,
     fsFor: (root) => projectGuardedFs(hostFs, root, activeProject),
     approve: async (loopId) => (await approveLoop(loopId))?.token ?? null,
+    loopRun: {
+      approvalStatus,
+      // The Loop page's approval chip is its own state; a background run has nothing to refresh.
+      refreshApproval: async () => undefined,
+      post: (path, body, timeoutMs) => core.requestRaw(path, { method: "POST", body, timeoutMs }),
+      readRepoConfig,
+      notify: (passed) => { void notifyTask("loop", passed); },
+      reportIncident: (message) => reportUiIncident("loop", message),
+    },
     // An issue runs in the clone Settings → Repositories maps its owner/name slug to (null = not mapped).
     repoForSlug: (provider, slug, projectRoot) => repoForIssue({ provider, repo: slug }, readRepoConfig().saved, projectRoot),
     activeProject,
