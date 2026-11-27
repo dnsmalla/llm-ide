@@ -12,11 +12,11 @@
     "warnings": 3
   },
   "ui/screens/docgen/SourcePanel.tsx": {
-    "errors": 5,
+    "errors": 0,
     "warnings": 4
   },
   "ui/screens/explorer/ExplorerScreen.tsx": {
-    "errors": 2,
+    "errors": 0,
     "warnings": 4
   },
   "ui/screens/factory/LoopRuns.tsx": {
