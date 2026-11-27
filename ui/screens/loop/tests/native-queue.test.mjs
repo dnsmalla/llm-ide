@@ -43,7 +43,7 @@ test("a Factory start still goes through the gate before its first await, and a 
   const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
   const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const startManaged ="));
   assert.ok(wrapper.indexOf("tryAcquire()") < wrapper.indexOf("await "), "the gate is taken before any await");
-  assert.match(wrapper, /finally \{\s*startGateRef\.current\.release\(\)/);
+  assert.match(wrapper, /finally \{\s*releasePageRun\(\);\s*startGateRef\.current\.release\(\)/);
   assert.match(wrapper, /Another run is starting/);
 });
 
@@ -88,6 +88,8 @@ test("the Loop schedule is read on every pass: an edit applies, a cleared one st
   assert.deepEqual(scheduleTick({ cron: "bogus", last: "" }, at(2, 0), valid, matches), { fire: false, next: null });
 
   const { readFileSync } = await import("node:fs");
-  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
-  assert.match(src, /scheduleTick\(stored\(\), new Date\(\), validateCron, cronMatches\)/, "the page's timer reads the saved schedule on each pass");
+  const src = readFileSync(new URL("../native/loop-schedule.ts", import.meta.url), "utf8");
+  assert.match(src, /scheduleTick\(loadSchedule\(d\.storage, root\), d\.now\(\), d\.valid, d\.matches\)/, "the shell's timer reads the saved schedule on each pass");
+  const page = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(page, /scheduleTick|setInterval\(tick/, "the page no longer owns a schedule timer");
 });

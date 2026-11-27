@@ -29,7 +29,7 @@ import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
 import { writeRunArchive } from "./summary.ts";
 import { takeLegacyQueue } from "./queue.ts";
-import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
+import { describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
@@ -53,7 +53,7 @@ import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type Trai
 import { readRepoConfig } from "../../settings/repo-config";
 import { appendRunLog, capRunLog } from "./run-log.ts";
 import { createStartGate } from "./start-gate.ts";
-import { readSchedule, scheduleTick } from "./schedule-tick.ts";
+import { SCHEDULE_NOTICE_EVENT, loadSchedule, markPageRun, saveSchedule } from "./loop-schedule.ts";
 import { unsavedWork } from "../../shell/unsaved-work.ts";
 import "./native-loop.css";
 import { isRecord } from "../../../kit/src/decode.ts";
@@ -216,7 +216,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const runCommandsRef = useRef(runCommands);
   runCommandsRef.current = runCommands;
   const queueMigrated = useRef(false);
-  const runLoopRef = useRef<(l: LoopDefinition, scheduled?: boolean) => void>(() => undefined);
   const [scheduleCron, setScheduleCron] = useState("");
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
@@ -828,9 +827,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const executeLoop = async (target: LoopDefinition, start: { repoRel: string; task: string; item: WorkItem }) => {
     if (!startGateRef.current.tryAcquire()) { setNotice("Another run is starting; start this item again when it has begun."); return; }
     setStarting(true);
+    const releasePageRun = projectRoot ? markPageRun(projectRoot) : () => undefined;
     try {
       await executeFactoryGated(target, start);
     } finally {
+      releasePageRun();
       startGateRef.current.release();
       setStarting(false);
     }
@@ -868,32 +869,20 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     startManaged(target, scheduled, command);
   };
 
-  runLoopRef.current = runLoop;
-
-  // The loops the scheduler starts are read when it fires, not when its timer was created.
   const loadRef = useRef(load);
   loadRef.current = load;
+
+  // The cron schedule itself runs from the shell (loop-schedule.ts); the page shows the saved cron and the lines the
+  // schedule says while this page is open.
   useEffect(() => {
-    if (!projectRoot) return;
-    const key = `llmide.loopSchedule.v1.${projectRoot}`;
-    const stored = () => { try { return readSchedule(localStorage.getItem(key)); } catch { return readSchedule(null); } };
-    setScheduleCron(stored().cron);
-    // The timer runs whether or not a schedule exists yet, and reads the saved one on every pass, so typing, changing
-    // or clearing the cron takes effect on the next pass.
-    const tick = () => {
-      const { fire, next } = scheduleTick(stored(), new Date(), validateCron, cronMatches);
-      if (next) { try { localStorage.setItem(key, JSON.stringify(next)); } catch { /* session only */ } }
-      if (!fire) return;
-      const now = loadRef.current;
-      const scheduled = (now?.kind === "ok" ? now.store.loops : []).filter((l) => l.runsOnSchedule);
-      if (scheduled.length === 0) { setNotice("The schedule fired, but no loop is marked Run on schedule."); return; }
-      if (runningRef.current || managedActiveRef.current) { setNotice("The schedule fired while a run is active; scheduled loops were skipped."); return; }
-      setNotice(`Schedule fired: running ${scheduled.length} loop(s).`);
-      for (const l of scheduled) runLoopRef.current(l, true);
+    if (!projectRoot) return undefined;
+    setScheduleCron(loadSchedule(localStorage, projectRoot).cron);
+    const onNote = (e: Event) => {
+      const message = (e as CustomEvent<{ message?: unknown }>).detail?.message;
+      if (typeof message === "string") setNotice(message);
     };
-    tick();
-    const timer = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(timer);
+    window.addEventListener(SCHEDULE_NOTICE_EVENT, onNote);
+    return () => window.removeEventListener(SCHEDULE_NOTICE_EVENT, onNote);
   }, [projectRoot]);
 
   const runScheduledNow = () => {
@@ -903,14 +892,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     for (const l of scheduled) runLoop(l, true);
   };
 
-  const saveSchedule = (cron: string) => {
+  const saveScheduleCron = (cron: string) => {
     if (!projectRoot) return;
     setScheduleCron(cron);
-    // The minute that already fired is kept while the cron is unchanged: saving it again must not fire it twice.
-    const key = `llmide.loopSchedule.v1.${projectRoot}`;
-    let prev = readSchedule(null);
-    try { prev = readSchedule(localStorage.getItem(key)); } catch { /* session only */ }
-    try { localStorage.setItem(key, JSON.stringify({ cron: cron.trim(), last: prev.cron === cron.trim() ? prev.last : "" })); } catch { /* session only */ }
+    saveSchedule(localStorage, projectRoot, cron);
   };
 
   /** Removes only this loop's queued run; the others keep their place. */
@@ -1168,8 +1153,8 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
 
         <section className="loop-card">
           <h2>Schedule</h2>
-          <label className="loop-field"><span>Cron (page-resident scheduler)</span><input value={scheduleCron} placeholder="0 2 * * *" onChange={(e) => saveSchedule(e.target.value)} /></label>
-          <p className="loop-native-hint">{scheduleCron && validateCron(scheduleCron) ? `${describeCron(scheduleCron)}. Fires while the Loop page is open; background scheduling is not ported.` : "No valid schedule. The desktop scheduler runs only while this page is open."}</p>
+          <label className="loop-field"><span>Cron</span><input value={scheduleCron} placeholder="0 2 * * *" onChange={(e) => saveScheduleCron(e.target.value)} /></label>
+          <p className="loop-native-hint">{serverFiles ? "Schedules do not run in SSH server mode." : scheduleCron && validateCron(scheduleCron) ? `${describeCron(scheduleCron)}. Fires in the background while the app is open, with or without this page.` : "No valid schedule. The schedule runs in the background while the app is open."}</p>
           <p className="loop-native-hint">Loops marked “Run on schedule” are queued when the cron fires.</p>
           <button type="button" className="loop-btn" onClick={runScheduledNow}>Run scheduled loops now</button>
         </section>

@@ -305,6 +305,16 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     void import("../loop/native/run-manager-host.ts").then((m) => m.installRunManagerHost());
     return undefined;
   }, [loopRoot, session.signedIn, gate, features.usable]);
+  // The loop cron schedule fires from here, so scheduled loops run without the Loop page open (one timer per app).
+  // loopRoot is null in ssh mode, so schedules never run there; turning Auto Tasks off stops them.
+  useEffect(() => {
+    if (!loopRoot || !session.signedIn || gate !== "open" || !features.usable || !isSectionEnabled("loop", features.usable)) return undefined;
+    if (typeof __FEATURE_AUTO_TASKS__ === "boolean" && !__FEATURE_AUTO_TASKS__) return undefined;
+    let live = true;
+    let stop: (() => void) | null = null;
+    void import("../loop/native/loop-schedule-wiring.ts").then((m) => { if (live) stop = m.installLoopSchedule(); }).catch(() => undefined);
+    return () => { live = false; stop?.(); };
+  }, [loopRoot, session.signedIn, gate, features.usable]);
   // The command-bus scheduler (docs/spec/command-bus.md section 9): not tied to a project or a feature, idle on a core
   // that does not see this UI as the desktop class.
   useEffect(() => {
