@@ -18,7 +18,7 @@ import { followsRegistry, registrySource, stagePromptText } from "./default-stag
 import { graphDigest, rulesDigest } from "./graph-digest.ts";
 import { INPUT_PATH_SKILLS, pathInside } from "./input-path.ts";
 import type { LoopDefinition, LoopStage } from "./model.ts";
-import { isTestFileName, protectedPaths, revertPlan } from "./protected.ts";
+import { isPytestIniPath, isTestFileName, protectedPaths, revertPlan } from "./protected.ts";
 import { runRegression } from "./regression.ts";
 import type { RunnerDeps, StageOutcome, StageRunResult } from "./runner.ts";
 import { noteUnresolvedStep, readRunFile, reviewStepOnce, takeStepSnapshot } from "./step-review-exec.ts";
@@ -509,6 +509,37 @@ export function addendumSection(stage: Pick<LoopStage, "promptAddendum">): strin
   return text ? `Project lessons for this step (accepted by the user):\n${text}` : null;
 }
 
+/**
+ * A created pytest.ini is only safe to exempt from the protected-path guard (see `guardedPaths`' `repairOf`) when
+ * nothing else already configures pytest beside it: pytest.ini always wins over a pyproject.toml, setup.cfg or
+ * tox.ini in the same folder, even when empty, so creating one next to an existing-but-undetected config (the
+ * Structure detector only recognises pytest.ini and a pyproject.toml naming pytest, not setup.cfg or tox.ini) would
+ * silently shadow it. Every other created path is returned unchanged; only a pytest.ini entry can be dropped here.
+ */
+export async function createdPytestInisWithoutCompetingConfig(ctx: StageExecContext, created: readonly string[]): Promise<string[]> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  const out: string[] = [];
+  for (const p of created) {
+    if (!isPytestIniPath(p)) { out.push(p); continue; }
+    const dir = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "";
+    const at = (name: string) => (prefix ? `${prefix}/` : "") + (dir ? `${dir}/${name}` : name);
+    // A missing file throws (readExisting's own pattern); ok/binary/too_large all mean the file is there regardless
+    // of its size, so a tiny maxBytes is enough for an existence check.
+    const exists = async (name: string) => { try { await ctx.fs.read(at(name), 1); return true; } catch { return false; } };
+    let competing = (await exists("setup.cfg")) || (await exists("tox.ini"));
+    if (!competing) {
+      try {
+        const r = await ctx.fs.read(at("pyproject.toml"), 2_000_000);
+        // "too_large" means its content could not be checked for "pytest": treat that as competing (fail closed)
+        // rather than risk missing a real pytest section.
+        competing = r.status === "too_large" || (r.status === "ok" && typeof r.text === "string" && r.text.includes("pytest"));
+      } catch { /* missing: not competing */ }
+    }
+    if (!competing) out.push(p);
+  }
+  return out;
+}
+
 async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, attempt: number, target: LoopDefinition, halt: HaltState, opts?: { review?: boolean }): Promise<StageRunResult> {
   // A review repair starts from a step that passed its checks, so the message says so and carries the findings to fix.
   const message = opts?.review
@@ -530,8 +561,11 @@ async function repairStage(ctx: StageExecContext, s: LoopStage, output: string, 
       signal: ctx.signal,
     }),
     changedNow: () => changedPathsNow(ctx),
-    // A repair gets no Implement exemption (stage = null): it can never edit the verifier.
-    check: (paths, b, created) => guardProtected(ctx, guardedPaths(target, null, paths, created), target, b, created),
+    // A repair gets no Implement exemption (stage = null): it can never edit the verifier. `repairOf: s` only lets
+    // a Structure stage's own repair create a missing pytest.ini, and only a pytest.ini vetted by
+    // createdPytestInisWithoutCompetingConfig; it grants nothing else. The guard's own revert still sees the full
+    // `created` list, so a path this filtering drops is still correctly judged and may still be deleted on revert.
+    check: async (paths, b, created) => guardProtected(ctx, guardedPaths(target, null, paths, await createdPytestInisWithoutCompetingConfig(ctx, created), [], s), target, b, created),
   });
   const r: AgentRunReply = g.result ?? {};
   for (const line of [`↻ repair ${s.name}`, r.reply ?? (g.error !== null ? `(agent call failed: ${g.error})` : "(no reply)"), ...(g.writes.length ? [`changed: ${g.writes.join(", ")}`] : []), ""]) ctx.log(line);

@@ -1,8 +1,43 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createStageDeps } from "../native/stage-exec.ts";
+import { createStageDeps, createdPytestInisWithoutCompetingConfig } from "../native/stage-exec.ts";
 import { runNativeLoop } from "../native/runner.ts";
 import { DEFAULT_LOOP_SPECS } from "../native/defaults.ts";
+
+/** A minimal fs for createdPytestInisWithoutCompetingConfig: `present` names the files that exist, content optional. */
+const presenceFs = (present) => ({
+  read: async (path) => {
+    if (!(path in present)) { const e = new Error("not found"); e.code = "not_found"; throw e; }
+    const text = present[path] ?? "";
+    return { status: "ok", text };
+  },
+});
+const pytestCtx = (present) => ({ projectRoot: "/p", runRoot: "/p", fs: presenceFs(present) });
+
+test("createdPytestInisWithoutCompetingConfig: a created pytest.ini is kept only when nothing else beside it configures pytest", async () => {
+  // Nothing else there: kept.
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({}), ["pytest.ini"]), ["pytest.ini"]);
+  // A sibling setup.cfg or tox.ini: dropped, whatever its content.
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "setup.cfg": "" }), ["pytest.ini"]), []);
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "tox.ini": "" }), ["pytest.ini"]), []);
+  // A sibling pyproject.toml that names pytest: dropped; one that does not: kept.
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "pyproject.toml": "[tool.pytest.ini_options]\n" }), ["pytest.ini"]), []);
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "pyproject.toml": "[tool.black]\n" }), ["pytest.ini"]), ["pytest.ini"]);
+  // A nested pytest.ini is checked beside ITS OWN folder, not the repo root.
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "setup.cfg": "" }), ["pkg/pytest.ini"]), ["pkg/pytest.ini"]);
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "pkg/setup.cfg": "" }), ["pkg/pytest.ini"]), []);
+  // A created path that is not pytest.ini is never touched by this function.
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({}), ["pytest.ini", "tests/test_a.py"]), ["pytest.ini", "tests/test_a.py"]);
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(pytestCtx({ "setup.cfg": "" }), ["pytest.ini", "tests/test_a.py"]), ["tests/test_a.py"]);
+});
+
+test("createdPytestInisWithoutCompetingConfig: an unreadably large pyproject.toml fails closed (treated as competing)", async () => {
+  const ctx = {
+    projectRoot: "/p", runRoot: "/p",
+    fs: { read: async (path) => { if (path.endsWith("pyproject.toml")) return { status: "too_large", text: null }; const e = new Error("not found"); e.code = "not_found"; throw e; } },
+  };
+  assert.deepEqual(await createdPytestInisWithoutCompetingConfig(ctx, ["pytest.ini"]), []);
+});
 
 const stage = (over = {}) => ({
   id: "s1", name: "Stage", kind: "shellCommand", command: "npm test", order: 0, skillId: null, targetPath: null,

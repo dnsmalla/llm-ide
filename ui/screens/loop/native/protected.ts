@@ -100,6 +100,13 @@ export function isCiHookPath(path: string): boolean {
   return CI_HOOK_PROTECTED_GLOBS.some((glob) => protectedMatch(glob, path));
 }
 
+/** True when `path` is named pytest.ini, at the repo root or inside any folder (the same reach as the protected
+ *  globs over that filename). Used only to let a Structure-stage repair CREATE a missing one; editing an existing
+ *  pytest.ini stays protected everywhere (see `guardedPaths`' `repairOf`). */
+export function isPytestIniPath(path: string): boolean {
+  return /(^|\/)pytest\.ini$/i.test(path);
+}
+
 /** The changed files the Ship panel lists as sensitive (build config, CI, hooks), in diff order. */
 export function sensitiveChangedFiles(paths: readonly string[]): string[] {
   return [...new Set(paths.filter((p) => SENSITIVE_SHIP_GLOBS.some((glob) => globMatch(glob, p))))];
