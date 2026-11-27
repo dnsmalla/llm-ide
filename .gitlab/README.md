@@ -261,9 +261,14 @@ flowchart LR
   based on an old `main` may need a rebase before it can be imported.
 - **Keep the history linear.** Rebase instead of merging `main` into your branch — merge commits
   in an MR cannot be imported.
+- **Stay inside the folders in this repository.** Adding new top-level files or folders is
+  refused, even in an intermediate commit.
+- **Build, CI and dependency files need maintainer approval.** Changes to `.github/`, `Makefile`,
+  `setup.sh`, any `package.json` or `.gitattributes`, `deploy/hub/`, the `graph-kit` pin and the
+  export scripts are imported only after an explicit maintainer decision — explain them in the MR.
 - **Do not change `.gitmodules`.** Submodules are managed upstream.
-- **Unsigned commits only.** GPG/SSH-signed commits cannot be re-created exactly; sign-off
-  trailers (`Signed-off-by:`) are fine.
+- **Plain commits only.** GPG/SSH-signed commits and non-UTF-8 commit encodings
+  (`i18n.commitEncoding`) cannot be re-created exactly; sign-off trailers (`Signed-off-by:`) are fine.
 - **One topic per MR**, with [Conventional Commits](https://www.conventionalcommits.org/)
   subjects (`feat(ui): …`, `fix(server): …`, `docs: …`).
 - **Run the tests** in [Testing](#testing) before requesting review.
