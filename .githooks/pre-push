@@ -4,10 +4,11 @@
 # Runs the relevant test suite before a push, scoped to what changed:
 #   - schema/, scripts/, ui/, desktop/, web/, graph-kit, Makefile
 #                               → `make regression` (contracts, desktop/ui/web
-#                                 node suites, agent/v2 wire, graph-kit labs)
+#                                 node suites, desktop+ui `tsc --noEmit`,
+#                                 agent/v2 wire, graph-kit labs)
 #   - extension/ or docs/reference/api/ only
 #                               → `make contract-gates`
-#   - extension/                → `make lint` and `make test`
+#   - extension/                → `make lint`, `npm run type-check`, `make test`
 #   - docs/ markdown            → markdownlint (as docs-ci)
 #   - ios_app/                  → `make test-shared-protocol`
 #   - the graph-kit gitlink     → the online pin check
@@ -126,6 +127,16 @@ if [ "$ext_changed" -eq 1 ]; then
     if ! make lint; then
         echo "pre-push: extension lint FAILED — push aborted (CI would fail the same way)." >&2
         echo "          Fix with: make format   (then re-push), or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+
+# `npm test` strips types without checking them, so a type error passed lint and tests and failed CI (`npm run build`).
+if [ "$ext_changed" -eq 1 ]; then
+    echo "pre-push: extension/ changed — running type-check (npm --prefix extension run type-check)…"
+    if ! npm --prefix extension run type-check; then
+        echo "pre-push: extension type-check FAILED — push aborted (CI would fail the same way)." >&2
+        echo "          Fix the type errors, or bypass with: git push --no-verify" >&2
         exit 1
     fi
 fi

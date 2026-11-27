@@ -26,7 +26,7 @@ clean-cache:
 
 # --- desktop (Tauri) ---------------------------------------------------------
 
-.PHONY: test-desktop test-desktop-node
+.PHONY: test-desktop test-desktop-node typecheck-desktop
 # Desktop gates: node tests, capability/DOMPurify checks, generated-token drift
 # check, then `cargo test --lib` (src-tauri) plus the full tests of the path-dependency
 # crates workspace-core and workspace-helper (`cargo test --lib` in src-tauri never
@@ -46,6 +46,14 @@ test-desktop-node:
 	@if [ -d web/node_modules ]; then \
 	  cd web && npm test --silent && npx tsc --noEmit -p .; \
 	else echo "test-desktop: web/node_modules missing; run: npm ci --prefix web"; [ "$(ALLOW_SKIP)" = 1 ] || exit 1; fi
+
+# Type-check the desktop app and the ui/ screens it bundles (tsc --noEmit, no vite). `npm test`
+# strips types without checking them, and the only other tsc run is `desktop npm run build` (CI).
+# ~18 s warm, so it is part of `make regression` (and so of the pre-push hook).
+typecheck-desktop:
+	@if [ -d desktop/node_modules ]; then \
+	  cd desktop && npx tsc --noEmit -p .; \
+	else echo "typecheck-desktop: desktop/node_modules missing; run: npm ci --prefix desktop"; [ "$(ALLOW_SKIP)" = 1 ] || exit 1; fi
 
 # test-desktop-node is under 2 s and is part of `make regression`; the cargo
 # step compiles Tauri (minutes cold), so it stays out of the regression gate
@@ -102,7 +110,7 @@ test-ios-app:
 # graph-kit-checkout goes FIRST: it is a one-line precondition. The extension
 # suite (`make test`) and cargo (`make test-desktop`) stay separate: the
 # pre-push hook runs `make test` for extension/ pushes, desktop-ci runs cargo.
-regression: graph-kit-checkout graphkit-pin-check contract-gates test-desktop-node agent-v2-gates graph-gates
+regression: graph-kit-checkout graphkit-pin-check contract-gates test-desktop-node typecheck-desktop agent-v2-gates graph-gates
 
 # The graph verification gates, run from the graph-kit submodule: graph-layout-lab
 # asserts the layout engine against exact N² ground truth and Louvain reference
