@@ -50,6 +50,7 @@ import { migrationStatus } from './kb/migrations.mjs';
 import { config, configSummary } from './core/config.mjs';
 import { extensionOriginAllowed } from './core/extension-origins.mjs';
 import { sendJSON } from './core/utils.mjs';
+import { isHostAllowed } from './server/host-allowlist.mjs';
 import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
 import { configureOsRoutes } from './routes/os.mjs';
@@ -943,6 +944,12 @@ function setCORS(req, res) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // First thing, before CORS and auth, for every method: a rebound DNS name (attacker.example -> 127.0.0.1)
+  // is same-origin for the page, so CORS never sees it. The Host value is not echoed back.
+  if (!isHostAllowed(req.headers.host, config)) {
+    sendJSON(res, 403, { error: { code: 'HOST_NOT_ALLOWED', message: 'Host header is not allowed' } });
+    return;
+  }
   setCORS(req, res);
 
   // Per-request logger child — every line emitted by handlers downstream

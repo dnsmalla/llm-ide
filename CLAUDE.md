@@ -123,6 +123,7 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 ### Server (`extension/server.mjs`)
 - **CORS strict allowlist** — `chrome-extension://<id>` + `localhost` / `127.0.0.1`; echo `Origin`, never `*`
 - **Server binds to `127.0.0.1`** — Remote bind requires `LLMIDE_ALLOW_REMOTE=1`; with it, self-registration is CLOSED unless `LLMIDE_ALLOW_REMOTE_REGISTRATION=1`
+- **Non-loopback `Host` is refused** — `isHostAllowed` (`extension/server/host-allowlist.mjs`) 403s before CORS/auth (DNS rebinding); extra names via `LLMIDE_ALLOWED_HOSTS`; off in hub/remote mode
 - **`runClaude()` prefers user's stored `claude.apiKey`** — Falls back to operator's Claude CLI; never silent fallback
 - **8 MB request body limit** — DoS guard
 - **500 k-char prompt cap** — Keep within Claude CLI comfort zone

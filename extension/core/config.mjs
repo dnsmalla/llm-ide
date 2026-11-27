@@ -416,6 +416,9 @@ export const config = Object.freeze({
   // CORS — comma-separated list of allowed origins beyond the always-
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.
   extraCorsOrigins: envStr('LLMIDE_CORS_ORIGINS', '').split(',').map((s) => s.trim()).filter(Boolean),
+  // Extra Host header names accepted by the loopback Host check (server/host-allowlist.mjs normalises them), e.g. a reverse
+  // proxy name in front of a local core. Loopback names are always accepted; hub/remote mode skips the check.
+  allowedHosts: envStr('LLMIDE_ALLOWED_HOSTS', '').split(',').map((s) => s.trim()).filter(Boolean),
   // chrome-extension origin pin from <dataDir>/extension-ids.json (core/extension-origins.mjs); null = any extension.
   pinnedExtensionIds: loadPinnedExtensionIds(DATA_LAYOUT.dataDir),
 
