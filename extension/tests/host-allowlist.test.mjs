@@ -80,7 +80,9 @@ test('a real server answers 403 HOST_NOT_ALLOWED to a foreign Host and serves a 
   const port = await freePort();
   const env = { ...process.env, LLMIDE_PORT: String(port), LLMIDE_HOST: '127.0.0.1',
     LLMIDE_DB_PATH: path.join(dir, 'kb.db'), LLMIDE_JWT_SECRET: 'a'.repeat(48), LLMIDE_VAULT_KEY: 'b'.repeat(48),
-    LLMIDE_BACKUP_INTERVAL_HOURS: '0', LLMIDE_ENGINE_PREWARM: '0', LLMIDE_ALLOWED_HOSTS: 'core.example' };
+    LLMIDE_BACKUP_INTERVAL_HOURS: '0', LLMIDE_ENGINE_PREWARM: '0', LLMIDE_ALLOWED_HOSTS: 'core.example',
+    // Without these the spawned core logs into (and rotates) the repo's own extension/kb/server.log.
+    LLMIDE_LOG_FILE: 'none', LLMIDE_PLUGIN_DIR: dir };
   delete env.NODE_TEST_CONTEXT; delete env.LLMIDE_HUB; delete env.LLMIDE_ALLOW_REMOTE;
   const child = spawn(process.execPath, ['server.mjs'], { cwd: EXT, env, stdio: 'ignore' });
   try {
