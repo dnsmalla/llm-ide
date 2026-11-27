@@ -122,6 +122,9 @@ export const PATHS_TEXT = {
   partial:
     "The layout is read-only here. This group shows the folders, opens them in Finder, re-creates missing folders, and links to Library for the index rebuild.",
   noProject: "Open a project to see its folders.",
+  // NOTE: only a server helper from before the 2026-11-27 change still answers the host code `not_a_project`.
+  serverOutdated:
+    "The server part is older than this app, so it cannot set up this folder. Update the server (Settings → Server → Connect), then try again.",
 } as const;
 
 export const MEMORY_TEXT = {
@@ -136,6 +139,7 @@ export const MEMORY_TEXT = {
 } as const;
 
 export function projectError(e: unknown): string {
+  if (hostErrorCode(e) === "not_a_project") return PATHS_TEXT.serverOutdated;
   const text = hostErrorText(e);
   if (/no project is open/i.test(text) || hostErrorCode(e) === "no_project") return PATHS_TEXT.noProject;
   return text ? text.slice(0, 200) : "The project folders could not be read.";
@@ -164,6 +168,7 @@ function cutAtWord(text: string, max: number): string {
 /** A clone failure's sentence: the no-project text, a friendly auth refusal, the host's message, or a generic one. */
 export function cloneError(e: unknown): string {
   if (hostErrorCode(e) === "no_project") return PATHS_TEXT.noProject;
+  if (hostErrorCode(e) === "not_a_project") return PATHS_TEXT.serverOutdated;
   const text = hostErrorText(e);
   if (!text) return "The clone failed.";
   // Checked on the full text, before cutting, so a marker past the limit still counts.

@@ -139,3 +139,17 @@ test("code_dir_of_uses_one_rule: <root>/code when a code folder is listed, else 
   const none = decodePaths({ root: "/srv/p", id: "p", folders: [{ name: "system", exists: true }] });
   assert.equal(none && codeDirOf(none), null);
 });
+
+const OLD_SERVER_ERROR = { code: "not_a_project", message: "This folder is not an LLM-IDE project." };
+const SERVER_OUTDATED_SENTENCE =
+  "The server part is older than this app, so it cannot set up this folder. Update the server (Settings → Server → Connect), then try again.";
+
+test("projectError: an old server's not_a_project says the server needs an update", () => {
+  assert.equal(projectError(OLD_SERVER_ERROR), SERVER_OUTDATED_SENTENCE);
+  assert.equal(projectError({ code: "other_code", message: "Something else." }), "Something else.");
+});
+
+test("cloneError: an old server's not_a_project says the server needs an update", () => {
+  assert.equal(cloneError(OLD_SERVER_ERROR), SERVER_OUTDATED_SENTENCE);
+  assert.equal(cloneError({ code: "other_code", message: "Something else." }), "Something else.");
+});
