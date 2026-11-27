@@ -218,7 +218,6 @@ are not mirrored here (the web and iPhone apps).
 | Packaging and releases | [desktop/PACKAGING.md](desktop/PACKAGING.md) |
 | Building on macOS | [desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md) |
 | Core internals, sync and invariants | [extension/CLAUDE.md](extension/CLAUDE.md) |
-| Full documentation site | <https://grid-devs.gitlab.io/personal/dinesh/notes-extension/> (GRID GitLab sign-in) |
 
 ## License
 
