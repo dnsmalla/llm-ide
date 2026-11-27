@@ -371,10 +371,10 @@ test("a rejected lease says which provider and that nothing was overwritten, and
 test("a run held for a person is recorded as awaiting review, with why and what the board's Approve needs to ship it", () => {
   assert.deepEqual(heldFields(null, "human"), { awaiting: { held: "success", kind: "passed", failedStage: null, reason: "human" } });
   assert.deepEqual(heldFields("https://gitlab.com/x/-/merge_requests/1", "leftoverFiles"), { awaiting: { held: "success", kind: "passed", failedStage: null, reason: "leftoverFiles" }, mergedMr: "https://gitlab.com/x/-/merge_requests/1" });
-  // The Loop page's run end writes these for a hold (a source check: the screen needs React to run).
-  const screen = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
+  // The Loop page's run end writes these for a hold (a source check on run-finish.ts, which builds the record).
+  const screen = readFileSync(new URL("../native/run-finish.ts", import.meta.url), "utf8");
   assert.match(screen, /statusCode: runStatusCode\(\{ \.\.\.outcome, awaitingReview: end === "hold" \}\)/);
-  assert.match(screen, /end === "hold" \? heldFields\(mergedMr, heldReason\)/);
+  assert.match(screen, /end === "hold" \? heldFields\(i\.mergedMr, heldReason\)/);
   // Leftovers from an earlier run win over Human: they must be reviewed in the diff, never shipped with one click.
-  assert.match(screen, /const heldReason: HeldReason = leftoverFiles === null \|\| \(leftoverFiles \?\? 0\) > 0 \? "leftoverFiles" : "human";/);
+  assert.match(screen, /const heldReason: HeldReason = i\.leftoverFiles === null \|\| \(i\.leftoverFiles \?\? 0\) > 0 \? "leftoverFiles" : "human";/);
 });

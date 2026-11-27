@@ -20,8 +20,7 @@ import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
 import { hasRealProgress, runAllPasses } from "./all-passes.ts";
 import { RUN_COMMAND_MAX, isOneItemRun } from "./run-command.ts";
-import { reviewModeOf, stepReviewRecords } from "./review.ts";
-import { loopbackLogLine, loopbackRecord } from "./loopback.ts";
+import { loopbackLogLine } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { pickInputPath } from "./pick-input-path.ts";
 import { BUILT_IN_TEMPLATES, applyTemplate, factoryLoop, initialProjectStore, loadCustomTemplatesState, type LoopTemplate } from "./templates.ts";
@@ -41,11 +40,12 @@ import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
 import { liveRuns, subscribe as subscribeRuns, trackExternalRun, withBaselineFor } from "./run-manager.ts";
 import { createModelTracker } from "./step-model.ts";
-import { appendRunRecord, decodeFactoryFields, iterationRecordsWithScores, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
-import { copyStateBackIfMissed, copyStateIn, endWorktreeRun } from "./run-end.ts";
+import { appendRunRecord, decodeFactoryFields, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
+import { copyStateBackIfMissed, copyStateIn } from "./run-end.ts";
+import { finishLoopRun } from "./run-finish.ts";
 import { branchDiscardRefusal, lastShipUrl, providerSaysMerged } from "./loop-branch.ts";
 import { configWithSetup, isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
-import { changedPathArgs, heldFields, type HeldReason, loopBranchSlug, newRunId, repoPrefixFor, runChanged, runEndAction, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
@@ -937,60 +937,26 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       } catch (e) { setRunLog((l) => [...l, `run archive failed: ${e instanceof Error ? e.message : String(e)}`]); }
       setNotice(outcome.cancelled ? (cancelledRef.current ? "The loop was cancelled." : outcome.statusSummary) : outcome.passed ? "The loop passed." : outcome.statusSummary);
       if (!outcome.cancelled) void notifyTask("loop", outcome.passed);
-      const startedAt = new Date(started).toISOString();
-      // One diff read per run end: ShipPanel gets it as a prop instead of re-reading (two parallel reads race on the
-      // worktree's index.lock).
-      const worktreeDiff = activeRun
-        ? await invokeHost<unknown>("loop_worktree_diff", { runId: activeRun.runId }).then(decodeWorktreeDiff).catch(() => null)
-        : null;
-      const diffSummary = worktreeDiff ? { files: worktreeDiff.files, truncated: worktreeDiff.truncated, patchId: worktreeDiff.patchId || null, additions: worktreeDiff.additions, deletions: worktreeDiff.deletions } : null;
-      // One end-of-run rule for every loop but the Factory (which has its own board): a passed run with changes opens its
-      // draft MR, a passed run with none is removed, anything else keeps its branch. Nothing is removed on doubt.
-      const end = activeRun && !isFactoryLoop(target)
-        ? runEndAction({ passed: outcome.passed, cancelled: outcome.cancelled === true, changed: runChanged(worktreeDiff), humanReview: reviewModeOf(target.config) === "human", leftoverFiles, openMergeRequest: target.config.openMergeRequest })
-        : null;
-      // factoryRunId + factoryMode: the board finds a card's last run through these fields (the run manager writes them too).
-      // Leftovers win over Human: an earlier run's edits must be seen in the diff, never shipped with one click.
-      const heldReason: HeldReason = leftoverFiles === null || (leftoverFiles ?? 0) > 0 ? "leftoverFiles" : "human";
-      const entry: LoopRunIndexEntry & { factoryRunId?: string; factoryMode?: "full" } = { id: crypto.randomUUID(), loopId: target.id, loopName: target.name, startedAt, durationSeconds: (Date.now() - started) / 1000, iterationsUsed: outcome.iterationsUsed, statusCode: runStatusCode({ ...outcome, awaitingReview: end === "hold" }), statusSummary: end === "discard" ? `${outcome.statusSummary} No changes.` : end === "hold" ? `${outcome.statusSummary} ${heldReason === "human" ? "Waiting for your review." : "Held: its worktree had files an earlier run left; open the run (Open run log & plan) and review its diff in the Ship panel before shipping."}` : outcome.statusSummary, trigger: runTrigger(scheduled), ...(activeRun && isFactoryLoop(target) ? { factoryRunId: activeRun.runId, factoryMode: "full" as const } : {}) };
-      const factoryFields: FactoryRunFields = {
-        workItem: start ? { source: start.item.source, id: start.item.id, title: start.item.title } : null,
-        worktree: activeRun ? { runId: activeRun.runId, branch: activeRun.branch, baseCommit: activeRun.baseCommit, repo: activeRun.repo } : null,
-        ship: null,
-        needsDecision,
-        diffSummary,
-      };
-      const recordStages = outcome.stages.map((o) => ({ stageName: o.stage.name, severity: o.stage.severity, costUsd: o.usage?.costUsd ?? null, run: { exitCode: o.ok ? 0 : 1, stdout: o.output, stderr: "", timedOut: false, durationMs: 0 } }));
-      // Awaited: Ship's record update (setRunRecordShip) needs the record on disk, so the panel opens only after it.
-      const record = { ...entry, endedAt: new Date().toISOString(), gitRoot: currentRunRoot(), config: target.config, changedPaths, summaryPath, ...factoryFields, ...(end === "hold" ? heldFields(mergedMr, heldReason) : {}), ...stepReviewRecords(outcome.stepReviews), ...loopbackRecord(outcome.loopback), costUsd: outcome.costUsd ?? recordStages.reduce((n, st) => n + (st.costUsd ?? 0), 0), stages: recordStages, iterations: iterationRecordsWithScores(outcome.iterations) };
-      const saveRecord = () => appendRunRecord(fs, entry, record).then(() => { if (marker) return fs.remove(marker).catch(() => undefined); return undefined; }).then(() => readRecentRuns(fs)).then(setRuns).catch((e: unknown) => { setRunLog((l) => [...l, `run record not written: ${e instanceof Error ? e.message : String(e)}`]); });
-      const manualShip = (item: WorkItem) => activeRun && setShipRun({ info: activeRun, item, entry, passed: true, reviewedPatchId: diffSummary?.patchId ?? null, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, branchDiscard: !isFactoryLoop(target), mergedMr, ...(worktreeDiff ? { diff: worktreeDiff } : {}) });
-      const afterRecord = () => {
-        // Not awaited and fail-open: a signal never delays or fails the run.
-        if (projectRoot) void postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }).then(() => setImproveTick((t) => t + 1));
-      };
-      if (activeRun && end) {
-        // Every loop but the Factory: saved state back, then the record, then the end rule (run-end.ts).
-        const item: WorkItem = { source: "text", id: null, title: `${target.name} run ${activeRun.runId}`, body: "", repo: null };
-        const done = await endWorktreeRun({
-          syncStateBack: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); stateSavedBack = true; },
-          saveRecord: async () => { await saveRecord(); afterRecord(); },
-          removeIfEmpty: () => invokeHost<boolean>("loop_worktree_remove_if_empty", { runId: activeRun.runId }),
-          ship: () => import("./run-manager-host.ts").then((m) => m.shipFinishedRun({ runId: activeRun.runId, projectRoot: projectRoot ?? "", mode: "full", item: { ...item, key: `loop:${activeRun.runId}`, provider: null }, info: activeRun, entry, statusCode: "success", needsDecision: false, failedStage: null, kind: "passed", processName: target.name, mergedMr, runPrefix: repoPrefixFor(projectRoot ?? "", activeRun.worktree) })),
-          log: (line) => setRunLog((l) => [...l, line]),
-        }, end, { branch: activeRun.branch, passed: outcome.passed });
-        if (done.line !== null) {
-          setNotice(`The loop passed. ${done.line}`);
-          void readRecentRuns(fs).then(setRuns).catch(() => undefined);
-        }
-        // Held for review, or the shipper was blocked (secret scan, CI/hook files, large diff, no repository set up): the Ship panel is the manual path.
-        if (done.panel) manualShip(item);
-      } else {
-        await saveRecord();
-        afterRecord();
-        // A Factory run started here offers Ship for its work item.
-        if (activeRun && start && isFactoryLoop(target) && outcome.passed && !outcome.cancelled && target.config.openMergeRequest) manualShip(start.item);
-      }
+      const finished = await finishLoopRun({
+        host: invokeHost,
+        appendRecord: (entry, record) => appendRunRecord(fs, entry, record),
+        removeMarker: marker ? () => fs.remove(marker) : null,
+        readRuns: () => readRecentRuns(fs),
+        setRuns,
+        postRunFinished: projectRoot ? (entry, record) => postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }) : null,
+        onSignalPosted: () => setImproveTick((t) => t + 1),
+        syncStateBack: async () => { if (!activeRun) return; await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); stateSavedBack = true; },
+        ship: (e) => import("./run-manager-host.ts").then((m) => m.shipFinishedRun(e)),
+        now: () => Date.now(),
+        newId: () => crypto.randomUUID(),
+        log: (line) => setRunLog((l) => [...l, line]),
+        setNotice,
+      }, {
+        loop: target, outcome, started, trigger: runTrigger(scheduled), activeRun, start, projectRoot: projectRoot ?? "",
+        runPrefix: activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", leftoverFiles, mergedMr, changedPaths, summaryPath, needsDecision, gitRoot: currentRunRoot,
+      });
+      const ship = finished.manualShip;
+      if (activeRun && ship) setShipRun({ info: activeRun, item: ship.item, entry: ship.entry, passed: true, reviewedPatchId: ship.reviewedPatchId, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, branchDiscard: !isFactoryLoop(target), mergedMr: ship.mergedMr, ...(ship.diff ? { diff: ship.diff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
