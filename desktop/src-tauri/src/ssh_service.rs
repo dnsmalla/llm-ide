@@ -143,8 +143,8 @@ pub struct OpenedLink {
 /// The confirmed host key: the type and base64 blob exactly as the server offered them.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Pin {
-    key_type: String,
-    key_b64: String,
+    pub(crate) key_type: String,
+    pub(crate) key_b64: String,
 }
 
 /// A key a scan offered, with its fingerprint computed once.
@@ -268,8 +268,12 @@ pub fn confirm(deps: &Deps, target: &SshServerTarget, key_type: &str, fingerprin
     // No pin at all counts as a replacement too: the pin may have been evicted while a login still holds a password.
     let keeps_same_key = pin_for(&endpoint).is_some_and(|old| old.key_type == offered.key_type && old.key_b64 == offered.key_b64);
     if !keeps_same_key {
+        // Read before the flags change. A REPLACED key (an old pin exists) also takes the saved core login of key
+        // logins with it; a first pin has no old key, and a login saved under an evicted pin is already unreadable
+        // because the login is bound to its pin's fingerprint.
+        let users = if pin_for(&endpoint).is_some() { prefs::ssh_users_for_endpoint(&endpoint.host, endpoint.port) } else { Vec::new() };
         let cleared = prefs::clear_ssh_password_flags_for_endpoint(&endpoint.host, endpoint.port)?;
-        for user in &cleared {
+        for user in cleared.iter().chain(users.iter().filter(|user| !cleared.contains(user))) {
             (deps.forget_password)(&endpoint.host, endpoint.port, user);
         }
     }
@@ -1246,6 +1250,23 @@ pub(crate) mod tests {
         let mut forgotten = locked(&fx.forgotten).clone();
         forgotten.sort();
         assert_eq!(forgotten, vec![format!("alice@{HOST}:22"), format!("bob@{HOST}:22")]);
+    }
+
+    #[test]
+    fn a_key_auth_login_is_forgotten_when_the_host_key_changes() {
+        let fx = Fixture::new("svc-key-change-keyauth");
+        upsert_ssh_known_host(pin_text(22, "key-old")).unwrap();
+        // A key login: it never has a saved password, so no password flag points at it.
+        prefs::remember_ssh_server(HOST, 22, "kay", "/home/kay/.ssh/id_ed25519", SshAuthKind::Key).unwrap();
+        prefs::remember_ssh_server("elsewhere.example", 22, "kay", "/home/kay/.ssh/id_ed25519", SshAuthKind::Key).unwrap();
+        let exec = fake(vec![]);
+        let deps = fx.deps(&exec, &scan_of("key-new"), true, true);
+        let key_login = target(22, SshAuthKind::Key);
+        test(&deps, &key_login, None).unwrap();
+        confirm(&deps, &key_login, "ssh-ed25519", &fingerprint_of("key-new")).unwrap();
+        let forgotten = locked(&fx.forgotten).clone();
+        assert!(forgotten.contains(&format!("kay@{HOST}:22")), "the key login's saved core login is cleared: {forgotten:?}");
+        assert!(!forgotten.iter().any(|entry| entry.contains("elsewhere")), "another server is untouched");
     }
 
     #[test]

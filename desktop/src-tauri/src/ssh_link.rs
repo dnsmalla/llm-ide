@@ -9,7 +9,7 @@
 //! formatted, logged, or placed in an argv or environment variable by this module.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -115,6 +115,13 @@ pub struct SshLink {
     known_hosts: Mutex<Option<KnownHostsDir>>,
     /// What the helper channel needs to start its own ssh process to the same server. `None` for a test link.
     helper: Option<HelperSpawnParts>,
+    /// The nonce `/health` must echo on the forwarded port: the one of the core this link was opened for.
+    nonce: String,
+    /// `ssh_server_key` of the endpoint the forward goes to, fixed when the link is built.
+    server_key: Option<String>,
+    /// Hex SHA-256 of the host key this link's known_hosts pins (`login_scope::host_key_fp`), read from that file when
+    /// the link is built. `None` when the file holds no usable pin: such a link gets no login scope at all.
+    host_key_fp: Option<String>,
 }
 
 /// The ssh runner and endpoint of a supervised link. The helper channel reuses them, so it talks to the same
@@ -123,6 +130,51 @@ pub struct SshLink {
 pub(crate) struct HelperSpawnParts {
     pub(crate) exec: Arc<dyn SshExec>,
     pub(crate) endpoint: SshEndpoint,
+}
+
+/// What the login gate needs to ask the SERVER whether the core behind this link's forward is the one this link
+/// started: the link's own runner, endpoint, pinned known_hosts and login (the password copy is wiped on drop).
+pub(crate) struct ConfirmInput {
+    exec: Arc<dyn SshExec>,
+    endpoint: SshEndpoint,
+    known_hosts: PathBuf,
+    password: Option<Secret>,
+    nonce: String,
+    remote_port: u16,
+}
+
+impl ConfirmInput {
+    /// Runs STATUS over SSH as the link's own SSH user (the same call the supervisor makes on reconnect, but bounded by
+    /// the short [`GATE_STATUS_DEADLINE`]: the gate must not make the UI wait a minute) and is true only when it reports a running core with this link's nonce on the port the forward
+    /// targets. Any failure or timeout is `false`.
+    pub(crate) fn confirms(&self) -> bool {
+        let link = Link {
+            exec: &*self.exec,
+            endpoint: &self.endpoint,
+            known_hosts: &self.known_hosts,
+            password: self.password.as_ref().map(Secret::as_str),
+        };
+        let Ok(output) = link.run_within(STATUS, None, GATE_STATUS_DEADLINE) else { return false };
+        parse_core_state(&output.stdout).is_ok_and(|state| status_confirms(&state, &self.nonce, self.remote_port))
+    }
+}
+
+/// How long the login gate waits for STATUS. A timeout is "not confirmed", never a retry.
+const GATE_STATUS_DEADLINE: Duration = Duration::from_secs(10);
+
+/// The pure decision: a core is running, it holds `nonce`, and it listens on `remote_port`.
+pub(crate) fn status_confirms(state: &crate::ssh_server_scripts::CoreState, nonce: &str, remote_port: u16) -> bool {
+    state.running
+        && state.nonce.as_deref().is_some_and(|seen| ct_eq(seen, nonce))
+        && state.port == Some(remote_port)
+}
+
+/// The host key fingerprint of the one pin in a link's known_hosts file (`<host> <key-type> <key-base64>`).
+pub(crate) fn pinned_fingerprint(file: &std::path::Path) -> Option<String> {
+    let text = std::fs::read_to_string(file).ok()?;
+    let mut fields = text.lines().next()?.split_whitespace();
+    let (_host, key_type, key_b64) = (fields.next()?, fields.next()?, fields.next()?);
+    Some(crate::login_scope::host_key_fp(key_type, key_b64))
 }
 
 /// Everything one helper spawn needs, taken in one step while the link is connected.
@@ -144,6 +196,37 @@ impl SshLink {
     /// The local URL. Fixed for the life of the link, because every reconnect reuses the same port.
     pub fn url(&self) -> String {
         self.url.clone()
+    }
+
+    /// The nonce of the core this link was opened for. Only the login gate compares it with a fresh `/health` answer.
+    pub(crate) fn nonce(&self) -> &str {
+        &self.nonce
+    }
+
+    /// `ssh_server_key` of the server this link's forward really goes to, taken from the link's own endpoint (never
+    /// from preferences). `None` for a link without an endpoint (a test link).
+    pub(crate) fn server_key(&self) -> Option<String> {
+        self.server_key.clone()
+    }
+
+    /// The fingerprint of the host key this link really pins, for the saved-login scope.
+    pub(crate) fn host_key_fp(&self) -> Option<String> {
+        self.host_key_fp.clone()
+    }
+
+    /// What [`ConfirmInput::confirms`] needs, copied out so the (slow) STATUS call runs without any lock held. `None`
+    /// for a link that cannot run STATUS: a test link, or one whose known_hosts folder is gone (stopped).
+    pub(crate) fn confirm_input(&self) -> Option<ConfirmInput> {
+        let parts = self.helper.clone()?;
+        let known_hosts = locked(&self.known_hosts).as_ref().map(|held| held.file.clone())?;
+        Some(ConfirmInput {
+            exec: parts.exec,
+            endpoint: parts.endpoint,
+            known_hosts,
+            password: self.shared.password_copy(),
+            nonce: self.nonce.clone(),
+            remote_port: self.shared.remote_port.load(Ordering::SeqCst),
+        })
     }
 
     /// Ends supervision, kills the forward and removes the known_hosts folder. The supervisor thread is given up
@@ -224,6 +307,27 @@ pub(crate) fn held_for_test(password: Option<&str>) -> SshLink {
         worker: Mutex::new(None),
         known_hosts: Mutex::new(None),
         helper: None,
+        nonce: "test-nonce".to_string(),
+        server_key: None,
+        host_key_fp: None,
+    }
+}
+
+/// A test link in `state` that answers to `nonce` and (when `key` is given) names that server. `key` is the
+/// `ssh_server_key` text; tests of the login gate use it to stand in for a real endpoint.
+#[cfg(test)]
+pub(crate) fn gated_for_test(state: LinkState, nonce: &str, key: &str, fp: Option<&str>) -> SshLink {
+    let shared = Arc::new(Shared::new(None));
+    shared.set_state(state);
+    SshLink {
+        shared,
+        url: "http://127.0.0.1:3456".to_string(),
+        worker: Mutex::new(None),
+        known_hosts: Mutex::new(None),
+        helper: None,
+        nonce: nonce.to_string(),
+        server_key: Some(key.to_string()),
+        host_key_fp: fp.map(str::to_string),
     }
 }
 
@@ -234,7 +338,11 @@ pub(crate) fn held_for_test(password: Option<&str>) -> SshLink {
 pub fn supervise(input: SuperviseInput) -> SshLink {
     let SuperviseInput { exec, connected, endpoint, password, known_hosts, health } = input;
     let helper = HelperSpawnParts { exec: exec.clone(), endpoint: endpoint.clone() };
+    let server_key = crate::login_scope::server_key(&endpoint.user, &endpoint.host, endpoint.port);
+    let link_nonce = connected.nonce.clone();
+    let host_key_fp = pinned_fingerprint(&known_hosts.file);
     let shared = Arc::new(Shared::new(password));
+    shared.remote_port.store(connected.remote_port, Ordering::SeqCst);
     let url = connected.local_url.clone();
     let worker_shared = shared.clone();
     let known_file = known_hosts.file.clone();
@@ -253,7 +361,7 @@ pub fn supervise(input: SuperviseInput) -> SshLink {
         let mut pause = |pause: Pause| sleep_unless_stopped(&worker_shared, pause);
         supervise_loop(&sup, forward, &mut pause);
     });
-    SshLink { shared, url, worker: Mutex::new(Some(worker)), known_hosts: Mutex::new(Some(known_hosts)), helper: Some(helper) }
+    SshLink { shared, url, worker: Mutex::new(Some(worker)), known_hosts: Mutex::new(Some(known_hosts)), helper: Some(helper), nonce: link_nonce, server_key: Some(server_key), host_key_fp }
 }
 
 /// One wait the loop asks for. The production waits sleep; tests record them.
@@ -288,6 +396,9 @@ struct Shared {
     /// Set under the `state` lock, so a late `set_state` cannot overwrite the stopped state.
     stopped: AtomicBool,
     password: Mutex<Option<Secret>>,
+    /// The server port the forward currently targets. Updated by each successful reattach, because STATUS may report a
+    /// new port; the login gate compares STATUS with it.
+    remote_port: AtomicU16,
 }
 
 impl Shared {
@@ -296,6 +407,7 @@ impl Shared {
             state: Mutex::new(LinkState::Connected),
             stopped: AtomicBool::new(false),
             password: Mutex::new(password.map(Secret)),
+            remote_port: AtomicU16::new(0),
         }
     }
 
@@ -460,7 +572,10 @@ fn try_reattach(sup: &Supervision<'_>) -> Result<Box<dyn ForwardChild>, Attempt>
     let mut watched = StopAware { inner: &mut *forward, stop: &sup.shared.stopped };
     let healthy = wait_for_core(&mut watched, sup.health, sup.local_port, sup.nonce, sup.health_timeout);
     match healthy {
-        Ok(()) => Ok(forward),
+        Ok(()) => {
+            sup.shared.remote_port.store(remote_port, Ordering::SeqCst);
+            Ok(forward)
+        }
         Err(error) => {
             forward.kill();
             // A timeout with the forward still up means the core did not answer. Any other failure here is the local
@@ -691,6 +806,9 @@ mod tests {
             worker: Mutex::new(None),
             known_hosts: Mutex::new(Some(held)),
             helper: None,
+            nonce: String::new(),
+            server_key: None,
+            host_key_fp: None,
         };
         let endpoint = match password {
             Some(_) => crate::ssh_transport::prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap(),
@@ -1018,6 +1136,9 @@ mod tests {
                 exec: Arc::new(FakeExec::default()),
                 endpoint: crate::ssh_transport::prepare_endpoint("example.com", 22, "alice", SshAuth::Password).unwrap(),
             }),
+            nonce: String::new(),
+            server_key: None,
+            host_key_fp: None,
         };
         let first = link.helper_spawn().unwrap();
         let second = link.helper_spawn().unwrap();
@@ -1039,6 +1160,9 @@ mod tests {
                 exec: Arc::new(FakeExec::default()),
                 endpoint: crate::ssh_transport::prepare_endpoint(host, 22, "alice", auth).unwrap(),
             }),
+            nonce: String::new(),
+            server_key: None,
+            host_key_fp: None,
         };
         let key = SshAuth::Key { path: "/home/alice/.ssh/id_ed25519".into() };
         let first = link_to("example.com", key.clone());

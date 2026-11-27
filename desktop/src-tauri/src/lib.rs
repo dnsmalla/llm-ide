@@ -68,6 +68,7 @@ mod ssh_workspace;
 mod workspace_backend;
 mod ssh_workspace_cmds;
 mod local_login;
+mod login_scope;
 mod ssh_saved_password;
 mod repo_config_store;
 mod remote_deploy;

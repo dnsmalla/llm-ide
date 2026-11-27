@@ -508,6 +508,29 @@ fn still_healthy_after(settle: Duration, interval: Duration, mut healthy: impl F
     true
 }
 
+/// An SSH link that passed the probe-only gate: connected, pinned, `/health` echoing its nonce. Not yet confirmed by
+/// the server; see [`SshForward::confirmed_with`].
+pub(crate) struct SshForward {
+    url: String,
+    key: String,
+    fp: String,
+    input: Option<crate::ssh_link::ConfirmInput>,
+}
+
+impl SshForward {
+    /// The probe-only result, for a command that sends no secret to the core.
+    pub(crate) fn unconfirmed(self) -> (String, String, String) {
+        (self.url, self.key, self.fp)
+    }
+
+    /// The full result: `confirm` (STATUS over SSH, called at most once, with no lock held) must say yes. It gets
+    /// `None` for a link that cannot run STATUS. A "no" or a timeout ends the gate: it is never retried.
+    pub(crate) fn confirmed_with(self, confirm: impl FnOnce(Option<crate::ssh_link::ConfirmInput>) -> bool) -> Option<(String, String, String)> {
+        let Self { url, key, fp, input } = self;
+        confirm(input).then_some((url, key, fp))
+    }
+}
+
 impl CoreHost {
     pub fn new() -> Self {
         Self::with(Tuning::default(), Arc::new(real_launch), Arc::new(real_claude_probe))
@@ -600,6 +623,52 @@ impl CoreHost {
             Probe::Healthy { nonce: Some(got) } if ct_eq(&got, &nonce) => Some(url),
             _ => None,
         }
+    }
+
+    /// The full SSH gate (probe, then STATUS) with both injected, so tests need neither a socket nor ssh. `confirm`
+    /// gets `None` for a link that cannot run STATUS. The server key and fingerprint come from the live link.
+    #[cfg(test)]
+    pub(crate) fn verified_ssh_core_with(
+        &self,
+        health: impl Fn(u16) -> Option<String>,
+        confirm: impl Fn(Option<crate::ssh_link::ConfirmInput>) -> bool,
+    ) -> Option<(String, String, String)> {
+        self.ssh_forward_with(health)?.confirmed_with(confirm)
+    }
+
+    /// The probe-only half of the SSH gate: a connected, pinned link whose forwarded port echoes its nonce on a fresh
+    /// `/health`. No STATUS. This is the only part worth retrying (a busy core can miss one probe); `confirmed_with`
+    /// on the result is the STATUS step.
+    pub(crate) fn ssh_forward(&self) -> Option<SshForward> {
+        self.ssh_forward_with(|port| health_nonce(port, Duration::from_millis(800)))
+    }
+
+    pub(crate) fn ssh_forward_with(&self, health: impl Fn(u16) -> Option<String>) -> Option<SshForward> {
+        if self.mode() != ServerMode::Ssh {
+            return None;
+        }
+        let (url, key, fp, nonce, input) = {
+            let slot = lock(&self.inner.ssh_link);
+            let link = slot.link.as_ref()?;
+            if link.state() != LinkState::Connected {
+                return None;
+            }
+            (link.url(), link.server_key()?, link.host_key_fp()?, link.nonce().to_string(), link.confirm_input())
+        };
+        let port = url_port(&url)?;
+        let got = health(port)?;
+        if !ct_eq(&got, &nonce) {
+            return None;
+        }
+        Some(SshForward { url, key, fp, input })
+    }
+
+    /// The attached link's server key and pin fingerprint (empty when it has no pin), whatever its state. Needs no
+    /// trust: it only names a keychain slot.
+    pub(crate) fn ssh_link_identity(&self) -> Option<(String, String)> {
+        let slot = lock(&self.inner.ssh_link);
+        let link = slot.link.as_ref()?;
+        Some((link.server_key()?, link.host_key_fp().unwrap_or_default()))
     }
 
     pub fn status(&self) -> CoreStatus {

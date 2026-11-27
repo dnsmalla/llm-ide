@@ -286,6 +286,10 @@ fn forget_server(host: &str, port: u16, user: &str) -> Result<(), FsError> {
     if prefs::ssh_password_saved(host, port, user) {
         let backend = secrets::default_backend().map_err(|_| herr("keychain_unavailable", "The Keychain is not available."))?;
         ssh_saved_password::forget(backend.as_ref(), host, port, user)?;
+        // The keychain is open anyway: the saved core login of this server goes too. A login with no saved password
+        // does not open it here (no keychain access without a reason); its saved core login stays bound to the pinned
+        // host key, so it is only ever read for the same server behind the same key.
+        crate::login_scope::forget_server_login(backend.as_ref(), &crate::login_scope::server_key(user, host, port));
     }
     prefs::forget_ssh_server(host, port, user)
 }
@@ -301,7 +305,12 @@ pub async fn remote_ssh_server_uninstall(
     let host = host.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let deps = production_deps()?;
-        ssh_service::uninstall(&deps, &host, password.as_deref(), &confirm_host, force.unwrap_or(false))
+        // The server the uninstall acts on is the saved one; its account database is deleted, so the login saved
+        // for it names an account that no longer exists.
+        let saved = prefs::stored().remote_server;
+        let status = ssh_service::uninstall(&deps, &host, password.as_deref(), &confirm_host, force.unwrap_or(false))?;
+        forget_saved_login(&saved.host, saved.port, &saved.user);
+        Ok(status)
     })
     .await
     .map_err(|_| herr("internal", "the SSH server uninstall did not finish."))?
@@ -329,7 +338,21 @@ pub(crate) fn production_deps() -> Result<Deps, FsError> {
 /// key, or got a new host key, where a keychain that refuses must not fail that action.
 fn forget_saved_password(host: &str, port: u16, user: &str) {
     if let Ok(backend) = secrets::default_backend() {
-        ssh_saved_password::forget_logins(backend.as_ref(), &[(host.to_string(), port, user.to_string())]);
+        forget_password_and_login(backend.as_ref(), host, port, user);
+    }
+}
+
+/// A server whose trust ended loses both secrets kept for it: the SSH password and the saved core login. The
+/// login's password was meant for the server behind the old host key, so it must not reach the one behind a new key.
+fn forget_password_and_login(b: &dyn secrets::SecretBackend, host: &str, port: u16, user: &str) {
+    ssh_saved_password::forget_logins(b, &[(host.to_string(), port, user.to_string())]);
+    crate::login_scope::forget_server_login(b, &crate::login_scope::server_key(user, host, port));
+}
+
+/// Clears the saved core login of one server (best effort, silent).
+fn forget_saved_login(host: &str, port: u16, user: &str) {
+    if let Ok(backend) = secrets::default_backend() {
+        crate::login_scope::forget_server_login(backend.as_ref(), &crate::login_scope::server_key(user, host, port));
     }
 }
 
@@ -460,6 +483,21 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     const VERSION: &str = "9.8.7";
+
+    #[test]
+    fn a_changed_host_key_forgets_the_saved_login() {
+        let b = secrets::MemoryBackend::default();
+        ssh_saved_password::save(&b, "Example.com", 22, "alice", "ssh-pw").unwrap();
+        b.set("ssh-login:alice@example.com:22", "{\"v\":1}").unwrap();
+        b.set("ssh-login:alice@other.example.com:22", "{\"v\":1}").unwrap();
+        b.set("local-login", "{\"v\":1}").unwrap();
+        // The dependency the service calls when a pin changes or is evicted, or a login leaves the recent list.
+        forget_password_and_login(&b, "Example.com", 22, "alice");
+        assert_eq!(ssh_saved_password::load(&b, "example.com", 22, "alice").unwrap(), None);
+        assert_eq!(b.get("ssh-login:alice@example.com:22").unwrap().as_deref(), Some(""), "that server's login is cleared");
+        assert_eq!(b.get("ssh-login:alice@other.example.com:22").unwrap().as_deref(), Some("{\"v\":1}"), "another server's is kept");
+        assert_eq!(b.get("local-login").unwrap().as_deref(), Some("{\"v\":1}"), "the local slot is kept");
+    }
 
     /// A scratch folder with a `hub/` subfolder, removed on drop.
     struct TempDir(PathBuf);

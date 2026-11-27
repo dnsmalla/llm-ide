@@ -78,8 +78,8 @@ pub struct ConnectInput<'a> {
 pub struct Connected {
     pub local_url: String,
     pub local_port: u16,
-    /// Read by the tests that check the port came from STATUS; the service never needs it.
-    #[cfg(test)]
+    /// The server port the forward targets, as STATUS or START reported it. The login gate compares a later STATUS
+    /// with it.
     pub remote_port: u16,
     pub nonce: String,
     pub version: String,
@@ -148,11 +148,16 @@ pub(crate) struct Link<'a> {
 impl Link<'_> {
     /// Runs one fixed remote command with strict host-key checking, bounded by [`deadline_for`].
     pub(crate) fn run(&self, command: &'static str, stdin: Option<&[u8]>) -> Result<RawOutput, FsError> {
+        self.run_within(command, stdin, deadline_for(command))
+    }
+
+    /// [`Link::run`] with its own deadline, for a caller that must not wait as long as the command's usual one.
+    pub(crate) fn run_within(&self, command: &'static str, stdin: Option<&[u8]>, deadline: Duration) -> Result<RawOutput, FsError> {
         let args = exec_args(self.endpoint, self.known_hosts, true, command);
         let grant = self.askpass()?;
         let output = self
             .exec
-            .run(&args, stdin, grant.as_ref(), deadline_for(command))
+            .run(&args, stdin, grant.as_ref(), deadline)
             .map_err(transport_error)?;
         transport_check(output)
     }
@@ -206,7 +211,6 @@ pub(crate) fn connect_with(
     Ok(Connected {
         local_url: format!("http://127.0.0.1:{local_port}"),
         local_port,
-        #[cfg(test)]
         remote_port: core.port,
         nonce: core.nonce,
         version: core.version,

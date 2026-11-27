@@ -1202,6 +1202,25 @@ pub(crate) fn clear_ssh_password_flags_for_endpoint(host: &str, port: u16) -> Re
     Ok(cleared)
 }
 
+/// Every user name saved for one host and port: the recent list's logins plus the saved server's own. A login with no
+/// saved password is included, so a key login's saved core login can be forgotten when the host key changes.
+pub(crate) fn ssh_users_for_endpoint(host: &str, port: u16) -> Vec<String> {
+    let endpoint = endpoint_text(host.trim(), port);
+    let stored = stored().remote_server;
+    let mut users: Vec<String> = stored
+        .ssh_recent_servers
+        .iter()
+        .filter(|entry| endpoint_text(&entry.host, entry.port) == endpoint)
+        .map(|entry| entry.user.clone())
+        .collect();
+    if endpoint_text(&stored.host, stored.port) == endpoint && !stored.user.trim().is_empty() {
+        users.push(stored.user.clone());
+    }
+    users.sort();
+    users.dedup();
+    users
+}
+
 /// Host-side writer for the saved server's mode alone. The SSH service calls it when the user switches to the saved
 /// server; the webview cannot change the mode directly.
 pub(crate) fn set_remote_server_mode(mode: ServerMode) -> Result<PrefsView, FsError> {

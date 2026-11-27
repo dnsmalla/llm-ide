@@ -111,6 +111,22 @@ after Connect; it asks first only when Loop work is running on this computer, be
 If you cancel, the app keeps its current mode, and a Connect still running when you cancel does not restart the app.
 The next start after that opens the local Welcome screen.
 
+### Keep me signed in
+
+After the switch, the server core asks you to sign in (or sign up, for the first account). The login panel shows
+**Keep me signed in**, ticked by default. While it is ticked, the app keeps the account's email, password and refresh
+token in this computer's Keychain, for this server only, and signs in by itself after the next Connect. A login kept
+for one server is never used for another. The kept login is also tied to the server's host key: after a host-key
+change you sign in again. On a shared server, the app first confirms over SSH that the server part it is about to
+sign in to is the one it started. Hub servers never keep a login. Untick the box to sign in without keeping anything.
+
+The kept login is forgotten when you sign out, when you choose **Forget** in Settings → Account, when you trust a
+different host key for the server, and on Uninstall. Removing a server from the recent list does not always remove a
+kept login: it does so only when a saved SSH password is removed with it, and a server pushed out of a full list
+behaves the same way. To remove a kept login for sure, use **Forget** in Settings → Account or sign out. This is
+separate from the SSH login password, which has its own **Remember password in Keychain** box (see
+[Password](#password)): one is the account on the server core, the other is the login to the server itself.
+
 ## Login methods
 
 ### Key file
