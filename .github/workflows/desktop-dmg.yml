@@ -71,6 +71,9 @@ jobs:
         env:
           LLMIDE_ADHOC_SIGN: '1'
           LLMIDE_OMIT_SOURCE_ROOT: '1'
+          # vite build of the desktop + ui screens passes Node's ~2 GB default heap on the runners
+          # (run 45975585612 aborted with "JavaScript heap out of memory"); desktop-ci.yml raises it too.
+          NODE_OPTIONS: --max-old-space-size=6144
         run: scripts/build-desktop-mac.sh --dmg
       - name: Check the SSH bundle is inside the app
         run: |
