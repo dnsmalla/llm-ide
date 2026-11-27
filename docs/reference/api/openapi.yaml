@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 162
+  x-api-version: 163
 servers:
   - url: "https://{host}"
     variables:
@@ -4261,31 +4261,16 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                  - title: "development: the token is returned"
-                    type: "object"
-                    required:
-                      - "ok"
-                      - "token"
-                      - "expiresAt"
-                    properties:
-                      ok:
-                        const: true
-                      token:
-                        type: "string"
-                        description: "single-use reset token, 1 hour TTL"
-                      expiresAt:
-                        type: "string"
-                  - title: "unknown email, or production: the same message either way"
-                    type: "object"
-                    required:
-                      - "ok"
-                      - "message"
-                    properties:
-                      ok:
-                        const: true
-                      message:
-                        type: "string"
+                title: "the same body for a known, unknown or disabled email; the token is never returned (it goes only to the server log)"
+                type: "object"
+                required:
+                  - "ok"
+                  - "message"
+                properties:
+                  ok:
+                    const: true
+                  message:
+                    type: "string"
         "429":
           description: "Too Many Requests"
           content:

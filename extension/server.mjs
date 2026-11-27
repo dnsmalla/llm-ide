@@ -525,7 +525,9 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          did not accept it (a protected-branch or hook decline stays `push_rejected`).
 //   v162 — POST /chat (410 since v89) and POST /code-assist (410 since v92) are deleted outright: both now 404 like any unknown route.
 //          The 410 ENDPOINT_REMOVED stubs promised "one release" and lasted seventy. No shipped client calls either path.
-const SERVER_API_VERSION = 162;
+//   v163 — POST /auth/reset-request never returns the reset token: a known email answers the same 200 `{ ok, message }` as an unknown
+//          or disabled one (the `{ ok, token, expiresAt }` development shape is gone). The token goes only to the `password_reset_token` log line.
+const SERVER_API_VERSION = 163;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

@@ -268,9 +268,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // ---- Password reset (public, rate-limited per IP) ------------------
   //
   // POST /auth/reset-request { email }
-  //   Always returns 200 even for unknown emails (prevents enumeration).
-  //   In dev: raw token is in the response.
-  //   In prod: token is written to the server log; operator delivers OOB.
+  //   Always returns 200 with the SAME body for a known, unknown or disabled
+  //   email (prevents enumeration).  The raw token is NEVER in a response: this
+  //   route is public and a desktop/SSH core is not NODE_ENV=production, so a
+  //   token in the body let anything that reaches the port take over the owner
+  //   account.  It goes only to the server log; the operator delivers it OOB.
   //
   // POST /auth/reset-confirm { token, newPassword }
   //   Consumes the token (single-use, 1-hour TTL) and sets the new
@@ -289,24 +291,15 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try {
       const result = createPasswordResetToken(db, { email: body.email });
       if (result.token) {
-        if (config.isProd) {
-          // Production: write token to structured log; operator delivers OOB.
-          // Replace this block with your SMTP / SES / SendGrid call.
-          logger.warn('password_reset_token', {
-            email: result.email,
-            token: result.token,
-            expiresAt: result.expiresAt,
-            note: 'Deliver this token OOB to the user requesting the reset.',
-          });
-          send(res, 200, { ok: true, message: 'If that email is registered, check the server logs for the reset token.' });
-        } else {
-          // Development: return token directly for easy local testing.
-          send(res, 200, { ok: true, token: result.token, expiresAt: result.expiresAt });
-        }
-      } else {
-        // Unknown / disabled account — same shape as success.
-        send(res, 200, { ok: true, message: 'If that email is registered, check the server logs for the reset token.' });
+        // Replace this block with your SMTP / SES / SendGrid call.
+        logger.warn('password_reset_token', {
+          email: result.email,
+          token: result.token,
+          expiresAt: result.expiresAt,
+          note: 'Deliver this token OOB to the user requesting the reset.',
+        });
       }
+      send(res, 200, { ok: true, message: 'If that email is registered, check the server logs for the reset token.' });
     } catch (err) {
       send(res, err.status || 400, { error: { code: err.code || 'VALIDATION_FAILED', message: err.message } });
     }

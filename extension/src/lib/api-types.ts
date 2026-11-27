@@ -4557,11 +4557,6 @@ export type PostAuthResetRequestRequest = {
 
 export type PostAuthResetRequestResponse200 = {
   ok: true;
-  /** single-use reset token, 1 hour TTL */
-  token: string;
-  expiresAt: string;
-} | {
-  ok: true;
   message: string;
 };
 

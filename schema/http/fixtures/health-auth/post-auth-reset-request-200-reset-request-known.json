@@ -8,7 +8,6 @@
   },
   "response": {
     "ok": true,
-    "token": "example-reset-token",
-    "expiresAt": "2026-10-26T05:31:31.455Z"
+    "message": "If that email is registered, check the server logs for the reset token."
   }
 }

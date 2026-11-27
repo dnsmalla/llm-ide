@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 162` (in `server.mjs`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (in `server.mjs`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 163` (in `server.mjs`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (in `server.mjs`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -174,6 +174,8 @@ GET  /auth/google/callback   (Google's OAuth redirect; carries no bearer token)
 ```
 
 `OPTIONS` requests are also unconditionally public (`auth.mjs:35`).
+
+`POST /auth/reset-request` answers the same `200 { ok, message }` for a known, unknown or disabled email and never returns the reset token (API 163); the token is written only to the `password_reset_token` log line for the operator to deliver out of band.
 
 ---
 

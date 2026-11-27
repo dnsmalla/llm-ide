@@ -1380,45 +1380,20 @@
       },
       "responses": {
         "200": {
-          "oneOf": [
-            {
-              "title": "development: the token is returned",
-              "type": "object",
-              "required": [
-                "ok",
-                "token",
-                "expiresAt"
-              ],
-              "properties": {
-                "ok": {
-                  "const": true
-                },
-                "token": {
-                  "type": "string",
-                  "description": "single-use reset token, 1 hour TTL"
-                },
-                "expiresAt": {
-                  "type": "string"
-                }
-              }
+          "title": "the same body for a known, unknown or disabled email; the token is never returned (it goes only to the server log)",
+          "type": "object",
+          "required": [
+            "ok",
+            "message"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
             },
-            {
-              "title": "unknown email, or production: the same message either way",
-              "type": "object",
-              "required": [
-                "ok",
-                "message"
-              ],
-              "properties": {
-                "ok": {
-                  "const": true
-                },
-                "message": {
-                  "type": "string"
-                }
-              }
+            "message": {
+              "type": "string"
             }
-          ]
+          }
         },
         "429": {
           "$ref": "_common#/$defs/Error"

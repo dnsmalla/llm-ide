@@ -628,7 +628,7 @@ test('unknown authed auth-route → 404 envelope', async () => {
 // Mimics server.mjs: authenticate() runs on EVERY request before dispatch.
 // Returns { authError } if the gate rejected the request (401 before the
 // handler), otherwise runs the real handler and returns { res }.
-async function callThroughGate(reqOpts) {
+async function callThroughGate(reqOpts, logger = noopLogger) {
   const req = makeReq(reqOpts);
   const res = makeRes();
   try {
@@ -636,8 +636,14 @@ async function callThroughGate(reqOpts) {
   } catch (err) {
     return { authError: err };
   }
-  await handleAuth(req, res, { db: kb.getDb(), logger: noopLogger, requestId: 'test-req' });
+  await handleAuth(req, res, { db: kb.getDb(), logger, requestId: 'test-req' });
   return { res };
+}
+
+// The reset token is delivered only through the `password_reset_token` log line, so a test reads it there.
+function capturingLogger() {
+  const lines = [];
+  return { ...noopLogger, warn(msg, fields) { lines.push({ msg, ...fields }); }, lines };
 }
 
 test('reset-request and reset-confirm are registered as public paths', () => {
@@ -679,11 +685,13 @@ test('POST /auth/reset-confirm passes the authenticate() gate with no Authorizat
 test('password reset flow (request → confirm) works end-to-end through the real gate with no auth', async () => {
   const { email } = await registerAndLogin();
 
-  const reqRes = await callThroughGate({ method: 'POST', url: '/auth/reset-request', body: { email } });
+  const logger = capturingLogger();
+  const reqRes = await callThroughGate({ method: 'POST', url: '/auth/reset-request', body: { email } }, logger);
   assert.equal(reqRes.authError, undefined);
   assert.equal(reqRes.res.statusCode, 200, reqRes.res._body);
-  const token = reqRes.res.json().token; // dev/test env returns the raw token
-  assert.ok(token, 'reset-request should return a raw token in the test env');
+  const logged = logger.lines.find((line) => line.msg === 'password_reset_token');
+  assert.ok(logged?.token, 'the reset token must reach the operator through the log line');
+  const token = logged.token;
 
   const newPassword = 'NewCorrectHorse1';
   const confirmRes = await callThroughGate({
@@ -697,6 +705,23 @@ test('password reset flow (request → confirm) works end-to-end through the rea
   assert.equal(good.statusCode, 200, good._body);
   const bad = await callAuth({ method: 'POST', url: '/auth/login', body: { email, password: PASSWORD } });
   assert.equal(bad.statusCode, 401, bad._body);
+});
+
+test('reset-request never returns the token and a known email looks like an unknown one', async () => {
+  const { email } = await registerAndLogin();
+  const logger = capturingLogger();
+  const known = await callThroughGate({ method: 'POST', url: '/auth/reset-request', body: { email } }, logger);
+  const unknown = await callThroughGate({
+    method: 'POST', url: '/auth/reset-request', body: { email: uniqueEmail() },
+  }, capturingLogger());
+
+  assert.equal(known.res.statusCode, 200, known.res._body);
+  assert.equal('token' in known.res.json(), false, 'the response must never carry a reset token');
+  assert.equal('expiresAt' in known.res.json(), false);
+  assert.ok(logger.lines.some((line) => line.msg === 'password_reset_token'), 'the known email was logged');
+  assert.equal(known.res.statusCode, unknown.res.statusCode);
+  assert.deepEqual(known.res.json(), unknown.res.json());
+  assert.equal(known.res._body, unknown.res._body);
 });
 
 // ---- plugin management ---------------------------------------------------
