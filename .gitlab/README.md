@@ -17,13 +17,14 @@
 [Install the app](#build-and-install-the-desktop-app) ·
 [SSH server mode](#ssh-server-mode) ·
 [Architecture](#architecture) ·
-[Testing](#testing)
+[Testing](#testing) ·
+[Contributing](#contributing)
 
 </div>
 
-> **Mirror notice.** This project is a one-way, read-only mirror of a subset of the main LLM-IDE
-> repository, updated automatically on every upstream change. Commits pushed here are
-> overwritten — please report issues or propose changes to the maintainer instead.
+> **How this repository is maintained.** `main` is published automatically from the main LLM-IDE
+> repository and cannot be pushed to directly. Contributions are welcome as merge requests — see
+> [Contributing](#contributing).
 
 ## Overview
 
@@ -237,6 +238,35 @@ make typecheck-desktop          # TypeScript check of the desktop and its screen
 
 `ALLOW_SKIP=1` is required here because some upstream test targets cover parts that are not
 mirrored (the web and iPhone apps).
+
+## Contributing
+
+Work in a branch and open a merge request (MR) against `main`. The maintainer imports approved MRs
+into the main repository, where the full test suite runs; the change then comes back here
+automatically and **your MR is marked as merged** — with your commits and authorship intact.
+
+```mermaid
+flowchart LR
+    A["Branch + commits"] --> B["Open MR<br/>against main"]
+    B --> C["Review on GitLab"]
+    C --> D["Maintainer imports<br/>import-gitlab-mr.sh"]
+    D --> E["Tests run in the<br/>main repository"]
+    E --> F["Merged upstream"]
+    F --> G["main updated here<br/>MR shows as merged"]
+```
+
+**Guidelines**
+
+- **Start from the latest `main`.** Rebase your branch on `main` before asking for review; an MR
+  based on an old `main` may need a rebase before it can be imported.
+- **Keep the history linear.** Rebase instead of merging `main` into your branch — merge commits
+  in an MR cannot be imported.
+- **Do not change `.gitmodules`.** Submodules are managed upstream.
+- **Unsigned commits only.** GPG/SSH-signed commits cannot be re-created exactly; sign-off
+  trailers (`Signed-off-by:`) are fine.
+- **One topic per MR**, with [Conventional Commits](https://www.conventionalcommits.org/)
+  subjects (`feat(ui): …`, `fix(server): …`, `docs: …`).
+- **Run the tests** in [Testing](#testing) before requesting review.
 
 ## Security model
 
