@@ -25,5 +25,7 @@ deploy/vps/llm-ide.com.nginx
 .editorconfig
 Makefile
 setup.sh
-README.md
+# The mirror's own README (GitLab scope only); the GitHub README is not exported.
+.gitlab/README.md
+.gitlab/README.md==>README.md
 LICENSE
