@@ -1,60 +1,84 @@
-# LLM-IDE — Desktop App, Local Core and Chrome Extension
+<div align="center">
 
-LLM-IDE is a local-first AI workspace for engineering teams. It captures meetings and other sources
-into a searchable library, plans work from that library, and automates code review and
-implementation — with every outbound action (pull requests, tickets, messages) gated on your approval.
+<img src="desktop/src-tauri/icons/128x128@2x.png" alt="LLM-IDE" width="120" height="120">
 
-This repository contains the **desktop application** (including **SSH server mode**), the **local
-Node core** that powers it, and the **Chrome extension** for meeting capture.
+# LLM-IDE
+
+**A local-first AI workspace for engineering teams — desktop app, local core and Chrome extension.**
+
+![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-informational)
+![Desktop](https://img.shields.io/badge/desktop-Tauri%202%20%2B%20React-24C8DB)
+![Core](https://img.shields.io/badge/core-Node.js%2022-339933)
+![Storage](https://img.shields.io/badge/storage-SQLite%20WAL%20%2B%20FTS5-003B57)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+[Overview](#overview) ·
+[Quick start](#quick-start) ·
+[Install the app](#build-and-install-the-desktop-app) ·
+[SSH server mode](#ssh-server-mode) ·
+[Architecture](#architecture) ·
+[Testing](#testing)
+
+</div>
 
 > **Mirror notice.** This project is a one-way, read-only mirror of a subset of the main LLM-IDE
-> repository. It is updated automatically on every change to the upstream `main` branch.
-> Commits pushed here are overwritten, so please do not push to it. Report issues or propose
-> changes to the maintainer instead.
+> repository, updated automatically on every upstream change. Commits pushed here are
+> overwritten — please report issues or propose changes to the maintainer instead.
 
-## Contents
+## Overview
 
-- [Components](#components)
-- [Requirements](#requirements)
-- [Getting started](#getting-started)
-- [SSH server mode](#ssh-server-mode)
-- [Building a release](#building-a-release)
-- [Architecture](#architecture)
-- [Repository layout](#repository-layout)
-- [Testing](#testing)
-- [Security model](#security-model)
-- [Troubleshooting](#troubleshooting)
-- [Further reading](#further-reading)
-- [License](#license)
+LLM-IDE captures meetings and other sources into a searchable library, turns them into plans and
+tasks, and automates code review and implementation. Everything runs on your own machine, and
+nothing leaves it until you approve an outbound action.
 
-## Components
+```mermaid
+flowchart LR
+    A["🎙️ Capture<br/>meetings · email · Slack · Box · repos"] --> B["📚 Library<br/>full-text search"]
+    B --> C["🗺️ Plan<br/>issues · Gantt · risks"]
+    C --> D["🤖 Automate<br/>review · implement · Loop"]
+    D --> E{"✅ Your approval"}
+    E -->|approved| F["🚀 Dispatch<br/>GitHub · GitLab · Backlog · Linear"]
+    F -. outcomes .-> B
+```
 
-| Component | Technology | Purpose |
-|:--|:--|:--|
-| **Desktop app** | Tauri 2 (Rust host) + React, TypeScript, Vite | The main workspace: Library, Explorer with Code Assistant, Issues, Gantt, Graph, Auto Tasks, Loop and Settings. Starts and supervises the core. macOS, Windows and Linux. |
-| **Local core** | Node.js 22, pure HTTP (no framework), SQLite (WAL + FTS5) | Authentication, knowledge base, AI orchestration, guardrails and integrations. Listens on `127.0.0.1:3456`. |
-| **SSH server mode** | Rust host + a helper deployed over SSH | Runs the core on a Linux server you can already log in to, reached through a single SSH port forward. |
-| **Chrome extension** | React 18 + TypeScript, Manifest V3 | Captures live captions from Google Meet, Microsoft Teams and Zoom (web) and shows notes in a side panel. |
+### What is in this repository
 
-Model calls go through the user's signed-in **Claude CLI** by default; per-user API keys are kept
-in an encrypted vault. Integrations include GitHub, GitLab, Backlog, Linear, Slack, Box and MCP
-connectors.
+| | Component | Technology | What it does |
+|:-:|:--|:--|:--|
+| 🖥️ | **Desktop app** | Tauri 2 (Rust) + React, TypeScript | The main workspace: Library, Explorer with Code Assistant, Issues, Gantt, Graph, Auto Tasks, Loop and Settings |
+| ⚙️ | **Local core** | Node.js 22, plain HTTP, SQLite | Auth, knowledge base, AI orchestration, guardrails and integrations on `127.0.0.1:3456` |
+| 🔐 | **SSH server mode** | Rust host + Linux helper | Runs the core on a Linux server you can log in to, through one SSH port forward |
+| 🧩 | **Chrome extension** | React 18, Manifest V3 | Captures live captions from Google Meet, Microsoft Teams and Zoom (web) |
 
-## Requirements
+Model calls use your signed-in **Claude CLI** by default; optional per-user API keys are kept in an
+encrypted vault.
+
+## Quick start
+
+```mermaid
+flowchart TD
+    S([Start]) --> P["Install prerequisites<br/>Node 22+ · Rust 1.90+<br/>Git · Claude CLI"]
+    P --> C["Clone with submodules<br/>then run ./setup.sh"]
+    C --> Q{"What do you need?"}
+    Q -->|"Use the app every day"| I["Build and install<br/>build-desktop-mac.sh"]
+    Q -->|"Develop the app"| D["Development mode<br/>npm run tauri dev"]
+    Q -->|"API only"| K["Core only<br/>npm run server"]
+    Q -->|"Meeting capture"| E["Chrome extension<br/>npm run build"]
+```
+
+### Requirements
 
 | Tool | Version | Notes |
 |:--|:--|:--|
 | Node.js | 22 or later | Core, extension and desktop front end |
-| Rust | 1.90 or later | Desktop host (`desktop/src-tauri`) |
+| Rust | 1.90 or later | Desktop host; add the `x86_64-unknown-linux-musl` target for SSH mode |
 | Git | any recent | Submodules are used |
 | Claude CLI | latest | Sign in once with `claude login` |
 
-On macOS, the Xcode Command Line Tools are also required. On Linux, install the
+On macOS, install the Xcode Command Line Tools. On Linux, install the
 [Tauri system dependencies](https://v2.tauri.app/start/prerequisites/) for your distribution.
 
-## Getting started
-
-### 1. Clone and install
+### Clone and set up
 
 ```bash
 git clone --recurse-submodules git@gitlab.com:grid-devs/personal/dinesh/llm-ide-app.git
@@ -65,7 +89,7 @@ cd llm-ide-app
 If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive graph-kit`
 before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
 
-### 2. Build and install the desktop app (macOS)
+## Build and install the desktop app
 
 ```bash
 rustup target add x86_64-unknown-linux-musl        # once; needed for the SSH server bundle
@@ -75,129 +99,131 @@ ditto desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app /Applications/LL
 open /Applications/LLM-IDE.app
 ```
 
-The script stages the core, builds the app, puts the SSH server bundle from `desktop/hub-dist/`
-inside it, signs it (with your Apple Development identity if you have one, otherwise ad-hoc), and
-smoke-tests the bundled core. It does **not** install the app: copy it to `/Applications` yourself
-after every build, or you will keep running the old copy.
+What `build-desktop-mac.sh` does, step by step:
 
-Re-run `stage-hub-core.mjs` whenever you update the code; the build prints the date of the
-bundle it includes (`SSH bundle: … (staged …)`). Skip that step if you do not need SSH mode —
-the app still builds, and only SSH Connect is unavailable.
-Add `--dmg` to also produce a disk image. On Windows and Linux, run `node scripts/stage-core.mjs`
-and `npm run tauri build` in `desktop/` (see [Building a release](#building-a-release)).
-
-### 3. Or run it in development mode
-
-```bash
-cd desktop
-npm run tauri dev   # opens the app window with live reload; the app starts its own core
+```mermaid
+flowchart LR
+    A["Stage the core<br/>pinned Node + deps"] --> B["Security gates<br/>capabilities · DOMPurify"]
+    B --> C["Build<br/>frontend + Rust"]
+    C --> H["Add SSH bundle<br/>from desktop/hub-dist"]
+    H --> S["Sign<br/>Apple Development<br/>or ad-hoc"]
+    S --> V["Verify the bundle"]
+    V --> T["Smoke + end-to-end tests<br/>against the bundled core"]
+    T --> O[/"LLM-IDE.app"/]
 ```
 
-### 4. Run the core on its own (optional)
+> [!IMPORTANT]
+> The script does **not** install the app. Copy it to `/Applications` after every build, or you
+> will keep running the old copy.
 
-```bash
-cd extension
-npm run server      # http://127.0.0.1:3456 — check with: curl http://127.0.0.1:3456/health
-```
+> [!TIP]
+> Re-run `stage-hub-core.mjs` whenever you update the code: the build prints the date of the
+> bundle it includes (`SSH bundle: … (staged …)`). Skip that step if you do not need SSH mode —
+> the app still builds, and only SSH Connect is unavailable.
 
-### 5. Load the Chrome extension (optional)
+Add `--dmg` to also produce a disk image. On Windows and Linux, see
+[Building on other platforms](#building-on-other-platforms).
 
-```bash
-cd extension
-npm run build       # writes extension/dist/
-npm run server      # the extension talks to the local core
-```
+### Development mode and other entry points
 
-Open `chrome://extensions`, turn on **Developer mode**, choose **Load unpacked** and select
-`extension/dist/`.
+| Goal | Command | Result |
+|:--|:--|:--|
+| Develop the desktop app | `cd desktop && npm run tauri dev` | App window with live reload; starts its own core |
+| Run the core only | `cd extension && npm run server` | API on `http://127.0.0.1:3456` (check `/health`) |
+| Build the Chrome extension | `cd extension && npm run build` | `extension/dist/` to load in Chrome |
+
+To load the extension, open `chrome://extensions`, turn on **Developer mode**, choose
+**Load unpacked** and select `extension/dist/`. Keep the core running while you use it.
 
 ## SSH server mode
 
 SSH server mode runs the LLM-IDE core on a Linux server and uses it from the desktop app on your
-own computer. The desktop installs the core into your home folder on the server, starts it, and
-connects through one SSH port forward. The server needs no domain, TLS certificate, root access,
-systemd or Node.js.
+own computer — similar to VS Code Remote-SSH. The server needs no domain, TLS certificate, root
+access, systemd or Node.js.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as You
+    participant D as Desktop app
+    participant S as Linux server
+    U->>D: Connect to SSH server (host, port, user, key or password)
+    D->>S: Read the host key
+    D-->>U: Show the fingerprint
+    U->>D: Trust this key
+    D->>S: Upload the core bundle (checksum verified)
+    D->>S: Install and start under ~/.llmide-server
+    D->>S: Open one SSH port forward
+    S-->>D: Core answers /health
+    D-->>U: Server home opens — work on the server
+```
 
 **Server requirements**
 
 - Linux on x86_64 with at least 2 GB free in your home folder
-- An SSH login (host, port, user, and a key file or password)
+- An SSH login: host, port, user, and a key file or password
 - A POSIX login shell (bash, dash, zsh or ksh) and the `sha256sum`, `tar` and `setsid` commands
 - glibc 2.34 or later (Ubuntu 22.04+, Debian 12+, RHEL 9+) for the standard bundle; older servers
   need the compat bundle (`stage-hub-core.mjs --compat-sqlite <module>`, see
   [desktop/PACKAGING.md](desktop/PACKAGING.md))
 - Optional: the Claude CLI installed on the server and signed in, for AI features
 
-**Connect**
-
-1. In the desktop app, choose **Connect to SSH server** on the Welcome screen, or open
-   **Settings → Server & Backend** and select **SSH server**.
-2. Enter the host, port, user and login method, then press **Connect**.
-3. On first contact, compare the shown host-key fingerprint and press **Trust this key**.
-4. The app installs or updates the server part, starts it, and switches to SSH server mode for
-   this session.
-
-The host code lives in `desktop/src-tauri/src/ssh_*.rs`; local and remote workspace logic is shared
-in `desktop/workspace-core`.
-
-## Building a release
-
-The release bundle embeds a staged copy of the core. **Always stage the core first**; otherwise
-the build ships an outdated core.
-
-```bash
-cd desktop
-node scripts/stage-core.mjs
-npm run tauri build
-```
-
-On macOS, `scripts/build-desktop-mac.sh` stages the core and builds the app in one step.
-Packaging, signing and platform notes: [desktop/PACKAGING.md](desktop/PACKAGING.md) and
-[desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md).
+**Connect:** choose **Connect to SSH server** on the Welcome screen, or open
+**Settings → Server & Backend** and select **SSH server**. The host code lives in
+`desktop/src-tauri/src/ssh_*.rs`; local and remote workspace logic is shared in
+`desktop/workspace-core`.
 
 ## Architecture
 
-```text
-┌───────────────────────── Desktop app (Tauri) ─────────────────────────┐
-│  React screens (ui/)  ◀──── invoke ────▶  Rust host (desktop/src-tauri) │
-└───────────────────────────────────┬───────────────────────────────────┘
-                                    │ spawns + supervises (local mode)
-                                    │ or SSH port forward (SSH mode)
-                                    ▼
-Chrome extension ──HTTP──▶  Local core (extension/, 127.0.0.1:3456)
-                              ├─ routes/      HTTP API
-                              ├─ kb/          SQLite (WAL + FTS5), per-user rows
-                              ├─ agents/      planner, risk, codegen, dispatcher
-                              ├─ providers/   Claude CLI / API model dispatch
-                              └─ connectors/  GitHub, GitLab, Slack, Box, …
+```mermaid
+flowchart TB
+    subgraph Desktop["🖥️ Desktop app (Tauri)"]
+        UI["React screens<br/>ui/"] <-->|invoke| Host["Rust host<br/>desktop/src-tauri"]
+    end
+
+    subgraph Core["⚙️ Local core — extension/ on 127.0.0.1:3456"]
+        R["routes/<br/>HTTP API"] --> KB[("kb/<br/>SQLite WAL + FTS5")]
+        R --> AG["agents/<br/>planner · risk · codegen"]
+        AG --> PR["providers/<br/>Claude CLI / API"]
+        AG --> CN["connectors/<br/>GitHub · GitLab · Slack · Box"]
+    end
+
+    subgraph Remote["🔐 Linux server (SSH mode)"]
+        RC["Core + workspace helper<br/>~/.llmide-server"]
+    end
+
+    EXT["🧩 Chrome extension"] -->|HTTP| R
+    Host -->|"spawns and supervises<br/>(local mode)"| R
+    Host -->|"one SSH port forward<br/>(SSH mode)"| RC
 ```
 
-Key design decisions:
+**Design principles**
 
-- **Local-first.** The core binds to `127.0.0.1`; data lives in one SQLite database per install.
-- **No web framework.** The core uses plain Node HTTP to keep the dependency surface small.
-- **Per-user tenancy.** Every owned row carries a `user_id`, and search results are re-checked
-  against it.
-- **Append-only migrations.** Schema changes are numbered SQL files under `extension/kb/migrations/`.
-- **Layered modules.** Import boundaries inside `extension/` are enforced by ESLint.
+| Principle | How it is applied |
+|:--|:--|
+| Local-first | The core binds to `127.0.0.1`; one SQLite database per install |
+| Small dependency surface | Plain Node HTTP, no web framework |
+| Per-user tenancy | Every owned row carries a `user_id`; search hits are re-checked against it |
+| Safe schema changes | Append-only, numbered SQL migrations in `extension/kb/migrations/` |
+| Clear module boundaries | Import layers inside `extension/` are enforced by ESLint |
 
-## Repository layout
+### Repository layout
 
 ```text
 llm-ide-app/
-├── desktop/         Tauri desktop app
-│   ├── src-tauri/       Rust host: commands, core supervision, SSH mode
-│   ├── workspace-core/  Shared local + SSH workspace logic
-│   └── workspace-helper/ Linux helper serving Explorer file/git/search on SSH servers
-├── ui/              React screens and the shared UI kit used by the desktop
-├── extension/       Local Node core (server.mjs, routes/, kb/, agents/, providers/)
-│                    and the Chrome extension (src/)
-├── schema/          Wire contracts (HTTP, Host API, sync) and fixtures
-├── graph-kit/       Graph engine (git submodule)
-├── deploy/hub/      Server templates used by the desktop's remote deployment
-├── scripts/         Setup, code generation and verification scripts
-├── setup.sh         One-shot developer setup
-└── Makefile         Test and lint entry points
+├── desktop/               Tauri desktop app
+│   ├── src-tauri/             Rust host: commands, core supervision, SSH mode
+│   ├── workspace-core/        Shared local + SSH workspace logic
+│   └── workspace-helper/      Linux helper serving Explorer file/git/search on SSH servers
+├── ui/                    React screens and the shared UI kit
+├── extension/             Local Node core (server.mjs, routes/, kb/, agents/, providers/)
+│                          and the Chrome extension (src/)
+├── schema/                Wire contracts (HTTP, Host API, sync) and fixtures
+├── graph-kit/             Graph engine (git submodule)
+├── deploy/hub/            Server templates used by the desktop's remote deployment
+├── scripts/               Setup, build, code generation and verification
+├── setup.sh               One-shot developer setup
+└── Makefile               Test and lint entry points
 ```
 
 ## Testing
@@ -209,18 +235,42 @@ make test-desktop ALLOW_SKIP=1  # desktop + ui tests, then cargo tests when Rust
 make typecheck-desktop          # TypeScript check of the desktop and its screens
 ```
 
-`ALLOW_SKIP=1` is required in this repository because some upstream test targets cover parts that
-are not mirrored here (the web and iPhone apps).
+`ALLOW_SKIP=1` is required here because some upstream test targets cover parts that are not
+mirrored (the web and iPhone apps).
 
 ## Security model
 
+```mermaid
+flowchart LR
+    Req["Incoming request"] --> H{"Loopback<br/>Host header?"}
+    H -- no --> X1["403 — DNS rebinding blocked"]
+    H -- yes --> O{"Allowed<br/>origin?"}
+    O -- no --> X2["Refused by CORS"]
+    O -- yes --> A{"Valid session<br/>token?"}
+    A -- no --> X3["401"]
+    A -- yes --> RL["Rate limit"] --> OK["Route handler"]
+```
+
 - **Loopback only.** The core listens on `127.0.0.1`; a remote bind must be enabled explicitly.
-- **Strict origins.** CORS allows only the extension and `localhost`, and requests with a
-  non-loopback `Host` header are refused (DNS-rebinding protection).
-- **Secrets stay encrypted.** API keys and tokens are stored in an encrypted vault or the OS keychain.
+- **Secrets stay encrypted.** API keys and tokens live in an encrypted vault or the OS keychain.
 - **Human approval.** Pull requests, tickets and messages are sent only after you approve them;
   generated diffs pass a guardrail scan first.
 - **Verified SSH hosts.** SSH server mode pins the server's host key on first use.
+
+## Building on other platforms
+
+The release bundle embeds a staged copy of the core. **Always stage the core first**; otherwise
+the build ships an outdated core.
+
+```bash
+cd desktop
+node scripts/stage-core.mjs
+npm run tauri build
+```
+
+These builds do not include the SSH server bundle; SSH mode then works only when the app runs from
+the source checkout. Packaging, signing and platform notes:
+[desktop/PACKAGING.md](desktop/PACKAGING.md) and [desktop/RUN-ON-MAC.md](desktop/RUN-ON-MAC.md).
 
 ## Troubleshooting
 
@@ -230,9 +280,11 @@ are not mirrored here (the web and iPhone apps).
 | `Node.js 22+ is required` | Install Node.js 22 or later |
 | `cargo: command not found` | Install Rust from [rustup.rs](https://rustup.rs), open a new shell, run `./setup.sh` |
 | `Port 3456 already in use` | Find the process with `lsof -i :3456`, stop it, then start the core again |
-| Build fails with `Could not load …/three.module.js` | The `graph-kit` submodule is missing: `git submodule update --init --recursive graph-kit`, then `./setup.sh` |
+| `Could not load …/three.module.js` | `git submodule update --init --recursive graph-kit`, then `./setup.sh` |
+| `install the target: rustup target add …` | Run `rustup target add x86_64-unknown-linux-musl` |
+| SSH Connect: "This build does not include the server files" | Run `node desktop/scripts/stage-hub-core.mjs`, rebuild, copy the app again |
+| The installed app does not show your latest changes | Rebuild and copy it to `/Applications` again — the build never installs |
 | Extension does not load or is out of date | `cd extension && npm run build`, then reload it at `chrome://extensions` |
-| A built app runs an old core | Run `node scripts/stage-core.mjs` in `desktop/` before `npm run tauri build` |
 
 ## Further reading
 
