@@ -3,7 +3,8 @@
 // branch for all its runs: `<project>/system/loop-worktrees/<slug>` on `loop/<slug>`, where the slug (see
 // `loopBranchSlug`) is also the run id. Each run continues on that branch and its commits join the loop's one draft MR.
 // Every host call of a run carries the run id. Pure: the host calls stay in NativeLoopScreen, so node tests can import this module.
-import type { LoopStage } from "./model.ts";
+import type { LoopDefinition, LoopStage } from "./model.ts";
+import { isCheckOnlyLoop } from "./check-only.ts";
 
 /** Mirrors the Rust `loop_worktree::RunInfo` (serde camelCase). `project`, `repo` and `worktree` are absolute paths. */
 export interface RunInfo {
@@ -98,6 +99,15 @@ export function loopBranchSlug(name: string, id: string, existing: Iterable<stri
  */
 export function runsInWorktree(config: { alwaysUseWorktree: boolean; stages: readonly Pick<LoopStage, "kind" | "enabled">[] }, isFactory: boolean): boolean {
   return isFactory || (config.alwaysUseWorktree && worktreeBlockedStage(config.stages) === null);
+}
+
+/**
+ * `runsInWorktree` for a whole loop: a check-only loop (Regression, Plan) never gets a worktree; it works on the
+ * project's working tree, so Plan's llm-doc/loop/plan lands in the project folder directly. The one rule every start
+ * path and the Loop page use.
+ */
+export function loopRunsInWorktree(loop: Pick<LoopDefinition, "defaultKey" | "config">, isFactory: boolean): boolean {
+  return !isCheckOnlyLoop(loop) && runsInWorktree(loop.config, isFactory);
 }
 
 /** Whether a run's branch holds anything beyond its base, from the run-end diff; null when the diff could not be read. */

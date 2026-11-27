@@ -1,5 +1,6 @@
 // Native Loop screen, first port slice: the Mac three-pane structure over the committed system/loop.json.
 // Editing/runner arrive next; every field shown here comes from the file, never from the bridge.
+import { isCheckOnlyLoop, opensMergeRequest, CHECK_ONLY_REASON } from "./check-only.ts";
 import { notifyTask } from "../../shell/notify/notify";
 import { reportUiIncident } from "../../shell/self-heal";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type SetStateAction } from "react";
@@ -40,7 +41,7 @@ import { finishLoopRun } from "./run-finish.ts";
 import { prepareLoopRun } from "./run-start.ts";
 import { branchDiscardRefusal, lastShipUrl } from "./loop-branch.ts";
 import { setupNeeded } from "./loop-setup.ts";
-import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
+import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runRoot, loopRunsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
 import { FactoryPicker } from "./FactoryPicker.tsx";
@@ -644,7 +645,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (dirty) return;
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    const useWorktree = runsInWorktree(target.config, true);
+    const useWorktree = loopRunsInWorktree(target, true);
     const worktreeBlocked = useWorktree ? worktreeBlockedStage(target.config.stages) : null;
     if (worktreeBlocked) { setNotice(`“${worktreeBlocked.name}” re-checks faults in the main working tree, so it cannot run in an isolated worktree. Turn that stage off or turn off “Always run in an isolated worktree”.`); return; }
     const batchBlock = batchRollbackReason(target);
@@ -1098,7 +1099,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <ol>{loop.config.stages.filter((s) => s.enabled).map((s, i) => <li key={s.id}><span>{i + 1}</span> {s.name} <code>{s.severity === "blocking" ? "verify" : "advisory"}</code> <code>{stageCheck(s)}</code></li>)}</ol>
           </div>
           <dl className="loop-meta">
-            <dt>Runs in</dt><dd>{runsInWorktree(loop.config, isFactoryLoop(loop)) ? `its own worktree and branch (loop/${loopBranchSlug(loop.name, loop.id)}), kept between runs: every run continues on that branch and its commits go to one draft merge request, which opens automatically after a passed run. Your working tree is not touched.` : regressionOnTree ? `${workRoot ?? projectRoot ?? ""} (your working tree): the Regression step re-checks faults there, so this loop cannot use its own branch.` : workRoot ?? projectRoot}</dd>
+            <dt>Runs in</dt><dd>{loopRunsInWorktree(loop, isFactoryLoop(loop)) ? `its own worktree and branch (loop/${loopBranchSlug(loop.name, loop.id)}), kept between runs: every run continues on that branch and its commits go to one draft merge request, which opens automatically after a passed run. Your working tree is not touched.` : regressionOnTree ? `${workRoot ?? projectRoot ?? ""} (your working tree): the Regression step re-checks faults there, so this loop cannot use its own branch.` : workRoot ?? projectRoot}</dd>
             <dt>Project root</dt><dd>{projectRoot}</dd>
             {loopUsesInputPath(loop) ? <><dt>Working on</dt><dd>{loop.inputPath || "whole repository"}</dd></> : null}
             <dt>Bounded by</dt><dd>{loop.config.maxIterations} iterations (rounds) · {loop.config.wallClockBudgetSeconds ? `${Math.round(loop.config.wallClockBudgetSeconds / 60)} min time limit` : "no time limit"} · stop after {loop.config.consecutiveFailureStop} non-improving · {loop.config.maxRepairsPerStage} repairs/stage</dd>
@@ -1107,7 +1108,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
           <div className="loop-budgets">
             {!isFactoryLoop(loop) ? <>
               <label className="loop-field"><span>Work</span><select value={loop.config.workMode === "one" ? "one" : "all"} onChange={(e) => patchLoop((l) => { if (e.target.value === "one") l.config.workMode = "one"; else delete l.config.workMode; })}><option value="all">Everything it finds</option><option value="one">One item I name</option></select></label>
-              {loop.config.workMode !== "one" && runsInWorktree(loop.config, false) ? (loop.defaultKey === "refactor" || loop.defaultKey === "test") ? <label className="loop-field"><span>Steps per run (1–50)</span><input type="number" min={1} max={50} title="One step is one small change, verified and rolled back if it fails. The time budget and cost ceiling still end the run early; the plan continues next run." value={loop.defaultKey === "test" ? stepLimitOf(loop.config) : (loop.config.refactorBatchesPerRun ?? 3)} onChange={(e) => patchLoop((l) => { const n = Math.min(50, Math.max(1, Math.floor(Number(e.target.value)) || 1)); if (l.defaultKey === "test") l.config.maxPassesPerRun = n; else l.config.refactorBatchesPerRun = n; })} /></label> : <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
+              {loop.config.workMode !== "one" && loopRunsInWorktree(loop, false) ? (loop.defaultKey === "refactor" || loop.defaultKey === "test") ? <label className="loop-field"><span>Steps per run (1–50)</span><input type="number" min={1} max={50} title="One step is one small change, verified and rolled back if it fails. The time budget and cost ceiling still end the run early; the plan continues next run." value={loop.defaultKey === "test" ? stepLimitOf(loop.config) : (loop.config.refactorBatchesPerRun ?? 3)} onChange={(e) => patchLoop((l) => { const n = Math.min(50, Math.max(1, Math.floor(Number(e.target.value)) || 1)); if (l.defaultKey === "test") l.config.maxPassesPerRun = n; else l.config.refactorBatchesPerRun = n; })} /></label> : <label className="loop-field"><span>Passes per run (1–10)</span><input type="number" min={1} max={10} title="The loop repeats its steps until a pass changes nothing, up to this many passes. Time budget and cost ceiling still apply." value={maxPassesOf(loop.config)} onChange={(e) => patchLoop((l) => { l.config.maxPassesPerRun = Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)); })} /></label> : null}
               <label className="loop-field"><span>Final review</span><select value={loop.config.reviewMode === "human" ? "human" : "auto"} onChange={(e) => patchLoop((l) => setReviewMode(l.config, e.target.value === "human" ? "human" : "auto"))}>{REVIEW_MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}</select></label>
             </> : null}
             <label className="loop-field"><span>Max iterations (rounds, {MIN_ITERATIONS}–{MAX_ITERATIONS})</span><input type="number" min={MIN_ITERATIONS} max={MAX_ITERATIONS} value={loop.config.maxIterations} onChange={(e) => patchLoop((l) => { l.config.maxIterations = clampIterations(Number(e.target.value) || MIN_ITERATIONS); })} /></label>
@@ -1131,10 +1132,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
             <label className="loop-field"><span>Extra protected globs (comma separated)</span><input value={loop.config.extraProtectedGlobs.join(", ")} onChange={(e) => patchLoop((l) => { l.config.extraProtectedGlobs = e.target.value.split(",").map((x) => x.trim()).filter(Boolean); })} /></label>
             <label className="loop-check"><input type="checkbox" checked={loop.config.writeSummaryNote} onChange={(e) => patchLoop((l) => { l.config.writeSummaryNote = e.target.checked; })} /> Write a run-summary note into the Library</label>
             <button type="button" className="loop-btn" onClick={() => { void revokeApprovals().then(() => { setApprovalState(null); if (loop) void refreshApproval(loop.id); setNotice("Revoked every host Loop command approval."); }).catch((e: unknown) => setNotice(e instanceof Error ? e.message : "The approvals could not be revoked.")); }}>Revoke command approvals</button>
-            <label className="loop-check"><input type="checkbox" checked={loop.config.openMergeRequest} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Open a draft merge request automatically after a passed run</label>
+            <label className="loop-check"><input type="checkbox" disabled={isCheckOnlyLoop(loop)} checked={opensMergeRequest(loop)} title={isCheckOnlyLoop(loop) ? CHECK_ONLY_REASON : undefined} onChange={(e) => patchLoop((l) => { l.config.openMergeRequest = e.target.checked; })} /> Open a draft merge request automatically after a passed run</label>
+            {isCheckOnlyLoop(loop) ? <p className="loop-native-hint">{CHECK_ONLY_REASON}</p> : null}
             <label className="loop-check"><input type="checkbox" checked={loop.config.issueTrail === true} onChange={(e) => patchLoop((l) => { l.config.issueTrail = e.target.checked; })} /> Open an issue per run and comment each step on it</label>
             <label className="loop-check"><input type="checkbox" disabled checked={loop.config.useWorktreesForConcurrentRuns} onChange={() => undefined} /> Isolated worktree for concurrent runs (not ported)</label>
-            <label className="loop-check"><input type="checkbox" checked={runsInWorktree(loop.config, isFactoryLoop(loop))} disabled={isFactoryLoop(loop) || regressionOnTree} title={regressionOnTree ? "The Regression step re-checks faults in your working tree, so this loop cannot run on its own branch." : undefined} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
+            <label className="loop-check"><input type="checkbox" checked={loopRunsInWorktree(loop, isFactoryLoop(loop))} disabled={isFactoryLoop(loop) || regressionOnTree || isCheckOnlyLoop(loop)} title={isCheckOnlyLoop(loop) ? CHECK_ONLY_REASON : regressionOnTree ? "The Regression step re-checks faults in your working tree, so this loop cannot run on its own branch." : undefined} onChange={(e) => patchLoop((l) => { l.config.alwaysUseWorktree = e.target.checked; })} /> Always run in an isolated worktree</label>
           </details>
           <details className="loop-advanced">
             <summary>Desktop limits (explicit)</summary>

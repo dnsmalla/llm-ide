@@ -184,8 +184,94 @@ test("each Discard confirm carries its own action, so a later check of another c
   const { readFileSync } = await import("node:fs");
   const loopRuns = readFileSync(new URL("../LoopRuns.tsx", import.meta.url), "utf8");
   const cardSrc = readFileSync(new URL("../Card.tsx", import.meta.url), "utf8");
-  assert.match(loopRuns, /onConfirm: \(\) => confirmDiscard\(run\.id, worktreeRunId\)/);
+  assert.match(loopRuns, /onConfirm: \(\) => confirmDiscard\(run\.id, worktreeRunId, run\.loopId\)/);
   assert.match(loopRuns, /onConfirm: \(\) => confirmHide\(run\.id\)/);
   assert.equal(/pendingDiscard/.test(loopRuns), false, "no shared ref between cards");
   assert.match(cardSrc, /if \(confirm\) void confirm\(\); else onAction\("discard"\);/);
+});
+
+// ---- Done lane ----
+import { UNSHIPPED_MESSAGE, doneState, doneStep } from "../loop-board-run.ts";
+import { actionsFor } from "../board-model.ts";
+
+const DONE_RUN = { id: "r1", loopId: "L1", loopName: "Refactor", startedAt: "2026-01-01T00:00:00.000Z", durationSeconds: 5, iterationsUsed: 1, statusCode: "success", statusSummary: "Passed.", trigger: "manual" };
+const MR_URL = "https://gitlab.com/g/p/-/merge_requests/7";
+const withShip = { worktree: { runId: "w1", branch: "b", baseCommit: "c", repo: "" }, ship: { provider: "gitlab", url: MR_URL, commit: "c0ffee", reused: false } };
+const st = (state) => ({ url: MR_URL, state, ci: "none", ciSummary: null, comments: [] });
+const doneView = (done, checkOnly = false, run = DONE_RUN) => loopRunCardView({ run, record: null, steps: ["A"], held: null, done, checkOnly, now: Date.parse(run.startedAt) });
+
+test("doneState: only finished runs have one", () => {
+  assert.equal(doneState({ ...DONE_RUN, statusCode: "failed" }, withShip, null, null), null);
+  assert.equal(doneState({ ...DONE_RUN, statusCode: "running" }, null, null, null), null);
+  assert.equal(doneState({ ...DONE_RUN, statusCode: "awaiting_review" }, null, { kind: "waiting", worktreeRunId: "w", mergedMr: null }, null), null);
+});
+
+test("doneState: MR open / unknown / error keep the card, merged and closed follow the status", () => {
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, null), { kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, "error"), { kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, st("open")), { kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, st("merged")), { kind: "mrMerged" });
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, st("closed")), { kind: "mrClosed" });
+});
+
+test("doneState: no MR in the record is noMr; held shipped or superseded runs are finished", () => {
+  assert.deepEqual(doneState(DONE_RUN, { worktree: withShip.worktree, ship: null }, null, null), { kind: "noMr" });
+  const held = { ...DONE_RUN, statusCode: "awaiting_review" };
+  assert.deepEqual(doneState(held, withShip, { kind: "shipped" }, null), { kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(doneState(held, null, { kind: "superseded" }, null), { kind: "noMr" });
+});
+
+test("card actions per Done state", () => {
+  const open = doneView({ kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(open.actions, ["openRequest", "openLog"]);
+  assert.deepEqual(open.request, { label: "MR open — shown until merged" });
+  const closed = doneView({ kind: "mrClosed" });
+  assert.deepEqual(closed.actions, ["done", "openLog", "discard"]);
+  assert.match(closed.note, /closed without merging/);
+  assert.deepEqual(doneView({ kind: "noMr" }).actions, ["done", "openLog", "discard"]);
+  assert.deepEqual(doneView({ kind: "noMr" }, true).actions, ["done", "openLog"]);
+  const oldPlan = loopRunCardView({ run: DONE_RUN, record: { worktree: { runId: "plan-1", branch: "loop/plan-1", baseCommit: "abc", repo: "/r" } }, steps: ["A"], held: null, done: { kind: "noMr" }, checkOnly: true, now: Date.parse(DONE_RUN.startedAt) });
+  assert.deepEqual(oldPlan.actions, ["done", "openLog", "discard"], "an old check-only worktree can still be discarded");
+  assert.deepEqual(doneView({ kind: "mrMerged" }).actions, ["openLog"]);
+  assert.equal(ACTION_LABELS.done, "Done");
+});
+
+test("a card with no Done state keeps the old actions", () => {
+  assert.deepEqual(doneView(null).actions, ["openLog", "discard"]);
+});
+
+test("the Factory board never offers Done", () => {
+  for (const column of ["inbox", "needsDecision", "working", "needsYou", "readyToShip", "shipped", "done"]) {
+    for (const note of [null, "Interrupted", "Not shipped", "CI failed", "New comments"]) assert.equal(actionsFor(column, note).includes("done"), false, `${column}/${note}`);
+  }
+});
+
+const okTarget = { kind: "ok", info: { runId: "w1" } };
+test("doneStep: unreadable changes nothing; refused, gone and no worktree just hide", () => {
+  assert.equal(doneStep({ kind: "unreadable" }, false, null).kind, "error");
+  assert.deepEqual(doneStep({ kind: "refused", reason: "older" }, false, null), { kind: "hide" });
+  assert.deepEqual(doneStep({ kind: "refused", reason: "older" }, true, null), { kind: "hide" });
+  assert.deepEqual(doneStep({ kind: "gone" }, false, null), { kind: "hide" });
+  assert.deepEqual(doneStep({ kind: "no-worktree" }, true, null), { kind: "hide" });
+});
+
+test("doneStep: a check-only loop's Done only hides the card, with or without a worktree", () => {
+  assert.deepEqual(doneStep(okTarget, true, null), { kind: "hide" });
+  assert.deepEqual(doneStep(okTarget, true, { changedFiles: 3, localCommits: 1, pushed: false }), { kind: "hide" });
+});
+
+test("doneStep: an MR loop's worktree is removed only when nothing is unshipped", () => {
+  assert.deepEqual(doneStep(okTarget, false, { changedFiles: 0, localCommits: 0, pushed: true }), { kind: "remove", worktreeRunId: "w1" });
+  assert.equal(doneStep(okTarget, false, { changedFiles: 2, localCommits: 0, pushed: false }).kind, "unshipped");
+  assert.equal(doneStep(okTarget, false, { changedFiles: 0, localCommits: 1, pushed: false }).kind, "unshipped");
+  assert.equal(doneStep(okTarget, false, null).kind, "error");
+  assert.match(UNSHIPPED_MESSAGE, /still has unshipped changes: open the run to ship them, or Discard to remove them\.$/);
+});
+
+test("a held check-only run offers Done instead of Approve", () => {
+  const held = { kind: "waiting", worktreeRunId: "w", mergedMr: null };
+  const run = { ...DONE_RUN, statusCode: "awaiting_review" };
+  const view = (checkOnly) => loopRunCardView({ run, record: null, steps: ["A"], held, checkOnly });
+  assert.deepEqual(view(true).actions, ["done", "openLog", "discard"]);
+  assert.deepEqual(view(false).actions, ["approve", "openLog", "discard"]);
 });

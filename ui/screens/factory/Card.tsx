@@ -82,7 +82,7 @@ export function Card({ view, selected, onOpen, onAction, onDiscardStatus, reques
       ) : view.actions.length > 0 ? (
         <div className="fx-actions">
           {view.actions.map((a) => (
-            <button key={a} type="button" data-tour-id={`card-action-${a}`} disabled={(busy && a === "approve") || (checking && a === "discard")} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
+            <button key={a} type="button" data-tour-id={`card-action-${a}`} disabled={(busy && a === "approve") || (checking && a === "discard")} className={a === "start" || a === "ship" || a === "finishChecks" || a === "approve" || a === "done" ? "fx-btn fx-primary" : "fx-btn"} onClick={() => {
               if (a === "discard") {
                 const readStatus = (read: () => Promise<unknown>) => {
                   setReadingDiscard(true);

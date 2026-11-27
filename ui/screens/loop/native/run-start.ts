@@ -41,7 +41,7 @@ export interface StartInput {
   start: { repoRel: string; task: string; item: WorkItem } | null;
   command: string | undefined;
   oneItem: boolean;
-  /** `runsInWorktree(...)`, decided by the caller before approval so a blocked stage refuses first. */
+  /** `loopRunsInWorktree(...)` (false for a check-only loop, which works on the project folder), decided by the caller before approval so a blocked stage refuses first. */
   useWorktree: boolean;
   projectRoot: string | null;
   workRoot: string | null;

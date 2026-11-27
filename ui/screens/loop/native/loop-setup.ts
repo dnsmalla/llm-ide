@@ -5,7 +5,7 @@
 import type { FsApi } from "../../explorer/fs";
 import { decodeStage, type LoopDefinition, type LoopStage } from "./model.ts";
 import { isFactoryLoop, setupCommandFor } from "./factory.ts";
-import { runsInWorktree } from "./worktree-run.ts";
+import { loopRunsInWorktree } from "./worktree-run.ts";
 
 const SETUP_ID_PREFIX = "loop/setup-";
 export const isSetupStage = (s: Pick<LoopStage, "id">): boolean => s.id.startsWith(SETUP_ID_PREFIX);
@@ -23,7 +23,7 @@ const INSTALLS: Record<string, { dir: string; lockfile: string }> = {
  */
 export function withSetupStage(loop: LoopDefinition, testCommand: string | null): LoopDefinition {
   const command = setupCommandFor(testCommand);
-  if (!command || isFactoryLoop(loop) || !runsInWorktree(loop.config, false)) return loop;
+  if (!command || isFactoryLoop(loop) || !loopRunsInWorktree(loop, false)) return loop;
   const stages = [...loop.config.stages].sort((a, b) => a.order - b.order);
   if (stages.some(isSetupStage) || stages.some((s) => s.kind === "shellCommand" && s.command === command)) return loop;
   if (!stages.some((s) => s.enabled && s.kind === "shellCommand" && s.command === testCommand)) return loop;

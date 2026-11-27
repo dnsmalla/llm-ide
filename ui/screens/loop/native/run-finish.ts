@@ -1,6 +1,7 @@
 // The end of a Loop-page run, free of React: the diff read, the end rule, the run record and index row, the signal and
 // the worktree end (run-end.ts). Every side effect goes through `FinishDeps`, so node tests drive the exact order.
 import type { LoopDefinition } from "./model.ts";
+import { opensMergeRequest } from "./check-only.ts";
 import { isFactoryLoop, type WorkItem } from "./factory.ts";
 import { iterationRecordsWithScores, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
 import { loopbackRecord } from "./loopback.ts";
@@ -117,7 +118,7 @@ export async function finishLoopRun(d: FinishDeps, i: FinishInput): Promise<Fini
   // One end-of-run rule for every loop but the Factory (which has its own board): a passed run with changes opens its
   // draft MR, a passed run with none is removed, anything else keeps its branch. Nothing is removed on doubt.
   const end = activeRun && !isFactory
-    ? runEndAction({ passed: outcome.passed, cancelled: outcome.cancelled === true, changed: runChanged(worktreeDiff), humanReview: reviewModeOf(loop.config) === "human", leftoverFiles: i.leftoverFiles, openMergeRequest: loop.config.openMergeRequest })
+    ? runEndAction({ passed: outcome.passed, cancelled: outcome.cancelled === true, changed: runChanged(worktreeDiff), humanReview: reviewModeOf(loop.config) === "human", leftoverFiles: i.leftoverFiles, openMergeRequest: opensMergeRequest(loop) })
     : null;
   // Leftovers win over Human: an earlier run's edits must be seen in the diff, never shipped with one click.
   const heldReason: HeldReason = i.leftoverFiles === null || (i.leftoverFiles ?? 0) > 0 ? "leftoverFiles" : "human";

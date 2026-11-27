@@ -2,24 +2,28 @@
 // reached (or Done). Facts come from system/loop-runs and the run manager's live runs. The run bar only REQUESTS a run
 // (shell bus "run-loop", answered through the run manager): execution (approval dialog, worktree, queue, ship) is the
 // manager's, so this board never runs or edits anything.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { shellBus } from "../shell/bus";
 import { invokeHost } from "../shell/host";
 import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops, saveLoops } from "../loop/native/store.ts";
 import { setReviewMode } from "../loop/native/review-ui.ts";
-import { liveRuns, shipHeldRun, subscribe as subscribeRuns } from "../loop/native/run-manager.ts";
+import { liveRuns, loopIdOfRun, shipHeldRun, subscribe as subscribeRuns } from "../loop/native/run-manager.ts";
 import { FinalReviewToggle } from "./FinalReviewToggle.tsx";
 import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
-import { afterSend, buildRunEvent, discardTarget, heldState, loopRunCardView, loopRunLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
+import { afterSend, buildRunEvent, discardTarget, doneState, doneStep, UNSHIPPED_MESSAGE, LOOP_BUSY_MESSAGE, CHECK_ONLY_APPROVE_MESSAGE, heldState, loopRunCardView, loopRunLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { liveCardNote, liveLoopCard, queuedLoopRuns } from "../loop/native/live-card.ts";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { Card, type DiscardCheck } from "./Card.tsx";
-import type { CardAction } from "./board-model.ts";
+import { STATUS_REFRESH_MS, chunkShipRequests, decodeShipResults, safeRequestUrl, type CardAction } from "./board-model.ts";
+import type { ShipStatus } from "./columns.ts";
+import { core } from "../shell/runtime";
+import { isCheckOnlyLoop } from "../loop/native/check-only.ts";
+import { decodeWorktreeStatus } from "../loop/native/ship-model.ts";
 
 export interface LoopRunsProps {
   projectRoot: string;
@@ -36,6 +40,8 @@ const storage = (): Storage | null => { try { return window.localStorage; } catc
 // A loop board lists at most 41 cards (40 journal runs + the live one), under LaneBoard's default page of 100, so "Show more" never appears.
 const NO_CAP: Readonly<Record<string, number>> = {};
 const noop = (): void => undefined;
+// A forced refresh (Refresh button) skips this; the 5-minute timer and card changes respect it.
+const STATUS_MIN_GAP_MS = 10_000;
 
 export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRunsProps): ReactNode {
   const fs = useMemo(() => createHostFs(), []);
@@ -181,17 +187,75 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     saveRunBarInput(scope, next, storage());
   };
 
+  // MR status of finished cards that opened a merge request, keyed by url; a card stays on the board until its MR is merged.
+  const [statusDown, setStatusDown] = useState(false);
+  const [ship, setShip] = useState<ReadonlyMap<string, ShipStatus | "error">>(() => new Map());
+  const cardsRef = useRef(cards);
+  cardsRef.current = cards;
+  const hiddenRef = useRef(hidden);
+  hiddenRef.current = hidden;
+  const lastStatusAt = useRef(0);
+  const statusBusy = useRef(false);
+  const mrUrlsKey = cards.filter((c) => !hidden.has(c.run.id) && doneState(c.run, c.record, c.held, null)?.kind === "mrOpen")
+    .map((c) => decodeFactoryFields(c.record).ship?.url ?? "").join("\n");
+  const refreshStatus = useCallback(async (force = false) => {
+    const seen = new Set<string>();
+    const requests: { url: string; since: string }[] = [];
+    for (const c of cardsRef.current) {
+      const url = decodeFactoryFields(c.record).ship?.url;
+      if (!url || seen.has(url) || hiddenRef.current.has(c.run.id) || doneState(c.run, c.record, c.held, null)?.kind !== "mrOpen") continue;
+      seen.add(url);
+      requests.push({ url, since: typeof c.record?.endedAt === "string" ? c.record.endedAt : c.run.startedAt });
+    }
+    if (requests.length === 0 || statusBusy.current) return;
+    const now = Date.now();
+    if (!force && now - lastStatusAt.current < STATUS_MIN_GAP_MS) return;
+    lastStatusAt.current = now;
+    statusBusy.current = true;
+    try {
+      const next = new Map<string, ShipStatus | "error">();
+      let anyOk = false;
+      for (const chunk of chunkShipRequests(requests)) {
+        try {
+          const r = await core.requestRaw("/kb/loop/ship-status", { method: "POST", body: { requests: chunk } });
+          // Rate limited: keep the statuses already shown.
+          if (r.status === 429) return;
+          if (r.status === 200) { anyOk = true; for (const [url, st] of decodeShipResults(r.body)) next.set(url, st); }
+        } catch { /* core unreachable: the cards keep their last known state */ }
+        for (const q of chunk) if (!next.has(q.url)) next.set(q.url, "error");
+      }
+      setShip(next);
+      setStatusDown(!anyOk);
+    } finally {
+      statusBusy.current = false;
+    }
+  }, []);
+  useEffect(() => {
+    if (!active) return;
+    void refreshStatus();
+    const timer = window.setInterval(() => { if (!document.hidden) void refreshStatus(); }, STATUS_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [active, mrUrlsKey, refreshStatus]);
+  // Merged cards are hidden for good, so the next poll leaves them out.
+  useEffect(() => {
+    const merged = cards.filter((c) => !hidden.has(c.run.id) && doneState(c.run, c.record, c.held, ship.get(decodeFactoryFields(c.record).ship?.url ?? ""))?.kind === "mrMerged").map((c) => c.run.id);
+    if (merged.length > 0) hideRuns(merged);
+  }, [cards, ship]);
+
   const liveRun: LoopRunIndexEntry | null = live && loopId ? {
     id: live.runId, loopId, loopName: scope, startedAt: live.startedAt,
     durationSeconds: Math.max(0, Math.round((Date.now() - Date.parse(live.startedAt)) / 1000)),
     iterationsUsed: 1, statusCode: "running", statusSummary: "Running now", trigger: "manual",
   } : null;
 
-  const shownCards = cards.filter((c) => !hidden.has(c.run.id));
+  const checkOnly = boardLoop !== null && isCheckOnlyLoop(boardLoop);
+  const doneOf = (c: RunCard) => doneState(c.run, c.record, c.held, ship.get(decodeFactoryFields(c.record).ship?.url ?? ""));
+  // A merged MR's card leaves the board by itself (hidden below, and remembered so it is not polled again).
+  const shownCards = cards.filter((c) => !hidden.has(c.run.id) && doneOf(c)?.kind !== "mrMerged");
   const listed = shownCards.filter((c) => c.run.id !== liveRun?.id);
   const runById = new Map<string, LoopRunIndexEntry>([...(liveRun ? [liveRun] : []), ...listed.map((c) => c.run)].map((r) => [r.id, r]));
   const liveView = liveRun && live ? loopRunCardView({ run: liveRun, record: null, steps, held: null, live: { lane: live.stageName || steps[0] || "Running", note: liveCardNote(live), progress: live.progress } }) : null;
-  const views = [...(liveView ? [liveView] : []), ...listed.map((c) => loopRunCardView({ ...c, steps }))];
+  const views = [...(liveView ? [liveView] : []), ...listed.map((c) => loopRunCardView({ ...c, steps, done: doneOf(c), checkOnly }))];
   const lanes = loopRunLanes(steps, views);
 
   const openRun = async (id: string, startedAt: string) => {
@@ -203,15 +267,16 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
-  /** Hides one card from this board's view (the journal entry itself is never deleted). */
-  const hideRun = (entryId: string) => {
+  /** Hides cards from this board's view (the journal entry itself is never deleted). */
+  const hideRuns = (entryIds: readonly string[]) => {
     setHidden((h) => {
       const next = new Set(h);
-      next.add(entryId);
+      for (const id of entryIds) next.add(id);
       saveHiddenRunIds(scope, next, storage());
       return next;
     });
   };
+  const hideRun = (entryId: string) => hideRuns([entryId]);
 
   /** Opens the inline confirm for one card's Discard, after checking it is actually safe to offer (a worktree
    *  exists, and this is the loop's newest run so its shared branch is not still needed by another one).
@@ -252,7 +317,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     const worktreeRunId = target.info.runId;
     return {
       kind: "confirm",
-      onConfirm: () => confirmDiscard(run.id, worktreeRunId),
+      onConfirm: () => confirmDiscard(run.id, worktreeRunId, run.loopId),
       text: "Remove this run's worktree and branch? This reverts every change it made that is not already shipped.",
       readStatus: () => invokeHost<unknown>("loop_worktree_status", { runId: worktreeRunId }),
       provider: fields.ok ? fields.ship?.provider ?? null : null,
@@ -268,8 +333,9 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
 
   /** Removes the run's worktree and branch (reverting every change it made that was never shipped), then hides its
    *  card: the Loop journal is append-only, so there is nothing to delete there. */
-  const confirmDiscard = async (entryId: string, worktreeRunId: string) => {
+  const confirmDiscard = async (entryId: string, worktreeRunId: string, runLoopId: string) => {
     if (discardBusy.current) { setDiscardMsg({ text: "Another worktree is still being removed; confirm again when it is done.", kind: "info" }); return; }
+    if (loopIsBusy(runLoopId)) { setDiscardMsg({ text: LOOP_BUSY_MESSAGE, kind: "error" }); return; }
     discardBusy.current = true;
     setDiscardMsg({ text: "Removing the worktree…", kind: "info" });
     try {
@@ -283,8 +349,50 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     }
   };
 
+  /** Done: ends a finished card. A check-only loop works on the project folder, so Done only hides its card; any other
+   *  loop's worktree is removed only when nothing in it is unshipped. A card that is not the loop's newest run, or any
+   *  card while the loop runs, is only hidden: a worktree is shared by every run of a loop. */
+  const finishCard = async (run: LoopRunIndexEntry) => {
+    if (discardBusy.current) { setDiscardMsg({ text: "Another worktree is still being removed; try again when it is done.", kind: "info" }); return; }
+    discardBusy.current = true;
+    setDiscardMsg(null);
+    try {
+      const record = await loadRunRecord(fs, run.id, run.startedAt).catch(() => null);
+      const fields = record === null ? { ok: false as const } : { ok: true as const, ...decodeFactoryFields(record) };
+      const worktrees = await invokeHost<RunInfo[]>("loop_worktree_list").then((list) => ({ ok: true as const, list })).catch(() => ({ ok: false as const }));
+      const runningLoopId = live && live.loopId === run.loopId ? run.loopId : null;
+      const target = discardTarget(run, fields, worktrees, cards.map((c) => c.run), runningLoopId);
+      const status = target.kind === "ok" && !checkOnly
+        ? await invokeHost<unknown>("loop_worktree_status", { runId: target.info.runId }).then(decodeWorktreeStatus).catch(() => null)
+        : null;
+      const step = doneStep(target, checkOnly, status);
+      if (step.kind === "error") { setDiscardMsg({ text: step.text, kind: "error" }); return; }
+      if (step.kind === "unshipped") { setDiscardMsg({ text: UNSHIPPED_MESSAGE, kind: "error" }); return; }
+      if (step.kind === "remove") {
+        if (loopIsBusy(run.loopId)) { setDiscardMsg({ text: LOOP_BUSY_MESSAGE, kind: "error" }); return; }
+        await invokeHost("loop_worktree_remove", { runId: step.worktreeRunId });
+      }
+      hideRun(run.id);
+    } catch (e) {
+      setDiscardMsg({ text: `Done did not finish, nothing else was changed: ${e instanceof Error ? e.message : String(e)}`, kind: "error" });
+    } finally {
+      discardBusy.current = false;
+    }
+  };
+
+  const openMergeRequest = (run: LoopRunIndexEntry) => {
+    const card = cards.find((c) => c.run.id === run.id);
+    const url = safeRequestUrl(decodeFactoryFields(card?.record ?? null).ship?.url ?? null);
+    if (url) void invokeHost("open_external_url", { url }).catch(() => setError("The PR/MR link could not be opened."));
+  };
+
+  /** True when the run manager has a run of this loop live or queued: its worktree must not be removed then. Read fresh. */
+  const loopIsBusy = (loopIdValue: string): boolean => liveRuns().some((r) => r.projectRoot === projectRoot && loopIdOfRun(r) === loopIdValue);
+
   const onAction = (run: LoopRunIndexEntry, action: CardAction) => {
     if (action === "approve") void approve(run);
+    else if (action === "done") void finishCard(run);
+    else if (action === "openRequest") openMergeRequest(run);
     else if (action === "openLog") void openRun(run.id, run.startedAt);
   };
 
@@ -318,6 +426,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const approve = async (run: LoopRunIndexEntry) => {
     if (approving !== null || !projectRoot) return;
     setDiscardMsg(null);
+    if (checkOnly) { setDiscardMsg({ text: CHECK_ONLY_APPROVE_MESSAGE, kind: "error" }); return; }
     setApproving(run.id);
     try {
       // Fresh reads, not the board's 5 s snapshot: a newer run of this loop may have taken the shared branch since.
@@ -334,6 +443,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
       if (target.kind !== "ok") { setDiscardMsg({ text: "Not approved: this run's worktree was removed, so there is nothing to ship.", kind: "error" }); return; }
       const info = target.info;
+      if (loopIsBusy(run.loopId)) { setDiscardMsg({ text: LOOP_BUSY_MESSAGE, kind: "error" }); return; }
       // The same Approve as the Factory board: shipHeldRun, through the one shipper with all its blocks.
       const line = await shipHeldRun(projectRoot, { source: "text", id: null, title: `${run.loopName} run ${info.runId}`, body: "", repo: null, key: `loop:${info.runId}`, provider: null }, {
         runId: info.runId, entry: run, statusCode: run.statusCode, shipped: false,
@@ -357,7 +467,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         </div>
         <span className="fx-spacer" />
         <FinalReviewToggle mode={boardLoop ? (boardLoop.config.reviewMode === "human" ? "human" : "auto") : null} busy={modeBusy} onChoose={(mode) => void chooseReviewMode(mode)} />
-        <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
+        <button type="button" className="fx-btn" onClick={() => { setReload((n) => n + 1); void refreshStatus(true); }}>Refresh</button>
       </header>
       {boardLoop && bar ? (
         <form className="fx-form" aria-label={`Run ${scope}`} onSubmit={(e) => { e.preventDefault(); sendRun(); }}>
@@ -380,6 +490,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         </form>
       ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}
+      {statusDown ? <p className="fx-hint" role="status">MR status unavailable</p> : null}
       {discardMsg ? <p className={discardMsg.kind === "error" ? "fx-error" : "fx-hint"} role="status">{discardMsg.text}</p> : null}
       <div className="fx-body">
         <LaneBoard

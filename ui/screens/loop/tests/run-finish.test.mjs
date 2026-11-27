@@ -203,3 +203,16 @@ test("a run without a worktree reads no diff, syncs nothing, and only records an
   assert.ok(calls.includes("append") && calls.includes("signal"));
   assert.equal(calls.includes("ship"), false);
 });
+
+test("a check-only loop (Regression, Plan) keeps its branch and never ships, even with the MR setting on and changes", async () => {
+  for (const key of ["regression", "plan"]) {
+    const base = store.loops.find((l) => l.defaultKey === key);
+    const checkOnly = { ...base, config: { ...base.config, openMergeRequest: true, reviewMode: "auto" } };
+    const { calls, deps } = harness();
+    const r = await finishLoopRun(deps, finishInput({ loop: checkOnly }));
+    assert.equal(calls.includes("ship"), false, key);
+    assert.equal(calls.includes("host:loop_worktree_remove_if_empty"), false, key);
+    assert.equal(deps.saved.e.statusCode, "success", key);
+    assert.equal(r.manualShip, null, key);
+  }
+});

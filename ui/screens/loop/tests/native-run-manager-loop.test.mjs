@@ -239,7 +239,10 @@ const stateOf = (id) => rm.liveRuns().find((r) => r.runId === id)?.state;
 test("two different loops of one project run one after the other, in start order; a Factory run is not held up", async () => {
   setup({ loadFactoryLoop: async () => byKey("factory") });
   const a = start(byKey("test"));
-  const b = start(byKey("plan"));
+  // Plan itself is check-only (no worktree, plain driver); a re-keyed Plan stands in for any other worktree loop.
+  const plan = byKey("plan");
+  plan.defaultKey = "other";
+  const b = start(plan);
   const factory = rm.startRun("/p", { key: "issue:1", source: "issue", id: "1", title: "Issue 1", body: "", repo: "", provider: null }, "full");
   await settle();
   assert.equal(rm.loopRunActive("/p"), true);
@@ -252,6 +255,7 @@ test("two different loops of one project run one after the other, in start order
   assert.deepEqual(world.drivers.filter((k) => k !== "plain"), ["test", "allPasses"]);
   await finish(world.gates.findIndex((g) => g.kind === "allPasses"), PASSED);
   assert.equal(rm.loopRunActive("/p"), false);
+  plan.defaultKey = "plan";
 });
 
 test("the loop-run lock is released by a cancel and by a run that throws", async () => {

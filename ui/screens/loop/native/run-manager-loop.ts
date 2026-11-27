@@ -24,7 +24,7 @@ import { createModelTracker } from "./step-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { writeRunArchive } from "./summary.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
-import { changedPathArgs, repoPrefixFor, runRoot, runsInWorktree, type RunInfo } from "./worktree-run.ts";
+import { changedPathArgs, repoPrefixFor, runRoot, loopRunsInWorktree, type RunInfo } from "./worktree-run.ts";
 import type { LoopApprovalStatus } from "./approvals.ts";
 import type { RepoConfig } from "../../settings/repo-config.ts";
 import type { LoopRunIndexEntry } from "./history.ts";
@@ -193,7 +193,7 @@ export async function runLoopRequest(d: LoopRunDeps, c: LoopRunContext): Promise
     endStarting: () => { starting = false; },
     closePicker: () => undefined,
     log: c.log,
-  }, { target, scheduled: c.request.scheduled === true, start: null, command, oneItem, useWorktree: runsInWorktree(target.config, false), projectRoot, workRoot, workRelative });
+  }, { target, scheduled: c.request.scheduled === true, start: null, command, oneItem, useWorktree: loopRunsInWorktree(target, false), projectRoot, workRoot, workRelative });
   if (!result.ok) {
     if (result.notice !== null) c.refuse(result.notice); else c.log("Run cancelled before it started.");
     return;

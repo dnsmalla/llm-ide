@@ -6,8 +6,9 @@ import { branchDiscardRefusal, isNewestRunOfLoop } from "../loop/native/loop-bra
 import { decodeFactoryFields, type FactoryRunFields, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
+import type { WorktreeStatus } from "../loop/native/ship-model.ts";
 import { LANE_DONE, LANE_WAITING, stepLane, type CardAction, type CardView, type Lane } from "./board-model.ts";
-import { decodeRunRecordFacts } from "./columns.ts";
+import { decodeRunRecordFacts, type ShipStatus } from "./columns.ts";
 
 export type BoardRunLoop = Pick<LoopDefinition, "id" | "config" | "inputPath">;
 
@@ -236,27 +237,71 @@ export interface LoopRunCardInput {
   record: Record<string, unknown> | null;
   steps: readonly string[];
   held: HeldState | null;
+  /** What the Done lane shows for this run (doneState); null or absent for a card that is not finished. */
+  done?: DoneState | null;
+  /** The loop only checks (Regression, Plan): a finished card without an MR offers Done but never Discard. */
+  checkOnly?: boolean;
   /** The loop's running card: it sits at `lane`, shows `note` and offers no action. */
   live?: { lane: string; note: string; /** How far the run is through its steps, 0..1. */ progress?: number | null };
   now?: number;
 }
 
+/**
+ * What a finished card means for the Done lane, or null when the run is not finished (finished = passed, or held and
+ * then shipped / superseded). Needs the MR's live status when the record names one:
+ * - `mrOpen`: the MR is open (or its status is not known yet): the card stays until it is merged.
+ * - `mrMerged`: merged: the card goes away by itself.
+ * - `mrClosed`: closed without merging: the person ends the card with Done.
+ * - `noMr`: the run opened no MR (the setting is off, a blocked ship, or a check-only loop): Done ends the card.
+ */
+export type DoneState = { kind: "mrOpen"; url: string } | { kind: "mrMerged" } | { kind: "mrClosed" } | { kind: "noMr" };
+
+export function doneState(
+  run: Pick<LoopRunIndexEntry, "statusCode">,
+  record: Record<string, unknown> | null,
+  held: HeldState | null,
+  shipStatus: ShipStatus | "error" | null | undefined,
+): DoneState | null {
+  const finished = run.statusCode === "success" || held?.kind === "shipped" || held?.kind === "superseded";
+  if (!finished) return null;
+  const url = decodeFactoryFields(record).ship?.url ?? null;
+  if (!url) return { kind: "noMr" };
+  if (shipStatus && shipStatus !== "error") {
+    if (shipStatus.state === "merged") return { kind: "mrMerged" };
+    if (shipStatus.state === "closed") return { kind: "mrClosed" };
+  }
+  return { kind: "mrOpen", url };
+}
+
+function doneCardView(done: DoneState | null, checkOnly: boolean, hasWorktree: boolean): { actions: CardAction[]; note: string | null; request: { label: string } | null } | null {
+  if (!done) return null;
+  switch (done.kind) {
+    case "mrOpen": return { actions: ["openRequest", "openLog"], note: null, request: { label: "MR open — shown until merged" } };
+    case "mrMerged": return { actions: ["openLog"], note: null, request: null };
+    case "mrClosed": return { actions: ["done", "openLog", "discard"], note: "Its MR was closed without merging.", request: null };
+    // A check-only run made before they moved to the project folder may still have its worktree: Discard removes it.
+    case "noMr": return { actions: checkOnly && !hasWorktree ? ["done", "openLog"] : ["done", "openLog", "discard"], note: null, request: null };
+  }
+}
+
 /** One run as a board card: the same CardView the Factory draws, so both boards render through Card. */
 export function loopRunCardView(input: LoopRunCardInput): CardView {
-  const { run, record, steps, held, live, now } = input;
+  const { run, record, steps, held, live, now, done, checkOnly } = input;
   const at = live ?? laneOf(run, record, steps, held);
   const facts = decodeRunRecordFacts(record);
   const diff = decodeFactoryFields(record).diffSummary;
   const stopped = run.statusCode !== "success" && !held;
-  const actions: CardAction[] = live ? [] : held?.kind === "waiting" ? ["approve", "openLog", "discard"] : ["openLog", "discard"];
+  const doneView = live ? null : doneCardView(done ?? null, checkOnly === true, decodeFactoryFields(record).worktree !== null);
+  const actions: CardAction[] = live ? [] : doneView ? doneView.actions : held?.kind === "waiting" ? (checkOnly === true ? ["done", "openLog", "discard"] : ["approve", "openLog", "discard"]) : ["openLog", "discard"];
   const cost = typeof record?.costUsd === "number" && Number.isFinite(record.costUsd) ? record.costUsd : facts?.costUsd ?? null;
   const changed = facts?.changed ?? (diff ? { files: diff.files.length, additions: null, deletions: null, truncated: diff.truncated } : null);
   return {
     key: run.id,
     title: `${run.loopName} · ${whenText(run.startedAt, now)}`,
     source: "text",
-    note: at.note,
+    note: doneView?.note ? `${at.note} ${doneView.note}` : at.note,
     lane: laneIdOf(at.lane),
+    ...(doneView?.request ? { request: doneView.request } : {}),
     status: held ? HELD_WORD[held.kind] : statusWord(run.statusCode),
     actions,
     durationSeconds: run.durationSeconds > 0 ? run.durationSeconds : null,
@@ -277,3 +322,38 @@ export function loopRunLanes(steps: readonly string[], cards: readonly CardView[
     return { id, label: name, cards: cards.filter((c) => c.lane === id) };
   });
 }
+
+/** Said when Done finds work in the branch that was never shipped; nothing is removed then. */
+export const UNSHIPPED_MESSAGE = "This run's branch still has unshipped changes: open the run to ship them, or Discard to remove them.";
+
+/** What a Done click does, decided from the worktree check (and, for an MR loop, the worktree's status). */
+export type DoneStep =
+  | { kind: "error"; text: string }
+  | { kind: "hide" }
+  | { kind: "unshipped" }
+  | { kind: "remove"; worktreeRunId: string };
+
+/**
+ * Done never deletes unshipped work. A worktree that cannot be read, or whose status cannot be read, changes nothing.
+ * A card that is not this loop's newest run (`refused`), or whose worktree is gone or never existed, is only hidden.
+ * A check-only loop's Done only hides the card: it works on the project folder, so an old worktree of it (from before
+ * that rule) stays until the person discards it. Any other loop's worktree is removed only when it has no changed
+ * files and no unpushed commits.
+ */
+export function doneStep(target: DiscardTarget, checkOnly: boolean, status: WorktreeStatus | null): DoneStep {
+  switch (target.kind) {
+    case "unreadable": return { kind: "error", text: "Could not check this run's worktree; try again." };
+    case "refused":
+    case "gone":
+    case "no-worktree": return { kind: "hide" };
+    case "ok":
+      if (checkOnly) return { kind: "hide" };
+      if (status === null) return { kind: "error", text: "Could not read this run's worktree status; nothing was removed." };
+      return status.changedFiles > 0 || status.localCommits > 0 ? { kind: "unshipped" } : { kind: "remove", worktreeRunId: target.info.runId };
+  }
+}
+
+/** Said when a worktree removal finds the loop started a run in the meantime. */
+export const LOOP_BUSY_MESSAGE = "This loop started a run; try again when it ends.";
+/** Said when Approve is pressed on an old held run of a check-only loop. */
+export const CHECK_ONLY_APPROVE_MESSAGE = "Plan and Regression no longer open merge requests; use Done to clear this card.";
