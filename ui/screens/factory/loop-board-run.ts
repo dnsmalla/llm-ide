@@ -2,7 +2,10 @@
 // "run-loop" request that the Loop page executes through its own approval, worktree and queue path.
 import { loopUsesInputPath, normalizeInputPath } from "../loop/native/input-path.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
+import { branchDiscardRefusal } from "../loop/native/loop-branch.ts";
+import type { FactoryRunFields, LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
+import type { RunInfo } from "../loop/native/worktree-run.ts";
 
 export type BoardRunLoop = Pick<LoopDefinition, "id" | "config" | "inputPath">;
 
@@ -77,4 +80,53 @@ export function loadRunBarInput(loop: Pick<LoopDefinition, "inputPath">, name: s
 /** Per-viewer convenience only: any storage failure just means no remembered text. */
 export function saveRunBarInput(name: string, input: RunBarInput, storage: Pick<Storage, "setItem"> | null): void {
   try { storage?.setItem(KEY + name, JSON.stringify({ task: input.task })); } catch { /* private mode */ }
+}
+
+const HIDDEN_KEY = "llmide.loopBoardHidden.";
+const HIDDEN_MAX = 200;
+
+/**
+ * Run ids this board has discarded, hidden from its own view only: Discard removes the run's worktree and branch
+ * (reverting every change it made), but the Loop journal is append-only and keeps no "deleted" concept, so there is
+ * nothing to tell the next refresh to leave out except this per-viewer list.
+ */
+export function loadHiddenRunIds(name: string, storage: Pick<Storage, "getItem"> | null): ReadonlySet<string> {
+  try {
+    const raw = storage?.getItem(HIDDEN_KEY + name);
+    if (!raw) return new Set();
+    const v = JSON.parse(raw) as unknown;
+    return Array.isArray(v) ? new Set(v.filter((x): x is string => typeof x === "string")) : new Set();
+  } catch { return new Set(); }
+}
+
+/** Per-viewer convenience only: any storage failure just means the card reappears after a reload. */
+export function saveHiddenRunIds(name: string, ids: ReadonlySet<string>, storage: Pick<Storage, "setItem"> | null): void {
+  try { storage?.setItem(HIDDEN_KEY + name, JSON.stringify([...ids].slice(-HIDDEN_MAX))); } catch { /* private mode */ }
+}
+
+export type DiscardTarget =
+  | { kind: "ok"; info: RunInfo }
+  | { kind: "missing" }
+  | { kind: "refused"; reason: string };
+
+/**
+ * Which worktree a Board card's Discard acts on, or why it may not. The run's OWN journal entry id (`run.id`, a
+ * fresh UUID per run) is never the worktree's runId: a non-Factory loop's worktree is created with the loop's own
+ * slug (shared by every run of that loop), read back here from the run's record
+ * (`fields.worktree.runId` — the same field `reopenWorktree` reads). Using `run.id` for the host calls instead
+ * would always report "no worktree", even when one exists.
+ */
+export function discardTarget(
+  run: LoopRunIndexEntry,
+  fields: Pick<FactoryRunFields, "worktree">,
+  worktrees: readonly RunInfo[],
+  runsOfThisLoop: readonly Pick<LoopRunIndexEntry, "id" | "loopId" | "startedAt">[],
+  runningLoopId: string | null,
+): DiscardTarget {
+  const worktreeRunId = fields.worktree?.runId ?? null;
+  if (!worktreeRunId) return { kind: "missing" };
+  const info = worktrees.find((w) => w.runId === worktreeRunId);
+  if (!info) return { kind: "missing" };
+  const refusal = branchDiscardRefusal(info, runsOfThisLoop, run, runningLoopId);
+  return refusal ? { kind: "refused", reason: refusal } : { kind: "ok", info };
 }

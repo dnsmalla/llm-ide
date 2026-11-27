@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { afterSend, buildRunEvent, loopReadTargets, runBarState, loadRunBarInput, saveRunBarInput } from "../loop-board-run.ts";
+import { afterSend, buildRunEvent, discardTarget, loopReadTargets, runBarState, loadHiddenRunIds, loadRunBarInput, saveHiddenRunIds, saveRunBarInput } from "../loop-board-run.ts";
 
 const stage = (over) => ({ id: "s", name: "S", kind: "skill", order: 0, enabled: true, skillId: "skills/refactor-apply", targetPath: null, ...over });
 const loop = (stages, over = {}) => ({ id: "L1", inputPath: "src", config: { stages, ...(over.workMode ? { workMode: over.workMode } : {}) } });
@@ -44,6 +44,40 @@ test("only the task draft is remembered; the path always comes from the loop", (
   const boom = { getItem() { throw new Error("x"); }, setItem() { throw new Error("x"); } };
   assert.deepEqual(loadRunBarInput({ inputPath: "src" }, "Test", boom), { inputPath: "src", task: "" });
   saveRunBarInput("Test", { inputPath: "", task: "" }, boom);
+});
+
+test("hidden run ids are per board name, survive a reload, and a storage failure never throws", () => {
+  const mem = new Map();
+  const storage = { getItem: (k) => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, v) };
+  assert.deepEqual(loadHiddenRunIds("Test", storage), new Set());
+  saveHiddenRunIds("Test", new Set(["r1", "r2"]), storage);
+  assert.deepEqual(loadHiddenRunIds("Test", storage), new Set(["r1", "r2"]));
+  assert.deepEqual(loadHiddenRunIds("Other", storage), new Set(), "a different board name is unaffected");
+  const boom = { getItem() { throw new Error("x"); }, setItem() { throw new Error("x"); } };
+  assert.deepEqual(loadHiddenRunIds("Test", boom), new Set());
+  saveHiddenRunIds("Test", new Set(["r1"]), boom);
+  assert.deepEqual(loadHiddenRunIds("Test", null), new Set(), "no storage at all");
+});
+
+test("discardTarget: the worktree runId comes from the run's own record, never from the journal entry's own id", () => {
+  // run.id is a fresh UUID per run; a non-Factory loop's worktree is prepared with the loop's slug instead, so the
+  // two never match. The worktree list only carries the slug.
+  const run = { id: "entry-uuid-1", loopId: "L1", loopName: "Refactoring", startedAt: "2026-11-27T00:00:00.000Z" };
+  const fields = { worktree: { runId: "refactoring", branch: "loop/refactoring", baseCommit: "abc", repo: "r" } };
+  const info = { runId: "refactoring", project: "/p", repo: "r", worktree: "/p/system/loop-worktrees/refactoring", branch: "loop/refactoring", baseCommit: "abc" };
+  assert.deepEqual(discardTarget(run, fields, [info], [run], null), { kind: "ok", info });
+  // Looking it up by the journal entry's own id (the bug) would find nothing.
+  assert.deepEqual(discardTarget(run, fields, [{ ...info, runId: run.id }], [run], null), { kind: "missing" });
+  // No record, or a record with no worktree at all: missing, not a crash.
+  assert.deepEqual(discardTarget(run, {}, [info], [run], null), { kind: "missing" });
+  assert.deepEqual(discardTarget(run, { worktree: null }, [info], [run], null), { kind: "missing" });
+  // The worktree once existed but was already removed: not in the current list.
+  assert.deepEqual(discardTarget(run, fields, [], [run], null), { kind: "missing" });
+  // An older run of a loop whose branch a newer run still needs: refused, same rule as the Factory board.
+  const newer = { id: "entry-uuid-2", loopId: "L1", startedAt: "2026-11-27T01:00:00.000Z" };
+  assert.equal(discardTarget(run, fields, [info], [run, newer], null).kind, "refused");
+  // The loop is running right now: refused even though it is the newest run.
+  assert.equal(discardTarget(run, fields, [info], [run], "L1").kind, "refused");
 });
 
 test("the task is whitespace-collapsed in the event", () => {

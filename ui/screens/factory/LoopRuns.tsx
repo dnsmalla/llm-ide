@@ -7,9 +7,11 @@ import { invokeHost } from "../shell/host";
 import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops } from "../loop/native/store.ts";
-import { loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
+import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
+import { decodeWorktreeStatus, discardWarning, type WorktreeStatus } from "../loop/native/ship-model.ts";
+import type { RunInfo } from "../loop/native/worktree-run.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
-import { afterSend, buildRunEvent, loadRunBarInput, runBarState, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
+import { afterSend, buildRunEvent, discardTarget, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
 
@@ -73,6 +75,16 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const pendingTimer = useRef<number | null>(null);
   const clearPending = () => { if (pendingTimer.current !== null) window.clearTimeout(pendingTimer.current); pendingTimer.current = null; setPending(false); };
   const boardLoop = loop !== null && (scopeId ? loop.id === scopeId : loop.name === scope && !ambiguous) ? loop : null;
+  // Run ids this viewer discarded: hidden here only, the journal entry itself is never deleted.
+  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => setHidden(loadHiddenRunIds(scope, storage())), [scope]);
+  const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null);
+  const [confirmWorktreeRunId, setConfirmWorktreeRunId] = useState<string | null>(null);
+  const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
+  const [discardProvider, setDiscardProvider] = useState<"github" | "gitlab" | null>(null);
+  const [readingDiscard, setReadingDiscard] = useState(false);
+  const [discardBusy, setDiscardBusy] = useState(false);
+  const [discardMsg, setDiscardMsg] = useState<string | null>(null);
   const loopId = boardLoop?.id ?? null;
 
   useEffect(() => {
@@ -204,7 +216,8 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     },
   } : null;
 
-  const allCards = liveCard ? [liveCard, ...cards.filter((c) => c.run.id !== liveCard.run.id)] : cards;
+  const shownCards = cards.filter((c) => !hidden.has(c.run.id));
+  const allCards = liveCard ? [liveCard, ...shownCards.filter((c) => c.run.id !== liveCard.run.id)] : shownCards;
 
   const lanes = useMemo(() => {
     const out = [...steps];
@@ -222,12 +235,60 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
+  /** Opens the inline confirm for one card's Discard, after checking it is actually safe to offer (a worktree
+   *  exists, and this is the loop's newest run so its shared branch is not still needed by another one).
+   *  The worktree's own runId is the loop's slug for a non-Factory run (loop_worktree_prepare's `runId` argument,
+   *  NativeLoopScreen's executeLoop), never the journal entry's own id (a fresh UUID per run) — it has to be read
+   *  from the run's record (`decodeFactoryFields(record).worktree.runId`), the same field reopenWorktree reads. */
+  const openDiscard = async (run: LoopRunIndexEntry) => {
+    setDiscardMsg(null);
+    const record = await loadRunRecord(fs, run.id, run.startedAt).catch(() => null);
+    const fields = decodeFactoryFields(record);
+    let worktrees: RunInfo[] = [];
+    try { worktrees = await invokeHost<RunInfo[]>("loop_worktree_list"); } catch { /* treated as "no worktree" below */ }
+    const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
+    const target = discardTarget(run, fields, worktrees, cards.map((c) => c.run), runningLoopId);
+    if (target.kind === "missing") { setDiscardMsg("This run has no worktree to discard: it was already removed, or this run worked directly on the main tree."); return; }
+    if (target.kind === "refused") { setDiscardMsg(target.reason); return; }
+    const worktreeRunId = target.info.runId;
+    setConfirmDiscardId(run.id);
+    setConfirmWorktreeRunId(worktreeRunId);
+    setDiscardStatus(null);
+    setDiscardProvider(fields.ship?.provider ?? null);
+    setReadingDiscard(true);
+    void invokeHost<unknown>("loop_worktree_status", { runId: worktreeRunId }).then(decodeWorktreeStatus).catch(() => null)
+      .then((status) => setDiscardStatus(status)).finally(() => setReadingDiscard(false));
+  };
+
+  /** Removes the run's worktree and branch (reverting every change it made that was never shipped), then hides its
+   *  card: the Loop journal is append-only, so there is nothing to delete there. */
+  const confirmDiscard = async (entryId: string, worktreeRunId: string) => {
+    if (discardBusy) return;
+    setDiscardBusy(true);
+    try {
+      await invokeHost("loop_worktree_remove", { runId: worktreeRunId });
+      setConfirmDiscardId(null);
+      setConfirmWorktreeRunId(null);
+      setDiscardMsg(null);
+      setHidden((h) => {
+        const next = new Set(h);
+        next.add(entryId);
+        saveHiddenRunIds(scope, next, storage());
+        return next;
+      });
+    } catch (e) {
+      setDiscardMsg(`The worktree could not be removed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setDiscardBusy(false);
+    }
+  };
+
   return (
     <div className="fx-board-root">
       <header className="fx-head">
         <div className="fx-head-title">
           <h2>{scope} board</h2>
-          <p className="fx-summary">{cards.length} run{cards.length === 1 ? "" : "s"}</p>
+          <p className="fx-summary">{shownCards.length} run{shownCards.length === 1 ? "" : "s"}</p>
         </div>
         <span className="fx-spacer" />
         <button type="button" className="fx-btn" onClick={() => setReload((n) => n + 1)}>Refresh</button>
@@ -252,6 +313,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         </form>
       ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}
+      {discardMsg ? <p className="fx-error" role="status">{discardMsg}</p> : null}
       <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
         {lanes.map((lane) => {
           const inLane = allCards.filter((c) => c.lane === lane);
@@ -265,7 +327,21 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
                     <header className="fx-run-head"><strong>{run.loopName}</strong><span className="fx-run-status">{statusWord(run.statusCode)}</span><span className="fx-run-time">{when(run.startedAt)}</span></header>
                     <p className="fx-run-summary">{note}</p>
                     <p className="fx-run-meta">{run.durationSeconds ? `${run.durationSeconds}s` : "—"} · {run.iterationsUsed} iteration{run.iterationsUsed === 1 ? "" : "s"}</p>
-                    {isLive ? null : <div className="fx-actions"><button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button></div>}
+                    {isLive ? null : confirmDiscardId === run.id ? (
+                      <div className="fx-actions" role="group" aria-label="Confirm discard">
+                        <span className="fx-hint" role="alert">
+                          Remove this run's worktree and branch? This reverts every change it made that is not already shipped.{" "}
+                          {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, discardProvider ? { provider: discardProvider } : null)}
+                        </span>
+                        <button type="button" className="fx-btn fx-danger" disabled={discardBusy || readingDiscard || !confirmWorktreeRunId} onClick={() => confirmWorktreeRunId && void confirmDiscard(run.id, confirmWorktreeRunId)}>Discard</button>
+                        <button type="button" className="fx-btn" onClick={() => { setConfirmDiscardId(null); setConfirmWorktreeRunId(null); }}>Cancel</button>
+                      </div>
+                    ) : (
+                      <div className="fx-actions">
+                        <button type="button" className="fx-btn" onClick={() => void openRun(run.id, run.startedAt)}>Open run log & plan</button>
+                        <button type="button" className="fx-btn" onClick={() => void openDiscard(run)}>Discard…</button>
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>
