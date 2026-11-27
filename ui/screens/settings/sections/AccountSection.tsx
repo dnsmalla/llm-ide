@@ -74,7 +74,7 @@ export default function AccountSection() {
           <div className="st-row"><Button tone="primary" disabled={busy || !email.trim()} onClick={() => void signIn()}>Sign in</Button></div>
         </form>
       ) : <NeedsHost what="Signing in" />}
-      {(serverMode ?? "local") === "local" ? <SavedLoginRow key={loginRowKey} host={host} /> : null}
+      {(serverMode ?? "local") !== "remote" ? <SavedLoginRow key={loginRowKey} host={host} serverMode={serverMode} /> : null}
     </div>
   );
 }

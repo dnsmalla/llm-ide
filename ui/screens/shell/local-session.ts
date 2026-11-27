@@ -1,12 +1,12 @@
-// Local mode: the signed-in local account is remembered on this computer (the OS keychain, through the host).
-// Once the spawned local core is ready, this binder restores the saved session, so a launch does not ask for the
-// password again. Each refresh rotation is stored back under the signed-in user's email. Only an explicit sign-out
+// Local and ssh-server modes: the signed-in account is remembered on this computer (the OS keychain, through the host;
+// in ssh mode per server). Once the spawned local core is ready (or the ssh forward is connected), this binder restores
+// the saved session, so a launch or a reconnect does not ask for the password again. Each refresh rotation is stored back under the signed-in user's email. Only an explicit sign-out
 // forgets the saved login: a null token (expiry, 401) keeps it.
 //
-// The host decides whether the credentials may be used at all (only the local core it spawned and verified, checked
-// again at each use); the webview only asks and reacts. The password is never read here: the host returns the
+// The host decides whether the credentials may be used at all (only the core it spawned, or the server it verified
+// through the forward, checked again at each use); the webview only asks and reacts. The password is never read here: the host returns the
 // refresh token only.
-import { host, isHostAvailable } from "./host";
+import { canKeepLogin, host, isHostAvailable, type CoreStatus } from "./host";
 import { core, coreStatusStore } from "./runtime";
 import {
   clearSavedLoginRejected,
@@ -30,8 +30,8 @@ export interface LocalSessionCore {
 }
 
 export interface LocalSessionOptions {
-  /** True while the status says the local core is spawned. Only then is a refused read worth one retry. */
-  isLocalSpawned?: () => boolean;
+  /** True while the status says the core is trusted (`canKeepLogin`). Only then is a refused read worth one retry. */
+  isTrustedCore?: () => boolean;
   /** Waits before the retry. Injected so the tests need no timers. */
   pause?: (ms: number) => Promise<void>;
 }
@@ -62,7 +62,7 @@ export function createLocalSessionBinder(
   onRejected: (refused: boolean) => void = () => undefined,
   options: LocalSessionOptions = {},
 ): () => void {
-  const isLocalSpawned = options.isLocalSpawned ?? (() => false);
+  const isTrustedCore = options.isTrustedCore ?? (() => false);
   const pause = options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   let stopped = false;
   const off = sessionCore.subscribeRefreshToken((refresh) => {
@@ -73,12 +73,12 @@ export function createLocalSessionBinder(
     void sessionHost.localLoginStoreRefresh(email, refresh).catch(() => undefined);
   });
 
-  // Reads the stored token. A refused core gets one retry after a pause, but only while the status says local+spawned.
+  // Reads the stored token. A refused core gets one retry after a pause, but only while the status says the core is trusted.
   const readToken = async (): Promise<string | null> => {
     try {
       return await sessionHost.localLoginSession();
     } catch (e) {
-      if (codeOf(e) !== "untrusted_core" || !isLocalSpawned()) throw e;
+      if (codeOf(e) !== "untrusted_core" || !isTrustedCore()) throw e;
       await pause(RESTORE_RETRY_MS);
       return await sessionHost.localLoginSession();
     }
@@ -126,7 +126,7 @@ export function createLocalSessionBinder(
   return () => { stopped = true; off(); };
 }
 
-/** Called by the shell only in local mode, once the spawned core is ready. */
+/** Called by the shell once the spawned local core is ready, or the ssh forward is connected (never in hub mode). */
 export function bindLocalSession(): () => void {
   if (!isHostAvailable()) return () => {};
   return createLocalSessionBinder(
@@ -134,22 +134,27 @@ export function bindLocalSession(): () => void {
     host as unknown as LocalSessionHost,
     (refused) => setSavedLoginRejected(refused),
     {
-      isLocalSpawned: () => {
-        const s = coreStatusStore.getSnapshot().status;
-        return s?.mode === "local" && s.trust === "spawned";
-      },
+      isTrustedCore: () => canKeepLogin(coreStatusStore.getSnapshot().status),
     },
   );
 }
 
 /**
- * Explicit sign-out in local mode also forgets the saved login (so the next launch asks for the password). Only
- * local mode: a hub sign-out must not touch the local login.
+ * Explicit sign-out in local or ssh mode also forgets the saved login (so the next launch or connect asks for the
+ * password; in ssh mode it is the login kept for the connected server). Never in hub mode: a hub sign-out must not
+ * touch it. Not tied to `canKeepLogin`: a forget must work even while the forward is reconnecting.
  */
+export async function forgetSavedLoginFor(
+  status: CoreStatus | null,
+  sessionHost: Pick<LocalSessionHost, "localLoginForget">,
+): Promise<void> {
+  if (status?.mode !== "local" && status?.mode !== "ssh") return;
+  await sessionHost.localLoginForget();
+}
+
 export async function forgetSavedLocalLogin(): Promise<void> {
   if (!isHostAvailable()) return;
-  if (coreStatusStore.getSnapshot().status?.mode !== "local") return;
-  await host.localLoginForget();
+  await forgetSavedLoginFor(coreStatusStore.getSnapshot().status, host as unknown as LocalSessionHost);
 }
 
 /**

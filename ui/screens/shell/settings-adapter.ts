@@ -367,9 +367,11 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
       // A new sign-in starts with a clean slate: a refused-password notice from an earlier attempt must not outlive it.
       clearSavedLoginRejected();
       setSavedLoginNote(null);
-      // An explicit sign-out in local mode also forgets the saved login. A failure is not swallowed here: the Saved
-      // login row then still shows the login, and the user can forget it there.
-      if (d.coreStatus()?.mode === "local") await d.invoke("local_login_forget");
+      // An explicit sign-out in local or ssh mode also forgets the saved login (ssh: the one kept for this server;
+      // never hub). A failure is not swallowed here: the Saved login row then still shows the login, and the user
+      // can forget it there.
+      const mode = d.coreStatus()?.mode;
+      if (mode === "local" || mode === "ssh") await d.invoke("local_login_forget");
     },
     async localLoginStatus() {
       return decodeLocalLoginStatus(await d.invoke<unknown>("local_login_status"));

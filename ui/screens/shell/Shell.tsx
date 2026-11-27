@@ -7,7 +7,7 @@ import { GuideDialog } from "../welcome/WelcomeScreen";
 import { TourOverlay, useTour } from "./TourOverlay";
 import { SectionToolbar } from "./Toolbar";
 import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
-import { host as shellHost, invokeHost, subscribeNoProject, subscribeRootMissing } from "./host";
+import { host as shellHost, invokeHost, localSessionKey as hostLocalSessionKey, subscribeNoProject, subscribeRootMissing } from "./host";
 import { projectStore } from "./project-store";
 import { backgroundRoot } from "./background-scope.ts";
 import { serverFolderHandlerFor, setServerFolderHandler } from "./server-folder";
@@ -160,13 +160,11 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     if (!remoteSessionReady) return undefined;
     return bindRemoteSession();
   }, [remoteSessionReady]);
-  // Local mode: restore the remembered local login once the spawned core is ready, and again after each core restart
-  // (a restarted core has no session in memory; the keychain login is the way back in). The key moves only with the
-  // URL and restart count, so ordinary status polls do not rebind.
-  const localCore = coreStatusStore.getSnapshot().status;
-  const localSessionKey = !remoteMode && !view.down && localCore?.mode === "local" && localCore.trust === "spawned" && localCore.state === "ready"
-    ? `${localCore.url}#${localCore.restarts}`
-    : "";
+  // Local and ssh modes: restore the remembered login once the spawned core is ready (or the ssh forward is connected),
+  // and again after each core restart or ssh reconnect (a restarted core has no session in memory; the keychain login is
+  // the way back in). The key moves only with the mode, URL and restart count, and is empty while the link is down,
+  // so ordinary status polls do not rebind. `remoteMode` is hub only, so bindRemoteSession never runs in ssh mode.
+  const localSessionKey = hostLocalSessionKey(coreStatusStore.getSnapshot().status, view.down);
   useEffect(() => {
     if (!localSessionKey) return undefined;
     return bindLocalSession();

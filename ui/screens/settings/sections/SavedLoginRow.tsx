@@ -13,11 +13,11 @@ import {
 } from "../../shell/saved-login-state.ts";
 
 /**
- * The login kept on this computer (local mode). It shows the saved email and never the password. "Change" verifies a
+ * The login kept on this computer (local mode), or in ssh mode the login kept here for the connected server. It shows the saved email and never the password. "Change" verifies a
  * new email and password with the local core before anything is stored (the host does that). "Forget" removes the
  * saved login only; the current session stays signed in until the user signs out.
  */
-export function SavedLoginRow({ host }: { host: SettingsHost }) {
+export function SavedLoginRow({ host, serverMode }: { host: SettingsHost; serverMode?: string }) {
   const [saved, setSaved] = useState<{ saved: boolean; email: string | null } | null>(null);
   const [editing, setEditing] = useState(false);
   const [email, setEmail] = useState("");
@@ -79,7 +79,7 @@ export function SavedLoginRow({ host }: { host: SettingsHost }) {
       <ErrorText text={error} />
       {forgetFailed ? <p role="alert">Sign-out could not remove the saved login from this computer. Forget it below.</p> : null}
       {note ? <p role="status">{note}</p> : null}
-      <p><span className="st-label">Saved login </span>{saved?.saved ? (saved.email ?? "Saved") : "Not saved"}</p>
+      <p><span className="st-label">{serverMode === "ssh" ? "Saved login for this server " : "Saved login "}</span>{saved?.saved ? (saved.email ?? "Saved") : "Not saved"}</p>
       <div className="st-row">
         {host.localLoginChange ? <Button onClick={() => setEditing((v) => !v)}>{editing ? "Cancel" : "Change"}</Button> : null}
         {(saved?.saved || forgetFailed) && host.localLoginForget ? <Button tone="danger" disabled={busy} onClick={() => void forget()}>Forget</Button> : null}

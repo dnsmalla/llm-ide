@@ -35,7 +35,7 @@ test("a refused read from a busy core is retried once after a pause, then restor
   const pauses = [];
   const outcomes = [];
   const off = createLocalSessionBinder(h.core, h.host, (r) => outcomes.push(r), {
-    isLocalSpawned: () => true,
+    isTrustedCore: () => true,
     pause: async (ms) => { pauses.push(ms); },
   });
   await tick();
@@ -50,7 +50,7 @@ test("an untrusted core that is not local+spawned is not retried and shows nothi
   const pauses = [];
   const outcomes = [];
   const off = createLocalSessionBinder(h.core, h.host, (r) => outcomes.push(r), {
-    isLocalSpawned: () => false,
+    isTrustedCore: () => false,
     pause: async (ms) => { pauses.push(ms); },
   });
   await tick();
@@ -64,7 +64,7 @@ test("a core that stays untrusted after the retry gives up silently", async () =
   const h = fakes([{ code: "untrusted_core" }, { code: "untrusted_core" }]);
   const outcomes = [];
   const off = createLocalSessionBinder(h.core, h.host, (r) => outcomes.push(r), {
-    isLocalSpawned: () => true,
+    isTrustedCore: () => true,
     pause: async () => undefined,
   });
   await tick();

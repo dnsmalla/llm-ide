@@ -321,6 +321,28 @@ export function sshForwardReady(s: CoreStatus): boolean {
 }
 
 /**
+ * True when a saved login may be used with this core right now: the local core this app spawned, or a connected ssh
+ * forward. The host re-checks this itself before it releases any credential; the UI uses it only to offer the choice
+ * and to decide whether a refused read is worth one retry. Never in hub mode.
+ */
+export function canKeepLogin(s: CoreStatus | null): boolean {
+  if (!s) return false;
+  if (s.mode === "local") return s.trust === "spawned";
+  return sshForwardReady(s);
+}
+
+/**
+ * Key of the effect that binds the saved login. Empty means "do not bind". It changes when the core restarts, when the
+ * URL changes, and across an ssh reconnect (a non-ready link gives "", so the effect cleans up and binds again).
+ * Local mode additionally waits for `ready`; the ssh forward has no `ready` state, `sshForwardReady` covers it.
+ */
+export function localSessionKey(s: CoreStatus | null, down: boolean): string {
+  if (!s || down || !canKeepLogin(s)) return "";
+  if (s.mode === "local" && s.state !== "ready") return "";
+  return `${s.mode}:${s.url}#${s.restarts}`;
+}
+
+/**
  * The core URL the shell may hand out for requests: a ready core the host spawned, or a usable ssh forward. Anything
  * else is `null`, so no request (and no credential) is sent to a port that is not verified right now.
  */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } fro
 import { StatusBanner } from "@llmide/ui-kit";
 import { CoreError, isAbortError, type CoreClient } from "./core";
 import { describeCoreErrorFor } from "./core-explain";
-import { host, type CoreStatus } from "./host";
+import { canKeepLogin, host, type CoreStatus } from "./host";
 import {
   clearSavedLoginRejected,
   savedLoginNote,
@@ -16,6 +16,8 @@ import type { TrustGate } from "./trust-gate";
 
 /** Shown when the core is not the one this app started: the login is used for this sign-in only, not saved. */
 const NOTE_NOT_SAVED_ADOPTED = "This core is not the one the app started, so your login was not saved.";
+/** Shown in ssh mode when the host could not verify the server through the forward just now. */
+const NOTE_NOT_SAVED_SSH = "Signed in, but the login was not kept: the connection to the server could not be verified just now. Sign in again to keep it.";
 /** Shown when an unticked sign-in could not clear a login saved earlier. */
 const NOTE_FORGET_FAILED = "Could not remove the saved login; open Settings → Account to forget it.";
 
@@ -145,8 +147,12 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const abort = useRef<AbortController | null>(null);
-  // Local mode only: the checkbox offers to keep the login on this computer. A hub login is never kept here.
-  const localMode = getStatus?.()?.mode === "local";
+  // Local mode (any trust: an adopted core gets the "not saved" note) and a ready ssh forward offer to keep the login on
+  // this computer. A hub login is never kept here.
+  const status = getStatus?.() ?? null;
+  const sshMode = status?.mode === "ssh";
+  const localMode = status?.mode === "local";
+  const keepOffered = localMode || (sshMode && canKeepLogin(status));
   const rejectedLogin = useSyncExternalStore(subscribeSavedLoginRejected, savedLoginRejected, () => false);
   const savedNote = useSyncExternalStore(subscribeSavedLoginNote, savedLoginNote, () => null);
 
@@ -181,7 +187,7 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
     setNotice(null);
     setSavedLoginNote(null);
     // Read before the reset below. The checkbox is absent (and so unchecked) outside local mode.
-    const keepSignedIn = localMode && data.get("keepSignedIn") !== null;
+    const keepSignedIn = keepOffered && data.get("keepSignedIn") !== null;
     try {
       if (mode === "create") {
         await client.register(email, password, displayName || undefined, ctl.signal, invite || undefined);
@@ -196,13 +202,14 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
           refresh = await host.localLoginSave(email, password);
         } catch (err) {
           if (codeOf(err) !== "untrusted_core") throw err;
-          // An adopted (dev) core cannot hold the login: sign in normally, and say the login was not kept.
-          setSavedLoginNote(NOTE_NOT_SAVED_ADOPTED);
+          // An adopted (dev) core, or an ssh server not verified just now, cannot hold the login: sign in normally,
+          // and say the login was not kept.
+          setSavedLoginNote(sshMode ? NOTE_NOT_SAVED_SSH : NOTE_NOT_SAVED_ADOPTED);
         }
         if (refresh) await client.restoreSession(refresh, ctl.signal);
         else await client.login(email, password, ctl.signal);
       } else {
-        if (localMode) {
+        if (keepOffered) {
           // Unticked: a login saved earlier must not survive this sign-in. A failed forget is only a warning, and only
           // when the login is still saved; the sign-in itself goes on.
           let forgotten = true;
@@ -243,7 +250,9 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
         The account lives on the LLM-IDE core you connect to.{" "}
         {localMode
           ? "With “Keep me signed in” ticked, the email, password and session are kept in this computer's keychain and reused at every start. Untick it to sign in again each time the app starts. Signing out forgets the saved login."
-          : "You sign in again each time the app starts."}
+          : keepOffered
+            ? "With “Keep me signed in” ticked, the email, password and session are kept in this computer's keychain for this server and reused each time you connect to it. Untick it to sign in again each time. Signing out forgets the saved login."
+            : "You sign in again each time the app starts."}
       </p>
       {savedNote ? <div role="status" className="sh-panel-text">{savedNote}</div> : null}
       {rejectedLogin && !error ? (
@@ -279,10 +288,10 @@ export function LoginPanel({ client, gate, getStatus }: { client: CoreClient; ga
             </button>
           </div>
         </label>
-        {localMode && (
+        {keepOffered && (
           <label className="sh-field">
             <input name="keepSignedIn" type="checkbox" defaultChecked disabled={pending} />
-            <span>Keep me signed in on this computer</span>
+            <span>{localMode ? "Keep me signed in on this computer" : "Keep me signed in on this computer for this server"}</span>
           </label>
         )}
         {error && (
