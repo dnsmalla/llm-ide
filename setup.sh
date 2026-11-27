@@ -146,7 +146,11 @@ echo "⚙️  Wiring central skills kit for all agents..."
 if [ -f "$REPO_ROOT/.gitmodules" ] && grep -q 'path = \.skills' "$REPO_ROOT/.gitmodules" 2>/dev/null; then
     git -C "$REPO_ROOT" submodule update --init --recursive .skills
 fi
-if [ -f "$REPO_ROOT/scripts/install-skills.sh" ]; then
+# NOTE: the GitLab partial mirror (scripts/gitlab-export-paths.txt) ships without
+# .skills; install-skills.sh exits 1 there, which would end setup under set -e.
+if [ ! -f "$REPO_ROOT/.skills/scripts/install.sh" ]; then
+    echo "⚠️  .skills kit not present — skip skills wiring"
+elif [ -f "$REPO_ROOT/scripts/install-skills.sh" ]; then
     bash "$REPO_ROOT/scripts/install-skills.sh"
     echo "✅ Skills installed (Claude / Cursor / Codex / .agents / Gemini)"
 else
