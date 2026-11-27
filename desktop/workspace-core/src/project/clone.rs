@@ -281,6 +281,8 @@ fn code_dir(root: &Path) -> PathBuf {
 /// The destination `code/<repo>`; refuses an existing path and any name that is not one plain component.
 pub fn destination(root: &Path, name: &str) -> Result<PathBuf, String> {
     let name = folder_name("", name).ok_or_else(|| "invalid repository name".to_string())?;
+    // `code/` may be a link to somewhere else; `create_dir_all` and git would follow it out of the project.
+    crate::fs::ensure_writable_inside(root, "code")?;
     let dest = code_dir(root).join(&name);
     if dest.exists() {
         return Err(format!("code/{name} already exists"));
@@ -631,6 +633,23 @@ mod tests {
         std::fs::create_dir_all(root.join("code/repo")).unwrap();
         assert!(destination(&root, "repo").is_err());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clone_plan_refuses_a_code_link_that_leaves_the_root() {
+        let base = std::env::temp_dir().join(format!("llmide-clone-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let (root, outside) = (base.join("root"), base.join("outside"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let root = std::fs::canonicalize(&root).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("code")).unwrap();
+        let req = CloneRequest { provider: "github".into(), url: "o/r".into(), token: None, folder: None, grant: None };
+        let error = plan(&root, &req).unwrap_err();
+        assert!(error.contains("code resolves outside the project root"), "{error}");
+        assert_eq!(std::fs::read_dir(&outside).unwrap().count(), 0, "nothing was created outside");
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

@@ -269,3 +269,94 @@ fn rebuild_fills_a_plain_folder_and_keeps_existing_files() {
     rebuild(&root).unwrap();
     assert_eq!(fs::read(root.join("system/project.json")).unwrap(), marker);
 }
+
+#[cfg(unix)]
+#[test]
+fn rebuild_refuses_a_linked_folder_that_leaves_the_root_and_writes_nothing() {
+    let root = scratch("link-out-root");
+    let outside = scratch("link-out-target");
+    std::os::unix::fs::symlink(&*outside, root.join("system")).unwrap();
+    let error = rebuild(&root).unwrap_err();
+    assert!(error.contains("resolves outside the project root"), "{error}");
+    assert_eq!(fs::read_dir(&*outside).unwrap().count(), 0, "nothing was written through the link");
+    let names: Vec<_> = fs::read_dir(&*root).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(names, ["system"], "a refusal leaves no half layout behind: {names:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_accepts_a_link_that_stays_inside_the_root() {
+    let root = scratch("link-in-root");
+    fs::create_dir_all(root.join("elsewhere")).unwrap();
+    std::os::unix::fs::symlink(root.join("elsewhere"), root.join("code")).unwrap();
+    rebuild(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_refuses_a_linked_template_folder_and_writes_nothing() {
+    let root = scratch("link-out-template-root");
+    let outside = scratch("link-out-template-target");
+    fs::create_dir_all(root.join("templates")).unwrap();
+    std::os::unix::fs::symlink(&*outside, root.join("templates/meeting-note")).unwrap();
+    let error = rebuild(&root).unwrap_err();
+    assert!(error.contains("resolves outside the project root"), "{error}");
+    assert_eq!(fs::read_dir(&*outside).unwrap().count(), 0, "nothing was written through the link");
+    assert!(!root.join("system").exists(), "a refusal leaves no half layout behind");
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_tolerates_a_seed_file_that_is_a_link() {
+    let root = scratch("seed-link-root");
+    let outside = scratch("seed-link-target");
+    let target = outside.join("shared.md");
+    fs::write(&target, b"shared bytes").unwrap();
+    std::os::unix::fs::symlink(&target, root.join("README.md")).unwrap();
+    rebuild(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+    assert_eq!(fs::read(&target).unwrap(), b"shared bytes", "the link was not written through");
+}
+
+#[test]
+fn every_scaffolded_file_sits_in_a_checked_directory() {
+    let root = scratch("checked-dirs");
+    rebuild(&root).unwrap();
+    // On the complete tree every folder exists, so this is exactly the file-receiving folders plus the templates.
+    let checked: Vec<std::path::PathBuf> = preflight_dirs(&root).iter().map(std::path::PathBuf::from).collect();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let parent = path.parent().unwrap().strip_prefix(&*root).unwrap();
+            assert!(parent.as_os_str().is_empty() || checked.iter().any(|c| c == parent), "{} sits in an unchecked folder", path.display());
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_allows_an_outside_link_that_receives_no_write() {
+    let root = scratch("link-nowrite-root");
+    let outside = scratch("link-nowrite-target");
+    std::os::unix::fs::symlink(&*outside, root.join("code")).unwrap();
+    rebuild(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+    assert_eq!(fs::read_dir(&*outside).unwrap().count(), 0, "nothing was written into the linked folder");
+}
+
+#[cfg(unix)]
+#[test]
+fn rebuild_refuses_a_linked_folder_that_would_receive_a_file() {
+    let root = scratch("link-gitkeep-root");
+    let outside = scratch("link-gitkeep-target");
+    std::os::unix::fs::symlink(&*outside, root.join("data")).unwrap();
+    let error = rebuild(&root).unwrap_err();
+    assert!(error.contains("resolves outside the project root"), "{error}");
+    assert_eq!(fs::read_dir(&*outside).unwrap().count(), 0, "no .gitkeep appeared outside");
+}

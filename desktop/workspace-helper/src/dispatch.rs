@@ -386,6 +386,31 @@ mod tests {
         assert_eq!(std::fs::read_to_string(project.join("CLAUDE.md")).unwrap(), "mine", "an existing file is never overwritten");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rebuild_refuses_a_link_out_of_the_folder() {
+        let mut f = Fixture::new("rebuild-link-out");
+        let project = f.open_plain_folder();
+        std::os::unix::fs::symlink(&f.outside, project.join("system")).unwrap();
+        let reply = f.call(r#"{"id":1,"cmd":"project_rebuild","args":{}}"#);
+        assert_eq!(code_of(&reply), "outside_root");
+        assert_eq!(std::fs::read_dir(&f.outside).unwrap().count(), 0, "nothing was written through the link");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn clone_refuses_a_code_link_out_of_the_folder() {
+        let mut f = Fixture::new("clone-link-out");
+        let project = f.open_plain_folder();
+        std::os::unix::fs::symlink(&f.outside, project.join("code")).unwrap();
+        use_fake_git(&mut f, FAST_GIT);
+        // The fake git script itself lives in `outside`, so count what is there before the call.
+        let before = std::fs::read_dir(&f.outside).unwrap().count();
+        let reply = f.call(&clone_line(1, "o/r", None));
+        assert_eq!(code_of(&reply), "clone_refused");
+        assert_eq!(std::fs::read_dir(&f.outside).unwrap().count(), before, "nothing was created outside");
+    }
+
     #[test]
     fn opening_an_empty_folder_scaffolds_it() {
         let mut f = Fixture::new("open-empty");

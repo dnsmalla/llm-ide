@@ -942,13 +942,26 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   after a reconnect does not, so a reconnect never writes. Rebuild (`project_rebuild`) works in any open server folder and
   creates the missing layout and the marker. Every write is write-if-absent, so an edited file keeps its text. The
   core calls that New project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are
-  the only other writes to the project. Pinned by the workspace-helper tests `create_refuses_existing_name`,
+  the only other writes to the project. The scaffold refuses a path that resolves outside the project root, as the
+  Explorer's file commands do (`<path> resolves outside the project root`; over SSH, Rebuild answers `outside_root`).
+  It checks every folder it would create or write a file into before the first write, so a refusal writes nothing.
+  A link that stays inside the project folder is allowed, and so is an existing linked folder that receives no
+  write (for example `code` linked to another disk); a broken link in a checked folder is refused the same way. A seed file that is itself a link is not a refusal: files are created only
+  when absent and never through a link, so only a linked folder can carry a write out. The rule is the same locally
+  and on the server. Pinned by the workspace-helper tests `create_refuses_existing_name`,
   `create_allows_home_refuses_outside`, `rebuild_scaffolds_a_plain_folder_and_keeps_existing_files`,
   `opening_an_empty_folder_scaffolds_it`, `opening_a_non_empty_plain_folder_writes_nothing` and
   `reopening_keeps_the_marker_byte_for_byte`, `opening_without_the_scaffold_flag_writes_nothing` and
   `a_scaffold_failure_does_not_fail_the_open`, by the desktop tests `a_user_open_sends_the_scaffold_flag` and
   `reconnect_reopens_folder_and_reregisters_watch` (the reconnect re-open sends no `scaffold`), by the workspace-core tests `ensure_scaffold_fills_an_empty_folder` and
-  `ensure_scaffold_leaves_a_non_empty_folder_alone`, and by the live harness project steps in
+  `ensure_scaffold_leaves_a_non_empty_folder_alone`,
+  `rebuild_refuses_a_linked_folder_that_leaves_the_root_and_writes_nothing`,
+  `rebuild_refuses_a_linked_template_folder_and_writes_nothing`,
+  `rebuild_refuses_a_linked_folder_that_would_receive_a_file`,
+  `rebuild_allows_an_outside_link_that_receives_no_write`, `rebuild_tolerates_a_seed_file_that_is_a_link`,
+  `every_scaffolded_file_sits_in_a_checked_directory` and `rebuild_accepts_a_link_that_stays_inside_the_root`, by
+  the workspace-helper test
+  `rebuild_refuses_a_link_out_of_the_folder`, and by the live harness project steps in
   `desktop/src-tauri/src/ssh_live.rs`.
 - **The clone token exists only in git's child environment on the server.** The desktop puts the token in the
   helper request, which travels on the SSH channel's stdin. The helper passes it to git only through git's
@@ -966,8 +979,10 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   `extension/tests/clone-credential.test.mjs` and `extension/tests/clone-redeem-key-server.test.mjs`.
 - **A clone runs in any open server folder and lands in `code/<name>`.** The helper's `clone_start` uses the same
   `clone::plan` as the desktop, so the folder does not need `system/project.json`, and the Repositories card always
-  offers `<folder>/code/<repo>` as the destination. Pinned by the workspace-helper test
-  `clone_in_a_plain_folder_lands_in_code`.
+  offers `<folder>/code/<repo>` as the destination. A `code` link that leaves the folder is refused before anything is
+  created (`clone_refused` over SSH, with `<path> resolves outside the project root`). Pinned by the workspace-helper
+  tests `clone_in_a_plain_folder_lands_in_code` and `clone_refuses_a_code_link_out_of_the_folder`, and by the
+  workspace-core test `clone_plan_refuses_a_code_link_that_leaves_the_root`.
 - **Clone results arrive as events, and only one clone runs at a time on each connection.** The helper answers `repo_clone` at once and
   sends the result as a `clone` event, so requests keep being answered during a clone (`requests_are_answered_while_a_clone_runs`).
   The `repo_clone` reply is `{started: true, id}`, and every `clone` event carries that `id`. The desktop accepts only

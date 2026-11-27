@@ -13,6 +13,8 @@ pub fn adopt_existing(root: &Path, req: &CloneRequest, git: &Path) -> Option<Clo
     let host = provider_host(&req.provider)?;
     let repo_ref = parse_repo(&req.url, &req.provider)?;
     let name = target_name(req, &repo_ref).ok()?;
+    // `code` itself may be a link out of the project: look at nothing (not even with git, read-only) beyond the root.
+    crate::fs::ensure_writable_inside(root, "code").ok()?;
     let dest = root.join("code").join(&name);
     // A symlink could point the recorded path outside the project; only real directories are adopted, `code/<name>`
     // and its `.git` alike (a `.git` file names a git dir elsewhere), and the folder must resolve inside the root.
@@ -144,6 +146,20 @@ mod tests {
         assert_eq!(split_remote("https://gitlab.com@evil.com/g/p").map(|r| r.0), Some("evil.com".into()));
         assert_eq!(split_remote("https://evil.com/@gitlab.com/g/p").map(|r| r.0), Some("evil.com".into()));
         assert_eq!(split_remote("git@evil:gitlab.com/g/p").map(|r| r.0), Some("evil".into()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn adopt_existing_ignores_a_code_link_that_leaves_the_root() {
+        let root = project_with_clone("codelink", "app", "https://github.com/o/app.git");
+        let outside = std::env::temp_dir().join(format!("llmide-adopt-out-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::rename(root.join("code"), outside.join("code")).unwrap();
+        std::os::unix::fs::symlink(outside.join("code"), root.join("code")).unwrap();
+        assert_eq!(adopt_existing(&root, &request("github", "o/app"), &git()), None);
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]
