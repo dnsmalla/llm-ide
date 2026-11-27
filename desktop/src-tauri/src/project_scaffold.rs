@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-pub use llmide_workspace_core::project::scaffold::{scaffold, validate_name, NewProject};
+pub use llmide_workspace_core::project::scaffold::validate_name;
 
 /// Creates `<parent>/<name>` and scaffolds it. Returns the canonical project root.
 pub fn create_project(parent: &Path, name: &str) -> Result<PathBuf, String> {

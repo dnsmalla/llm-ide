@@ -144,7 +144,7 @@ pub fn memory(root: &Path) -> ProjectMemory {
 /// The project marker's metadata, or a fresh identity derived from the folder name when the marker is missing.
 /// Never invents a different display name when the marker exists.
 pub fn project_meta(root: &Path) -> NewProject {
-    let fallback_name = root.file_name().and_then(|n| n.to_str()).unwrap_or("Project").to_string();
+    let fallback_name = crate::text::folder_display_name(root);
     let text = std::fs::read_to_string(root.join("system/project.json")).unwrap_or_default();
     let v: serde_json::Value = serde_json::from_str(&text).unwrap_or(serde_json::Value::Null);
     let str_of = |key: &str| v.get(key).and_then(|x| x.as_str()).map(str::to_string);
@@ -223,6 +223,14 @@ mod tests {
     }
 
     #[test]
+    fn project_meta_fallback_name_matches_open_time_scaffolding() {
+        // Same plain folder must get one display name whether it was scaffolded on open or by Rebuild.
+        let bare = scratch("bare-name");
+        assert_eq!(project_meta(&bare).display_name, crate::text::folder_display_name(&bare));
+        let _ = fs::remove_dir_all(&bare);
+    }
+
+    #[test]
     fn project_meta_preserves_the_marker_and_falls_back_to_the_folder_name() {
         let root = scratch("meta");
         fs::create_dir_all(root.join("system")).unwrap();
@@ -237,7 +245,7 @@ mod tests {
         assert_eq!(p.language, "ja");
         let bare = scratch("bare-meta");
         let q = project_meta(&bare);
-        assert_eq!(q.display_name, bare.file_name().unwrap().to_string_lossy());
+        assert_eq!(q.display_name, crate::text::folder_display_name(&bare));
         assert!(!q.id.is_empty());
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&bare);

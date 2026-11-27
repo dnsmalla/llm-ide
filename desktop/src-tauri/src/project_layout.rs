@@ -35,7 +35,7 @@ pub(crate) fn ssh_memory(remote: &Remote, connector: &dyn Connector) -> R<Value>
     workspace_backend::project_call_with(remote, connector, "project_memory", json!({}))
 }
 
-/// SSH branch of Rebuild: the helper's `project_rebuild`, which refuses a folder that is not a project.
+/// SSH branch of Rebuild: the helper's `project_rebuild`, which runs the same scaffold on the open server folder.
 pub(crate) fn ssh_rebuild(remote: &Remote, connector: &dyn Connector) -> R<Value> {
     workspace_backend::project_call_with(remote, connector, "project_rebuild", json!({}))
 }
@@ -64,7 +64,7 @@ pub async fn project_memory() -> Result<Value, CommandError> {
 
 /// Re-create missing canonical folders/files for the active project (the Mac's "Rebuild missing folders").
 /// Idempotent: `scaffold::scaffold` only writes files that are absent, so user edits are never replaced.
-/// In SSH mode the helper does this only for a folder that is already a project; any other folder is refused.
+/// In SSH mode the helper runs the same scaffold on the open server folder.
 #[tauri::command]
 pub async fn project_rebuild_folders() -> Result<(), CommandError> {
     if workspace_backend::is_ssh_mode() {
@@ -72,5 +72,5 @@ pub async fn project_rebuild_folders() -> Result<(), CommandError> {
         return Ok(());
     }
     let root = active_root()?;
-    Ok(blocking(move || scaffold::scaffold(&root, &layout::project_meta(&root))).await??)
+    Ok(blocking(move || scaffold::rebuild(&root)).await??)
 }

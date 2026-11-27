@@ -61,7 +61,8 @@ fn run_command(session: &mut Session, req: &Request) -> R<Value> {
     let cmd = req.cmd.as_str();
     match cmd {
         "hello" => Ok(session.hello()),
-        "open" => session.open(&arg::<String>(args, "root")?),
+        // `scaffold` is additive: absent or not a boolean means false, so an older desktop (which never sends it) keeps working.
+        "open" => session.open(&arg::<String>(args, "root")?, args.get("scaffold").and_then(Value::as_bool).unwrap_or(false)),
         "list_dirs" => session.list_dirs(&arg::<String>(args, "path")?, arg_or_false(args, "hidden")?),
         "mkdir" => session.mkdir(&arg::<String>(args, "path")?, &arg::<String>(args, "name")?),
         "project_search_start" => session.search_start(arg(args, "req")?),
@@ -235,21 +236,30 @@ mod tests {
             std::fs::canonicalize(&self.home).unwrap()
         }
 
-        /// Makes `home/project` with New project and opens it. A clone needs a real project, so the clone tests use
-        /// this instead of `open_project`, which makes a plain folder.
+        /// Makes `home/project` with New project (a full scaffold) and opens it as the user would (`scaffold: true`).
         fn open_new_project(&mut self) -> PathBuf {
             ok_of(&self.call(&create_line(1, "~", "project")));
             let project = self.home.join("project");
-            let reply = self.call(&json!({"id": 2, "cmd": "open", "args": {"root": project.to_string_lossy()}}).to_string());
+            let reply = self.call(&json!({"id": 2, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": true}}).to_string());
             assert!(reply.get("ok").is_some(), "open failed: {reply}");
             std::fs::canonicalize(&project).unwrap()
         }
 
-        /// Opens `home/project` (created here) as the session's folder.
+        /// Opens `home/project` as a NON-empty plain folder (one file, no marker), which opening leaves alone.
+        fn open_plain_folder(&mut self) -> PathBuf {
+            let project = self.home.join("project");
+            std::fs::create_dir_all(&project).unwrap();
+            std::fs::write(project.join("notes.txt"), "mine notes").unwrap();
+            let reply = self.call(&json!({"id": 1, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": true}}).to_string());
+            assert!(reply.get("ok").is_some(), "open failed: {reply}");
+            std::fs::canonicalize(&project).unwrap()
+        }
+
+        /// Opens `home/project` (created here, empty) as the user would (`scaffold: true`), so it is scaffolded as a project.
         fn open_project(&mut self) -> PathBuf {
             let project = self.home.join("project");
             std::fs::create_dir_all(&project).unwrap();
-            let reply = self.call(&json!({"id": 1, "cmd": "open", "args": {"root": project.to_string_lossy()}}).to_string());
+            let reply = self.call(&json!({"id": 1, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": true}}).to_string());
             assert!(reply.get("ok").is_some(), "open failed: {reply}");
             std::fs::canonicalize(&project).unwrap()
         }
@@ -365,15 +375,83 @@ mod tests {
     }
 
     #[test]
-    fn rebuild_refuses_plain_folder_and_writes_nothing() {
+    fn rebuild_scaffolds_a_plain_folder_and_keeps_existing_files() {
         let mut f = Fixture::new("rebuild-plain");
+        let project = f.open_plain_folder();
+        std::fs::write(project.join("CLAUDE.md"), "mine").unwrap();
+        ok_of(&f.call(r#"{"id":1,"cmd":"project_rebuild","args":{}}"#));
+        assert!(project.join("system/project.json").is_file(), "the marker is written");
+        assert!(project.join("code").is_dir(), "the layout is created");
+        assert_eq!(std::fs::read_to_string(project.join("notes.txt")).unwrap(), "mine notes");
+        assert_eq!(std::fs::read_to_string(project.join("CLAUDE.md")).unwrap(), "mine", "an existing file is never overwritten");
+    }
+
+    #[test]
+    fn opening_an_empty_folder_scaffolds_it() {
+        let mut f = Fixture::new("open-empty");
         let project = f.open_project();
-        std::fs::write(project.join("notes.txt"), "x").unwrap();
-        let before = tree_listing(&project);
-        let reply = f.call(r#"{"id":1,"cmd":"project_rebuild","args":{}}"#);
-        assert_eq!(code_of(&reply), "not_a_project");
-        assert_eq!(reply["err"]["message"], "This folder is not an LLM-IDE project.");
-        assert_eq!(tree_listing(&project), before, "the folder listing is identical before and after");
+        assert!(project.join("system/project.json").is_file());
+        assert!(project.join("code").is_dir());
+        let paths = ok_of(&f.call(r#"{"id":2,"cmd":"project_paths","args":{}}"#)).clone();
+        assert_eq!(paths["isProject"], true);
+    }
+
+    #[test]
+    fn opening_a_non_empty_plain_folder_writes_nothing() {
+        let mut f = Fixture::new("open-plain");
+        let project = f.open_plain_folder();
+        assert_eq!(tree_listing(&project), vec!["notes.txt".to_string()]);
+        assert!(!project.join("system").exists());
+        let paths = ok_of(&f.call(r#"{"id":2,"cmd":"project_paths","args":{}}"#)).clone();
+        assert_eq!(paths["isProject"], false);
+    }
+
+    #[test]
+    fn opening_without_the_scaffold_flag_writes_nothing() {
+        // The reconnect case: the desktop re-sends a plain `open`, which must never write.
+        let mut f = Fixture::new("open-no-flag");
+        let project = f.home.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let line = json!({"id": 1, "cmd": "open", "args": {"root": project.to_string_lossy()}}).to_string();
+        ok_of(&f.call(&line));
+        let bad = json!({"id": 2, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": "yes"}}).to_string();
+        ok_of(&f.call(&bad));
+        assert!(tree_listing(&project).is_empty(), "a plain open leaves an empty folder empty");
+    }
+
+    #[test]
+    fn reopening_keeps_the_marker_byte_for_byte() {
+        let mut f = Fixture::new("reopen");
+        let project = f.open_project();
+        let marker = project.join("system/project.json");
+        let before = std::fs::read(&marker).unwrap();
+        std::fs::remove_file(project.join("README.md")).unwrap();
+        let line = json!({"id": 2, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": true}}).to_string();
+        ok_of(&f.call(&line));
+        assert!(!project.join("README.md").exists(), "a folder with the marker is never touched on open");
+        assert_eq!(std::fs::read(&marker).unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_scaffold_failure_does_not_fail_the_open() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut f = Fixture::new("open-readonly");
+        let project = f.home.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let probe = project.join(".probe");
+        if std::fs::write(&probe, b"x").is_ok() {
+            // Running as root: the mode does not stop writes, so the scaffold cannot be made to fail.
+            let _ = std::fs::remove_file(&probe);
+            std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let line = json!({"id": 1, "cmd": "open", "args": {"root": project.to_string_lossy(), "scaffold": true}}).to_string();
+        let reply = f.call(&line);
+        std::fs::set_permissions(&project, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(reply.get("ok").is_some(), "open failed: {reply}");
+        assert!(!project.join("system").exists());
     }
 
     #[test]
@@ -386,7 +464,7 @@ mod tests {
         std::fs::remove_file(root.join("README.md")).unwrap();
         std::fs::remove_dir(root.join("code")).unwrap();
         let root_text = root.to_string_lossy().into_owned();
-        ok_of(&f.call(&json!({"id": 2, "cmd": "open", "args": {"root": root_text}}).to_string()));
+        ok_of(&f.call(&json!({"id": 2, "cmd": "open", "args": {"root": root_text, "scaffold": true}}).to_string()));
         ok_of(&f.call(r#"{"id":3,"cmd":"project_rebuild","args":{}}"#));
         assert_eq!(std::fs::read_to_string(root.join("CLAUDE.md")).unwrap(), "my edits", "an edited file is kept");
         assert!(root.join("README.md").is_file(), "a missing file comes back");
@@ -401,7 +479,7 @@ mod tests {
         let root = f.canonical_home().join("work").join("Gamma");
         let root_text = root.to_string_lossy().into_owned();
         assert_eq!(code_of(&f.call(r#"{"id":2,"cmd":"project_paths","args":{}}"#)), "no_project");
-        ok_of(&f.call(&json!({"id": 3, "cmd": "open", "args": {"root": root_text}}).to_string()));
+        ok_of(&f.call(&json!({"id": 3, "cmd": "open", "args": {"root": root_text, "scaffold": true}}).to_string()));
         let paths = ok_of(&f.call(r#"{"id":4,"cmd":"project_paths","args":{}}"#)).clone();
         assert_eq!(paths["root"], root_text.as_str());
         assert_eq!(paths["isProject"], true);
@@ -703,6 +781,10 @@ mod tests {
     #[cfg(unix)]
     const SLOW_GIT: &str = "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"; sleep 30";
 
+    /// Creates the destination (the last argument, as a real clone does) and succeeds.
+    #[cfg(unix)]
+    const FAST_GIT: &str = "last=\"\"; for a in \"$@\"; do last=\"$a\"; done; mkdir -p \"$last\"";
+
     /// Rejects every credential, so the clone fails after its anonymous retry.
     #[cfg(unix)]
     const REFUSING_GIT: &str = "echo \"fatal: Authentication failed for 'https://github.com/o/r.git/'\" >&2; exit 128";
@@ -773,16 +855,18 @@ mod tests {
         assert_eq!(code_of(&f.call(&clone_line(1, "o/r", None))), "no_project");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn clone_refuses_plain_folder_and_writes_nothing() {
+    fn clone_in_a_plain_folder_lands_in_code() {
         let mut f = Fixture::new("clone-plain");
-        let project = f.open_project();
-        std::fs::write(project.join("notes.txt"), "mine").unwrap();
-        let before = tree_listing(&project);
-        let reply = f.call(&clone_line(1, "o/r", None));
-        assert_eq!(code_of(&reply), "not_a_project");
-        assert_eq!(reply["err"]["message"], "This folder is not an LLM-IDE project.");
-        assert_eq!(tree_listing(&project), before, "no code/ folder was made in a plain folder");
+        let project = f.open_plain_folder();
+        use_fake_git(&mut f, FAST_GIT);
+        let id = start_clone(&mut f, 1, "o/r");
+        let data = clone_event(&f.captured, id);
+        assert_eq!(data["ok"], true, "{data}");
+        assert!(project.join("code").join("r").is_dir(), "the core created code/r in the plain folder");
+        assert!(!project.join("system").exists(), "a clone does not turn the folder into a project");
+        assert_eq!(std::fs::read_to_string(project.join("notes.txt")).unwrap(), "mine notes");
     }
 
     #[test]

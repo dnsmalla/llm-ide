@@ -248,9 +248,19 @@ fn reconnect_reopens_folder_and_reregisters_watch() {
     assert_eq!(connector.connects(), 2, "the dead channel is replaced once");
     assert_eq!(connector.channel(1).commands(), vec!["open", "fs_watch_start", "fs_watch_set", "fs_list_dir"]);
     let (_, args, _) = connector.channel(1).calls().into_iter().find(|(cmd, _, _)| cmd == "open").unwrap();
-    assert_eq!(args, json!({"root": "/home/u/project"}), "the same folder is opened again");
+    assert_eq!(args, json!({"root": "/home/u/project"}), "the same folder is opened again, without `scaffold` (a reconnect never writes)");
+    assert!(args.get("scaffold").is_none());
     let (_, dirs, _) = connector.channel(1).calls().into_iter().find(|(cmd, _, _)| cmd == "fs_watch_set").unwrap();
     assert_eq!(dirs, json!({"dirs": ["src"]}));
+}
+
+#[test]
+fn a_user_open_sends_the_scaffold_flag() {
+    let remote = Remote::new();
+    let connector = FakeConnector::new(|_| FakeApi::new(respond));
+    remote.open(&connector, "/home/u/project").unwrap();
+    let (_, args, _) = connector.channel(0).calls().into_iter().find(|(cmd, _, _)| cmd == "open").unwrap();
+    assert_eq!(args, json!({"root": "/home/u/project", "scaffold": true}));
 }
 
 #[test]
@@ -772,7 +782,7 @@ fn project_setup(cmd: &str, args: &Value, confirm: Option<&str>) -> Result<Value
     match cmd {
         "project_paths" => Ok(json!({"root": "/srv/home/proj", "code": "/srv/home/proj/code"})),
         "project_memory" => Ok(json!({"files": []})),
-        "project_rebuild" => Err(FsError { code: "not_a_project", message: "This folder is not an LLM-IDE project.".into() }),
+        "project_rebuild" => Err(FsError { code: "io", message: "Could not write the folder.".into() }),
         "project_create" => Ok(json!({"root": "/srv/home/new", "id": "p1", "name": "new"})),
         "graph_read" => Ok(json!("{\"nodes\": []}")),
         "repo_clone" => Ok(json!({"started": true, "id": CLONE_ID})),
@@ -816,13 +826,30 @@ fn ssh_memory_goes_to_project_memory() {
 }
 
 #[test]
-fn ssh_rebuild_folders_maps_to_project_rebuild() {
+fn ssh_rebuild_folders_maps_to_project_rebuild_and_passes_a_refusal_through() {
     let remote = Remote::new();
     remote.set_folder_for_test(Some(open_folder("/srv/home/plain")));
     let connector = project_setup_connector();
-    let err = crate::project_layout::ssh_rebuild(&remote, &*connector).expect_err("plain folder");
-    assert_eq!(err.code, "not_a_project");
-    assert_eq!(err.message, "This folder is not an LLM-IDE project.");
+    let err = crate::project_layout::ssh_rebuild(&remote, &*connector).expect_err("helper refusal");
+    assert_eq!(err.code, "io");
+    assert_eq!(err.message, "Could not write the folder.");
+    assert_eq!(sent(&connector).last().map(String::as_str), Some("project_rebuild"));
+}
+
+/// Like `project_setup`, but the helper's Rebuild succeeds (it answers `null`, the way the real one does).
+fn project_setup_rebuild_ok(cmd: &str, args: &Value, confirm: Option<&str>) -> Result<Value, FsError> {
+    match cmd {
+        "project_rebuild" => Ok(Value::Null),
+        _ => project_setup(cmd, args, confirm),
+    }
+}
+
+#[test]
+fn ssh_rebuild_folders_succeeds_when_the_helper_answers_null() {
+    let remote = Remote::new();
+    remote.set_folder_for_test(Some(open_folder("/srv/home/plain")));
+    let connector = Arc::new(FakeConnector::new(|_| FakeApi::new(project_setup_rebuild_ok)));
+    crate::project_layout::ssh_rebuild(&remote, &*connector).expect("rebuild ok");
     assert_eq!(sent(&connector).last().map(String::as_str), Some("project_rebuild"));
 }
 

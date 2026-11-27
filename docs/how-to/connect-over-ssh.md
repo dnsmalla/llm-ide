@@ -230,26 +230,21 @@ install-skills), not only the failed step. Nothing is removed.
 **New project** works in your server home folder too: with the picker at `~`, it creates `~/<name>`, as it does
 locally. It refuses a name that already exists, a name with a path separator or a leading dot, a parent folder
 outside your server home folder, and a project folder that would itself be a broad folder such as `~/Documents`
-(a project created inside `~/Documents` is fine). It never turns
-an existing folder into a project. To use an existing folder as a project, create a new project next to it and move
-the files you need.
+(a project created inside `~/Documents` is fine).
 
 **Copy server path** copies the server path. In SSH server mode the buttons that reveal a path in Finder show
 **Copy server path** instead, because this computer cannot open a server folder.
 
 In **Settings → Project**, **Paths** lists the project folders and **Memory** lists its memory files and graph.
-**Rebuild missing folders** is offered only when the open folder is a project. It creates folders and files that
-are missing and never overwrites one that exists. In a folder that is not a project, Settings → Project shows
-"This folder is not an LLM-IDE project. To use project features, create one with New project in the server
-folder picker." and no action button.
+Opening an empty server folder sets it up as a project, as it does locally. Opening a folder that already has
+files writes nothing. **Rebuild missing folders** works in any open server folder. It creates the folders and files
+that are missing, including the project marker, and never overwrites one that exists.
 
 ### Clone a repository on the server
 
-**Repositories** can clone a repository into the open server project. It needs a project. In a folder that is not an
-LLM-IDE project, the Repositories card shows "Open a project to use its code/ folder as the clone destination.",
-offers no clone and never starts one, even when you finish typing a repository URL. The server also refuses a clone
-in a plain folder with "This folder is not an LLM-IDE project." and changes nothing. The clone goes to `code/<name>`
-inside the project, for example `code/Hello-World`, and the app shows the server path when it finishes.
+**Repositories** can clone a repository into the open server folder. The folder does not need to be a project. The
+clone goes to `code/<name>` inside the open folder, for example `code/Hello-World`, and the app shows the server path
+when it finishes.
 
 The clone runs on the server, so the server needs `git` and outbound https access. Only GitHub and GitLab
 https URLs are accepted. If `git` is missing or the network blocks the host, the clone stops with a message that
@@ -421,8 +416,9 @@ work until `claude login` succeeds on the server.
   Windows desktops. The live harness has not run yet against a server, so the project steps (New project, Paths,
   Memory, Rebuild, register and install-skills, and a clone of `octocat/Hello-World` with no token) are not yet
   verified on a live server.
-- **Existing folders are never set up.** Opening a server folder never writes project files. Only New project
-  creates a project, and Rebuild missing folders runs only in a folder that already is one.
+- **Non-empty folders are set up only on request.** Opening an empty server folder sets it up as a project. A folder
+  that already has files is not written on open. It becomes a project only when you press Rebuild missing folders.
+  A clone into it adds only `code/<name>`.
 - **Notes folder, Loop and Reveal stay local.** Your local notes folder is not on the server, and Loop and Auto
   Tasks do not run in SSH server mode. Reveal buttons show Copy server path instead.
 - **No push, fetch or pull in Changes.** Push and pull run from the terminal on the server.

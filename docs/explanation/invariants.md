@@ -931,15 +931,23 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
 - **The helper and terminal commands are constants, and the folder is data.** `ssh_server_scripts::WORKSPACE` is the only remote command for the helper, and it carries no path. The folder is the first request (`open`) on stdin. `ssh_server_scripts::TERMINAL` is one line that reads the folder from the terminal's first input line, and `pty::remote_terminal_launch` writes that line; `cd --` keeps a folder name that starts with `-` from being read as an option. Pinned by `ssh_workspace::tests::workspace_argv_is_strict_and_quiet`, `ssh_server_scripts::tests::terminal_script_is_one_constant_line_group`, `pty::tests::terminal_argv_is_strict_and_constant` and `pty::tests::terminal_folder_is_data`.
 - **No Explorer command reaches this computer's disk in SSH mode.** `workspace_backend::dispatch` calls the remote path whenever SSH mode is on, and its local closure runs only in local and hub mode. Opening a PDF (`fs_open_pdf`) and the other local-only actions stay refused in SSH mode (`refuse_in_ssh_mode`), and the webview admits only the Explorer's command set (`ui/screens/shell/host.ts`, `sshExplorerAdmitted`). `project_active` reports the server folder in SSH mode. Pinned by `workspace_backend::tests::ssh_mode_dispatch_without_folder_is_no_project`, `workspace_backend::tests::project_active_reports_server_folder`, `workspace_backend::tests::open_pdf_stays_local_only` and `ui/screens/shell/tests/ssh-explorer-guard.test.mjs`.
 - **The server part is checked before it is used.** The helper's `hello` must match this build's protocol number (`ssh_workspace::check_hello`), or the desktop answers `workspace_version`, and a `hello` that an older helper refuses counts the same way. The version text in `hello` is kept for display and logs only; it is not compared, because the bundle's SHA-256 check keeps the helper and the app in step. Pinned by `ssh_workspace::tests::hello_version_is_not_compared` and the `ssh_workspace` tests that assert `VERSION_MESSAGE`.
-- **Only New project writes project files on the server.** The helper's `project_create` scaffolds a new folder
-  inside the server home, and refuses an existing name, a parent outside home and a target too broad to be a project
-  (the `paths` rule in `workspace-core`). The home folder itself may hold a project (`~/<name>`), as it does locally. Rebuild
-  (`project_rebuild`) writes only in a folder that has `system/project.json`, and refuses any other with
-  `not_a_project`. Every write is write-if-absent, so an edited file keeps its text. The core calls that New
-  project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are the only other writes
-  to the project. Opening a folder writes nothing. Pinned by the workspace-helper tests `create_refuses_existing_name`,
-  `create_allows_home_refuses_outside` and `rebuild_refuses_plain_folder_and_writes_nothing`, and by the live harness
-  steps 15 to 20 in `desktop/src-tauri/src/ssh_live.rs`.
+- **Project setup on the server behaves as it does locally, through one shared implementation in `workspace-core`.**
+  The helper's `project_create` scaffolds a new folder inside the server home, and refuses an existing name, a parent
+  outside home and a target too broad to be a project (the `paths` rule in `workspace-core`). The home folder itself
+  may hold a project (`~/<name>`), as it does locally. Opening an empty folder scaffolds it as a project
+  (`project::scaffold::ensure_scaffold`), and a scaffold failure does not fail the open. Opening a non-empty folder
+  without `system/project.json` writes nothing. Only an open the user asked for carries `scaffold: true`; the re-open
+  after a reconnect does not, so a reconnect never writes. Rebuild (`project_rebuild`) works in any open server folder and
+  creates the missing layout and the marker. Every write is write-if-absent, so an edited file keeps its text. The
+  core calls that New project makes after the scaffold (`/kb/projects/register`, `/kb/project/install-skills`) are
+  the only other writes to the project. Pinned by the workspace-helper tests `create_refuses_existing_name`,
+  `create_allows_home_refuses_outside`, `rebuild_scaffolds_a_plain_folder_and_keeps_existing_files`,
+  `opening_an_empty_folder_scaffolds_it`, `opening_a_non_empty_plain_folder_writes_nothing` and
+  `reopening_keeps_the_marker_byte_for_byte`, `opening_without_the_scaffold_flag_writes_nothing` and
+  `a_scaffold_failure_does_not_fail_the_open`, by the desktop tests `a_user_open_sends_the_scaffold_flag` and
+  `reconnect_reopens_folder_and_reregisters_watch` (the reconnect re-open sends no `scaffold`), by the workspace-core tests `ensure_scaffold_fills_an_empty_folder` and
+  `ensure_scaffold_leaves_a_non_empty_folder_alone`, and by the live harness project steps in
+  `desktop/src-tauri/src/ssh_live.rs`.
 - **The clone token exists only in git's child environment on the server.** The desktop puts the token in the
   helper request, which travels on the SSH channel's stdin. The helper passes it to git only through git's
   environment (`GIT_CONFIG_*` extra header, `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=/usr/bin/true`). It is never in argv,
@@ -954,10 +962,10 @@ The desktop installs, starts and forwards to the core on a Linux server reached 
   `workspace_backend::tests::clone_grant_is_sent_only_when_no_token_is_usable` and
   `ssh_server_scripts::tests::start_marks_the_core_as_an_ssh_server_only`, and by the core tests
   `extension/tests/clone-credential.test.mjs` and `extension/tests/clone-redeem-key-server.test.mjs`.
-- **A clone needs an LLM-IDE project, and a plain folder is refused before anything is written.** The helper's
-  `clone_start` returns `not_a_project` when `layout::is_project` is false for the open folder. The desktop leaves the
-  Repositories clone destination empty in that case, so no clone is offered or started, even after a URL is typed.
-  Pinned by the workspace-helper test `clone_refuses_plain_folder_and_writes_nothing`.
+- **A clone runs in any open server folder and lands in `code/<name>`.** The helper's `clone_start` uses the same
+  `clone::plan` as the desktop, so the folder does not need `system/project.json`, and the Repositories card always
+  offers `<folder>/code/<repo>` as the destination. Pinned by the workspace-helper test
+  `clone_in_a_plain_folder_lands_in_code`.
 - **Clone results arrive as events, and only one clone runs at a time on each connection.** The helper answers `repo_clone` at once and
   sends the result as a `clone` event, so requests keep being answered during a clone (`requests_are_answered_while_a_clone_runs`).
   The `repo_clone` reply is `{started: true, id}`, and every `clone` event carries that `id`. The desktop accepts only

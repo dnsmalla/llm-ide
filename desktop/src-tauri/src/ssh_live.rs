@@ -761,19 +761,15 @@ fn core_post(run: &Run, path: &str, body: Value) -> Result<Reply, Failed> {
     send(agent().post(&format!("{}{path}", run.local_url)).set("Authorization", &format!("Bearer {token}")), Some(body.to_string()))
 }
 
-/// Step 15: the work folder has no `system/project.json`, so Paths says it is not a project and Rebuild refuses it
-/// with `not_a_project`.
+/// Step 15: the work folder was empty when step 9 (workspace open) opened it, and opening an empty folder scaffolds it, so Paths says it
+/// is a project. Rebuild works in any open folder, so it succeeds here and Paths still says project.
 fn step_project_plain(_run: &mut Run) -> Result<Outcome, Failed> {
     let paths = block(project_paths()).map_err(|error| failed("PATHS_FAILED", error.message()))?;
-    expect(paths["isProject"] == json!(false), "PLAIN_IS_PROJECT", "a folder without system/project.json reports isProject")?;
-    // The entry point returns the message text only; the helper's `not_a_project` copy is the one this matches.
-    match block(project_rebuild_folders()) {
-        Err(error) if error.message().contains("This folder is not an LLM-IDE project.") => {
-            println!("  paths: isProject false; rebuild: not_a_project");
-        }
-        Ok(()) => return Err(failed("REBUILD_PLAIN", "Rebuild ran on a folder that is not a project")),
-        Err(error) => return Err(failed("REBUILD_FAILED", error.message())),
-    }
+    expect(paths["isProject"] == json!(true), "PLAIN_NOT_SCAFFOLDED", "opening an empty folder did not scaffold it")?;
+    block(project_rebuild_folders()).map_err(|error| failed("REBUILD_FAILED", error.message()))?;
+    let again = block(project_paths()).map_err(|error| failed("PATHS_FAILED", error.message()))?;
+    expect(again["isProject"] == json!(true), "REBUILD_NOT_PROJECT", "Paths lost isProject after Rebuild")?;
+    println!("  open scaffolded the empty folder; paths: isProject true; rebuild: ok");
     Ok(Outcome::Done)
 }
 
@@ -993,7 +989,7 @@ fn run_steps(run: &mut Run) -> Result<usize, (usize, Failed)> {
         ("search", step_search),
         ("watch", step_watch),
         ("terminal", step_terminal),
-        ("project plain folder refused", step_project_plain),
+        ("project empty folder scaffolded", step_project_plain),
         ("project create", step_project_create),
         ("project paths and memory", step_project_paths),
         ("project rebuild keeps edits", step_project_rebuild),
