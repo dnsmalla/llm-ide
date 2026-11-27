@@ -33,7 +33,7 @@ The following source files together constitute the server and its API:
 
 Every inbound HTTP request passes through these stages **in order** (`extension/server.mjs:185–529`):
 
-1. **CORS headers set** (`server.mjs:186`) — `setCORS()` runs unconditionally before any other logic. Never echoes `*`; see [§7 Limits and guards](#7-limits-and-guards).
+1. **Host check, then CORS headers** — `isHostAllowed()` (`extension/server/host-allowlist.mjs`) runs first: a request whose `Host` is not a loopback name gets `403 HOST_NOT_ALLOWED` with no CORS headers (the check is off for a hub and in remote mode). Then `setCORS()` runs before any other logic. Never echoes `*`; see [§7 Limits and guards](#7-limits-and-guards).
 2. **Request-ID & per-request logger** (`server.mjs:194–200`) — `X-Request-ID` is read from the client header (validated: max 128 chars, CR/LF/NUL stripped) or generated fresh. A child logger carrying `{ requestId, method, url }` is attached as `req.log`.
 3. **Response-finish instrumentation** (`server.mjs:203–217`) — a `res.on('finish')` listener records duration + status, calls `recordHttpRequest()`.
 4. **OPTIONS short-circuit** (`server.mjs:219–223`) — preflight requests return `200` immediately.
