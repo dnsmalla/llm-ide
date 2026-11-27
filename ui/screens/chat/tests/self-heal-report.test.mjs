@@ -27,7 +27,7 @@ test("nothing is recorded without a description or when Self-Heal is off; the us
   const sent = [];
   const deps = (on, pending = 0) => ({ report: async (m) => { if (on) sent.push(m); return on; }, pending: () => pending });
   assert.match(await c.reportFromChat(deps(true), "   ", []), /Describe what is wrong/);
-  assert.match(await c.reportFromChat(deps(false), "it crashes", []), /only available in debug desktop builds/);
+  assert.match(await c.reportFromChat(deps(false), "it crashes", []), /Self-Heal is off in this build/);
   assert.equal(sent.length, 0);
   const ok = await c.reportFromChat(deps(true), "it crashes", [user("hi")]);
   assert.match(ok, /Try to fix/);
