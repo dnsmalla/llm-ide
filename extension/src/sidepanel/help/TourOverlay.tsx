@@ -39,7 +39,9 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     // Lock-on: once found, never jump to another match with the same id.
     let locked: HTMLElement | null = null;
     const check = () => {
-      const candidates = locked ? [] : Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`));
+      const candidates = locked
+        ? []
+        : Array.from(document.querySelectorAll<HTMLElement>(`[data-tour-id="${targetId}"]`));
       const picked = pickTarget(locked, candidates, isLive);
       if (picked) locked = picked;
       setEl(picked);
@@ -49,7 +51,12 @@ function useTourTarget(targetId: string | undefined): HTMLElement | null {
     // for now (el stays null), but a slow target (e.g. notes still generating) can still be picked up
     // once it finally appears. A found target is locked: if it later unmounts the spotlight drops, no re-search.
     const mo = new MutationObserver(check);
-    mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden', 'data-tour-id'] });
+    mo.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'data-tour-id'],
+    });
     const timeout = window.setTimeout(check, TARGET_WAIT_MS);
     return () => {
       mo.disconnect();
