@@ -243,7 +243,8 @@ writing anything if a folder it has to create or write into is a link that leads
 broken link. A linked folder it writes nothing into, such as `code` linked to another disk, does not stop it.
 
 If Rebuild or a clone answers "The server part is older than this app, so it cannot set up this folder.", the
-server still runs a helper from before this behaviour. Connect again from **Settings → Server** to update it.
+server still runs a helper from before this behaviour. In **Settings → Server & Backend → SSH server**, press
+**Disconnect** and then **Connect** to update it.
 
 ### Clone a repository on the server
 

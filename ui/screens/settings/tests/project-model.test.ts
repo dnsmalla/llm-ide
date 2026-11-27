@@ -142,7 +142,7 @@ test("code_dir_of_uses_one_rule: <root>/code when a code folder is listed, else 
 
 const OLD_SERVER_ERROR = { code: "not_a_project", message: "This folder is not an LLM-IDE project." };
 const SERVER_OUTDATED_SENTENCE =
-  "The server part is older than this app, so it cannot set up this folder. Update the server (Settings → Server → Connect), then try again.";
+  "The server part is older than this app, so it cannot set up this folder. In Settings → Server & Backend → SSH server, press Disconnect and then Connect to update it, then try again.";
 
 test("projectError: an old server's not_a_project says the server needs an update", () => {
   assert.equal(projectError(OLD_SERVER_ERROR), SERVER_OUTDATED_SENTENCE);

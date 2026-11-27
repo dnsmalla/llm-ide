@@ -124,7 +124,7 @@ export const PATHS_TEXT = {
   noProject: "Open a project to see its folders.",
   // NOTE: only a server helper from before the 2026-11-27 change still answers the host code `not_a_project`.
   serverOutdated:
-    "The server part is older than this app, so it cannot set up this folder. Update the server (Settings → Server → Connect), then try again.",
+    "The server part is older than this app, so it cannot set up this folder. In Settings → Server & Backend → SSH server, press Disconnect and then Connect to update it, then try again.",
 } as const;
 
 export const MEMORY_TEXT = {
