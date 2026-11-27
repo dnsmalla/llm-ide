@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 163
+  x-api-version: 164
 servers:
   - url: "https://{host}"
     variables:
@@ -11508,7 +11508,8 @@ paths:
                   type: "string"
                   enum:
                     - ".factory"
-                  description: "Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review); any other value is 400 invalid_write_scope (API 131)"
+                    - "llm-doc"
+                  description: "Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review) or <repoRoot>/llm-doc/ (the other default loops' plan/index-only stages, API 164); any other value is 400 invalid_write_scope (API 131)"
                 denyWrite:
                   type: "string"
                   enum:

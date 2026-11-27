@@ -208,8 +208,9 @@ export const DEFAULT_LOOP_SPECS = [
     "config": {
       "stages": [
         {
+          "allowsRepair": false,
           "defaultKey": "plan-structure-index",
-          "defaultRevision": 2,
+          "defaultRevision": 3,
           "enabled": true,
           "id": "67DCF24C-AE34-44C6-BDF4-E7B60D858FA8",
           "isDefault": true,
@@ -225,8 +226,9 @@ export const DEFAULT_LOOP_SPECS = [
           "promptHash": "a5cadde48ce5e4000c8e1a7ae4a316decfc908128b2fec454a28cd238c19c183"
         },
         {
+          "allowsRepair": false,
           "defaultKey": "plan-director",
-          "defaultRevision": 2,
+          "defaultRevision": 3,
           "enabled": true,
           "id": "C347BC2B-D03E-4283-9C44-A4177CB68107",
           "isDefault": true,
@@ -396,8 +398,9 @@ export const DEFAULT_LOOP_SPECS = [
           "testOp": "map"
         },
         {
+          "allowsRepair": false,
           "defaultKey": "refactor-plan",
-          "defaultRevision": 6,
+          "defaultRevision": 7,
           "enabled": true,
           "id": "refactor/refactor-plan",
           "isDefault": true,
@@ -579,8 +582,9 @@ export const DEFAULT_LOOP_SPECS = [
     "config": {
       "stages": [
         {
+          "allowsRepair": false,
           "defaultKey": "doc-index",
-          "defaultRevision": 2,
+          "defaultRevision": 3,
           "enabled": true,
           "id": "docs/doc-index",
           "isDefault": true,
@@ -596,8 +600,9 @@ export const DEFAULT_LOOP_SPECS = [
           "promptHash": "935d5b26f121d5393798bc962f541391516522f746dda2f9885f5ae582d4c248"
         },
         {
+          "allowsRepair": false,
           "defaultKey": "doc-writer",
-          "defaultRevision": 2,
+          "defaultRevision": 3,
           "enabled": true,
           "id": "docs/doc-writer",
           "isDefault": true,

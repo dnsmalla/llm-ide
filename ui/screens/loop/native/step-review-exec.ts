@@ -117,7 +117,7 @@ export async function reviewStepOnce(ctx: StageExecContext, loop: LoopDefinition
     before,
     call: () => ctx.core.request<AgentRunReply>("/kb/loop/agent-run", {
       method: "POST",
-      body: agentRunBody({ message, stage: { kind: "skill", skillId: STEP_REVIEW_SKILL }, repoRoot: ctx.runRoot, timeoutMs: STEP_REVIEW_TIMEOUT_MS, projectRoot: ctx.projectRoot, llmDocExists: false }),
+      body: agentRunBody({ message, stage: { kind: "skill", skillId: STEP_REVIEW_SKILL, outputPath: null }, repoRoot: ctx.runRoot, timeoutMs: STEP_REVIEW_TIMEOUT_MS, projectRoot: ctx.projectRoot, llmDocExists: false }),
       timeoutMs: STEP_REVIEW_TIMEOUT_MS + AGENT_TRANSPORT_GRACE_MS,
       signal: ctx.signal,
     }),

@@ -6536,8 +6536,8 @@ export type PostKbLoopAgentRunRequest = {
     /** "anthropic" or an Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent = first-party Anthropic */
     provider?: string;
     timeoutMs?: number;
-    /** Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review); any other value is 400 invalid_write_scope (API 131) */
-    writeScope?: ".factory";
+    /** Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review) or <repoRoot>/llm-doc/ (the other default loops' plan/index-only stages, API 164); any other value is 400 invalid_write_scope (API 131) */
+    writeScope?: ".factory" | "llm-doc";
     /** Edit/Write everywhere inside <repoRoot> EXCEPT under .factory/ (Factory Implement and every repair); any other value is 400 invalid_deny_write (API 134) */
     denyWrite?: ".factory";
     /** No Edit/Write at all (the self-improvement review); any other non-null value is 400 invalid_read_only, and readOnly with writeScope is 400 (API 150) */

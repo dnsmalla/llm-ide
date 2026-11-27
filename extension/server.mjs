@@ -528,7 +528,11 @@ const isSelfHealRoute = (url) => { const p = String(url || '').split('?')[0]; re
 //          The 410 ENDPOINT_REMOVED stubs promised "one release" and lasted seventy. No shipped client calls either path.
 //   v163 — POST /auth/reset-request never returns the reset token: a known email answers the same 200 `{ ok, message }` as an unknown
 //          or disabled one (the `{ ok, token, expiresAt }` development shape is gone). The token goes only to the `password_reset_token` log line.
-const SERVER_API_VERSION = 163;
+//   v164 — POST /kb/loop/agent-run accepts `writeScope: "llm-doc"`, additive alongside `".factory"`: the plan/index-only
+//          stages of the Refactor, Test, Plan and Docs loops (Refactor Plan, Refactor/Test Setup, Plan Director,
+//          Structure Index, Doc Index, Doc Writer) may write only under llm-doc/, the same confinement Factory's
+//          Intake/Plan/Review already had.
+const SERVER_API_VERSION = 164;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -1108,8 +1112,9 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Self-Heal incidents (/kb/self-heal/*): debug desktop builds only (config.selfHeal). Off: the feature-disabled 404
-  // and the module is never loaded. On: JWT + bus host proof inside the route.
+  // Self-Heal incidents (/kb/self-heal/*): on by default in a debug desktop build, opt-in (LLMIDE_SELF_HEAL=1) in a
+  // release one (config.selfHeal). Off: the feature-disabled 404 and the module is never loaded. On: JWT + bus host
+  // proof inside the route.
   if (isSelfHealRoute(req.url || '')) {
     if (!config.selfHeal) { sendFeatureDisabled(res, 'self_heal'); return; }
     try { const { handleSelfHealRoute } = await import('./routes/self-heal.mjs'); await handleSelfHealRoute(req, res); } catch (err) { sendError(res, err, { logger: reqLog }); }
@@ -1860,7 +1865,7 @@ server.listen(PORT, HOST, () => {
   setImmediate(() => { startAgentStoreJobs({ logger }); });
   // Initial probe — non-blocking; result lands in the cache for /health.
   probeClaude().catch(() => { /* logged inside */ });
-  // Self-Heal (debug builds): a 'fixing' incident whose run died with the last core goes back to 'new' (plan B runs).
+  // Self-Heal (when config.selfHeal is on): a 'fixing' incident whose run died with the last core goes back to 'new' (plan B runs).
   if (config.selfHeal) {
     void import('./kb/incidents.mjs').then((m) => m.reopenOrphanedIncidents())
       .catch((err) => logger.warn('self_heal_reopen_failed', { error: err.message }));

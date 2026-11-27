@@ -40,6 +40,19 @@ test("a stage saved before hashes existed upgrades when its prompt is a known re
   assert.equal(up.defaultRevision, 2);
 });
 
+test("an upgrade also brings allowsRepair in line with the registry's current stage, once, never on every load", () => {
+  // doc-writer's spec now says allowsRepair: false (Doc Writer may not repair; a protected-path halt reaches Doc Check
+  // instead). An existing saved stage with the old default (true) picks that up the next time it crosses a revision.
+  const up = upgradeDefaultStage(stage({ allowsRepair: true }), source());
+  assert.equal(up.allowsRepair, false);
+  // A stage whose defaultKey the registry has no repair opinion on (or none at all) is left exactly as saved.
+  assert.equal(upgradeDefaultStage(stage({ allowsRepair: true, defaultKey: "some-other-key" }), source()).allowsRepair, true);
+  assert.equal(upgradeDefaultStage(stage({ allowsRepair: true, defaultKey: null, promptRef: null }), source()).allowsRepair, true, "not a default stage: upgrade never runs at all");
+  // Once upgraded (defaultRevision now matches), a later user toggle back to true is never reverted by another pass:
+  // the revision gate alone decides whether upgradeDefaultStage touches the stage again.
+  assert.equal(upgradeDefaultStage(stage({ allowsRepair: true, defaultRevision: 2 }), source()).allowsRepair, true, "already at the registry's revision: left alone");
+});
+
 test("a hand-edited prompt never upgrades", () => {
   const edited = stage({ prompt: "My own doc prompt." });
   assert.equal(upgradeDefaultStage(edited, source()), edited, "the stored hash no longer matches");

@@ -1477,6 +1477,7 @@ test('route passes writeScope ".factory" to the engine, and nothing when absent'
   };
   for (const [body, want] of [
     [{ message: 'x', repoRoot: REPO, writeScope: '.factory' }, '.factory'],
+    [{ message: 'x', repoRoot: REPO, writeScope: 'llm-doc' }, 'llm-doc'],
     [{ message: 'x', repoRoot: REPO }, undefined],
   ]) {
     let seen = null;
@@ -1487,6 +1488,17 @@ test('route passes writeScope ".factory" to the engine, and nothing when absent'
     assert.equal(res.statusCode, 200, res._body);
     assert.equal(seen.writeScope, want);
   }
+});
+
+test('writeScope "llm-doc" allows Write under llm-doc/ and refuses it elsewhere, same rules as .factory', () => {
+  const LLM_DOC = { writeScope: 'llm-doc' };
+  assert.equal(loopToolRefusal('Write', { file_path: path.join(SCOPED, 'llm-doc', 'loop', 'refactor', 'REFACTOR.md') }, SCOPED, LLM_DOC), null);
+  assert.equal(loopToolRefusal('Write', { file_path: 'llm-doc/plans/INDEX.md' }, SCOPED, LLM_DOC), null, 'relative to the first root');
+  const reason = loopToolRefusal('Edit', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, LLM_DOC);
+  assert.ok(reason, 'an edit outside llm-doc/ is refused');
+  assert.match(reason, /llm-doc\//, 'the refusal names the scope');
+  assert.ok(loopToolRefusal('Write', { file_path: path.join(SCOPED, 'pytest.ini') }, SCOPED, LLM_DOC), 'a protected config file outside the scope is refused the same way');
+  assert.equal(loopToolRefusal('Read', { file_path: path.join(SCOPED, 'src', 'a.ts') }, SCOPED, LLM_DOC), null, 'reads are unchanged by the scope');
 });
 
 test('C1: a symlink leaf (dangling or to an outside file) is refused for Edit/Write, scoped and unscoped', () => {

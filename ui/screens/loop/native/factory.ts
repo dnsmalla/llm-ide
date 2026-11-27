@@ -5,7 +5,7 @@ import type { FsApi } from "../../explorer/fs";
 import { repoKeyOf, type RepoConfig } from "../../settings/repo-config.ts";
 import { DETECTED_STRUCTURE, DETECTED_TEST } from "./environment.ts";
 import { clampIterations, type LoopDefinition, type LoopEngineConfig, type LoopStage } from "./model.ts";
-import { TEST_PLAN_PATH, isCiHookPath, isTestFileName } from "./protected.ts";
+import { TEST_PLAN_PATH, isCiHookPath, isPytestIniPath, isTestFileName } from "./protected.ts";
 import { STEP_REVIEW_SKILL } from "./review.ts";
 import type { LoopRunOutcome } from "./runner.ts";
 import type { LoopTemplate } from "./templates.ts";
@@ -125,9 +125,21 @@ export function isFactoryLoop(loop: LoopDefinition): boolean {
   return loop.defaultKey === FACTORY_DEFAULT_KEY;
 }
 
-/** The agent-run write scope of a stage: Intake, Plan and Review may write only under `.factory/`. */
-export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId">): ".factory" | null {
-  return s.kind === "skill" && (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_PLAN_SKILL || s.skillId === FACTORY_REVIEW_SKILL || s.skillId === STEP_REVIEW_SKILL) ? ".factory" : null;
+/**
+ * The agent-run write scope of a stage: Intake, Plan and Review may write only under `.factory/`. Any other skill
+ * stage whose own `outputPath` is `llm-doc` or sits under `llm-doc/` gets the matching confinement — this is keyed
+ * on the stage's declared output, not its skill id, because one skill (`doc-writer`) is reused both by the Docs
+ * loop's own narrowly-scoped Doc Writer (output under `llm-doc/loop/docs`) and by Factory's "Doc review" custom
+ * stage (output `.`, meant to touch real docstrings anywhere) — keying on skill id alone scoped Factory's Doc
+ * review down to `llm-doc/` too, which was wrong. A stage with no declared output (or one outside `llm-doc/`) gets
+ * no scope and keeps full write access, same as before this function existed.
+ */
+export function writeScopeFor(s: Pick<LoopStage, "kind" | "skillId" | "outputPath">): ".factory" | "llm-doc" | null {
+  if (s.kind !== "skill") return null;
+  if (s.skillId === FACTORY_INTAKE_SKILL || s.skillId === FACTORY_PLAN_SKILL || s.skillId === FACTORY_REVIEW_SKILL || s.skillId === STEP_REVIEW_SKILL) return ".factory";
+  const out = s.outputPath?.trim();
+  if (out === "llm-doc" || out?.startsWith("llm-doc/")) return "llm-doc";
+  return null;
 }
 
 /** Skills whose step writes or maintains a plan (incl. the Plan loop's index and director); they run on the Settings → Model routing "Plan" role. */
@@ -143,7 +155,7 @@ export interface AgentRunBody {
   skills: string[];
   repoRoot: string;
   timeoutMs: number;
-  writeScope?: ".factory";
+  writeScope?: ".factory" | "llm-doc";
   denyWrite?: ".factory";
   extraRoots?: string[];
   role?: "plan";
@@ -157,7 +169,7 @@ export interface AgentRunBody {
  */
 export function agentRunBody(a: {
   message: string;
-  stage: Pick<LoopStage, "kind" | "skillId"> & { id?: string | null };
+  stage: Pick<LoopStage, "kind" | "skillId" | "outputPath"> & { id?: string | null };
   repoRoot: string;
   timeoutMs: number;
   projectRoot: string;
@@ -193,23 +205,31 @@ export const REFACTOR_MOVE_SKILLS: ReadonlySet<string> = new Set(["skills/refact
  * Outside Factory, a test-writing or refactor-move stage is judged on every path except a test file it newly created
  * (`created`): an existing test or build config it edits is still a violation. Every other stage and every repair is
  * judged on all paths.
+ * `repairOf` names the stage one more exemption reads: a repair of a Structure stage (`testOp: "structure"`, Test or
+ * Refactor loop) may CREATE a missing pytest.ini — establishing it is that stage's own job when a project has none —
+ * but never edit one that already exists. This is the only thing `repairOf` affects; a repair otherwise still gets
+ * none of the exemptions above (`stage` stays null for it).
  */
-export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[], created: readonly string[] = [], importOnly: readonly string[] = []): string[] {
+export function guardedPaths(loop: LoopDefinition, stage: Pick<LoopStage, "kind" | "skillId"> | null, paths: readonly string[], created: readonly string[] = [], importOnly: readonly string[] = [], repairOf: Pick<LoopStage, "kind" | "testOp"> | null = null): string[] {
   const skill = stage && stage.kind === "skill" ? stage.skillId : null;
-  if (!isFactoryLoop(loop)) {
-    // The Test loop's step plan is its own bookkeeping (never in a diff or a merge request), not a test: Test Write
-    // marks its step there, and a repair of that stage may correct the mark. llm-doc/loop/test/ is otherwise a
-    // protected "test" folder, and an edit there halted the run.
-    const planEdit = (p: string) => loop.defaultKey === "test" && (p === TEST_PLAN_PATH || p.endsWith(`/${TEST_PLAN_PATH}`));
-    if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return paths.filter((p) => !planEdit(p));
-    // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
-    const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
-    return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p) && !planEdit(p));
-  }
-  if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {
-    return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));
-  }
-  return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));
+  const judged = (() => {
+    if (!isFactoryLoop(loop)) {
+      // The Test loop's step plan is its own bookkeeping (never in a diff or a merge request), not a test: Test Write
+      // marks its step there, and a repair of that stage may correct the mark. llm-doc/loop/test/ is otherwise a
+      // protected "test" folder, and an edit there halted the run.
+      const planEdit = (p: string) => loop.defaultKey === "test" && (p === TEST_PLAN_PATH || p.endsWith(`/${TEST_PLAN_PATH}`));
+      if (skill === null || !(TEST_WRITING_SKILLS.has(skill) || REFACTOR_MOVE_SKILLS.has(skill))) return paths.filter((p) => !planEdit(p));
+      // Only a NEW file named like a test is exempt: a new conftest.py or helper in tests/ can skip every test.
+      const kept = REFACTOR_MOVE_SKILLS.has(skill) ? new Set(importOnly.filter((p) => isTestFileName(p))) : new Set<string>();
+      return paths.filter((p) => !(created.includes(p) && isTestFileName(p)) && !kept.has(p) && !planEdit(p));
+    }
+    if (skill !== null && TEST_WRITING_SKILLS.has(skill)) {
+      return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/") && isCiHookPath(p));
+    }
+    return paths.filter((p) => p !== ".factory" && !p.startsWith(".factory/"));
+  })();
+  const structureRepair = repairOf !== null && repairOf.kind === "testMap" && repairOf.testOp === "structure";
+  return structureRepair ? judged.filter((p) => !(created.includes(p) && isPytestIniPath(p))) : judged;
 }
 
 

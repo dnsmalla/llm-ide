@@ -15,6 +15,16 @@ const REF_BY_KEY: Readonly<Record<string, string>> = Object.freeze(Object.fromEn
   DEFAULT_LOOP_SPECS.flatMap((spec) => spec.config.stages.flatMap((s) => (s.promptRef && s.defaultKey ? [[s.defaultKey, s.promptRef] as const] : []))),
 ));
 
+/**
+ * Default key -> the registry's current `allowsRepair`, for a stage whose repair the registry has an opinion on
+ * (today: a plan/index-only stage must not repair, so a protected-path halt reaches the next gate instead of an
+ * unscoped agent call). A saved stage synced only on a prompt-revision upgrade (see `upgradeDefaultStage`), never
+ * on every load, so a person's own "Allows repair" toggle is never silently reverted afterwards.
+ */
+const ALLOWS_REPAIR_BY_KEY: Readonly<Record<string, boolean>> = Object.freeze(Object.fromEntries(
+  DEFAULT_LOOP_SPECS.flatMap((spec) => spec.config.stages.flatMap((s) => (s.defaultKey && typeof s.allowsRepair === "boolean" ? [[s.defaultKey, s.allowsRepair] as const] : []))),
+));
+
 type Linkable = Pick<LoopStage, "isDefault" | "defaultKey" | "defaultRevision" | "promptRef">;
 
 /** The registry task a default stage follows, or null for a user stage and for a stage the user detached. */
@@ -43,11 +53,14 @@ export function followsRegistry(stage: Linkable & Pick<LoopStage, "prompt" | "pr
   return source !== null && isUnedited(stage, source);
 }
 
-/** The stage moved to the source's revision when it is unedited and behind it; otherwise the same object. */
+/** The stage moved to the source's revision when it is unedited and behind it; otherwise the same object. Also
+ *  brings `allowsRepair` in line with the registry's current value for this default key, if it has one (see
+ *  `ALLOWS_REPAIR_BY_KEY`) — this is the only non-prompt field an upgrade touches. */
 export function upgradeDefaultStage(stage: LoopStage, source: PromptSource): LoopStage {
   if (promptRefOf(stage) !== source.id) return stage;
   if ((stage.defaultRevision ?? 0) >= source.revision || !isUnedited(stage, source)) return stage;
-  return { ...stage, promptRef: source.id, prompt: source.text, promptHash: sha256Hex(source.text), defaultRevision: source.revision };
+  const allowsRepair = stage.defaultKey && Object.hasOwn(ALLOWS_REPAIR_BY_KEY, stage.defaultKey) ? ALLOWS_REPAIR_BY_KEY[stage.defaultKey] : stage.allowsRepair;
+  return { ...stage, promptRef: source.id, prompt: source.text, promptHash: sha256Hex(source.text), defaultRevision: source.revision, allowsRepair };
 }
 
 /** The prompt a stage runs and shows: the registry text while it is unedited, else the stage's own text. */

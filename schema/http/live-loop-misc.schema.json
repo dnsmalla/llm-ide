@@ -865,10 +865,11 @@
             "writeScope": {
               "type": "string",
               "enum": [
-                ".factory"
+                ".factory",
+                "llm-doc"
               ],
               "x-optional": true,
-              "description": "Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review); any other value is 400 invalid_write_scope (API 131)"
+              "description": "Edit/Write only under <repoRoot>/.factory/ (Factory Intake, Plan and Review) or <repoRoot>/llm-doc/ (the other default loops' plan/index-only stages, API 164); any other value is 400 invalid_write_scope (API 131)"
             },
             "denyWrite": {
               "type": "string",

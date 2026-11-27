@@ -5,7 +5,7 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, provider?, role?: "loop"|"autoTasks"|"plan", timeoutMs?, writeScope?: ".factory", denyWrite?: ".factory",
+//            model?, provider?, role?: "loop"|"autoTasks"|"plan", timeoutMs?, writeScope?: ".factory"|"llm-doc", denyWrite?: ".factory",
 //            readOnly?: true (API 150: no Edit/Write at all; the self-improvement review) }
 //
 // `role` (API v147): with neither model nor provider, the run takes that Settings → Model routing role's tier
@@ -202,11 +202,14 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     if (route) { model = route.model; provider = route.provider; }
   }
   const meteredProvider = provider || AGENT_SDK_PROVIDER;
-  // Factory Intake / Review write only their reports (.factory/). Only that literal is accepted.
-  if (body.writeScope != null && body.writeScope !== '.factory') {
-    return validationError(res, 'writeScope must be ".factory"', 'invalid_write_scope');
+  // Factory Intake/Plan/Review write only their reports (.factory/); the other default loops' plan/index-only
+  // stages (Refactor Plan, Refactor/Test Setup, Plan Director, Structure Index, Doc Index, Doc Writer) write only
+  // under llm-doc/ (API 164). Only these two literals are accepted.
+  const WRITE_SCOPES = new Set(['.factory', 'llm-doc']);
+  if (body.writeScope != null && !WRITE_SCOPES.has(body.writeScope)) {
+    return validationError(res, 'writeScope must be ".factory" or "llm-doc"', 'invalid_write_scope');
   }
-  const writeScope = body.writeScope === '.factory' ? '.factory' : undefined;
+  const writeScope = WRITE_SCOPES.has(body.writeScope) ? body.writeScope : undefined;
   // Factory Implement and every repair may write code/tests but never the run's own reports.
   if (body.denyWrite != null && body.denyWrite !== '.factory') {
     return validationError(res, 'denyWrite must be ".factory"', 'invalid_deny_write');

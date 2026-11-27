@@ -396,7 +396,7 @@ export const TASKS: readonly TaskDef[] = [
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
       "935d5b26f121d5393798bc962f541391516522f746dda2f9885f5ae582d4c248"
     ]
@@ -435,7 +435,7 @@ export const TASKS: readonly TaskDef[] = [
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
       "49d174908b052b2ce7dfcc54878b447035496ab76ee7512868bd12df5730f7b8"
     ]
@@ -474,7 +474,7 @@ export const TASKS: readonly TaskDef[] = [
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
       "918457c0ab47a016e99efcbbef923eb98624c3f54d5cb83260d17abafd92ff4b"
     ]
@@ -513,7 +513,7 @@ export const TASKS: readonly TaskDef[] = [
       "status": "available",
       "reason": null
     },
-    "revision": 2,
+    "revision": 3,
     "knownPromptHashes": [
       "a5cadde48ce5e4000c8e1a7ae4a316decfc908128b2fec454a28cd238c19c183"
     ]
@@ -632,7 +632,7 @@ export const TASKS: readonly TaskDef[] = [
       "status": "available",
       "reason": null
     },
-    "revision": 6,
+    "revision": 7,
     "knownPromptHashes": [
       "3f01b3ca6fe917820028ad627553dfcbe55e71b8d045170f606995d6a7457050",
       "b698d420392b8fa77f43e9e48d2b188333f7a143811f2d1fa68e490f6a6c1cbb",

@@ -93,6 +93,45 @@ test("the built-in steps in order with runOnce and gates as specified", () => {
   assert.ok(BUILT_IN_TEMPLATES.some((t) => t.id === "factory" && t === f.FACTORY_TEMPLATE));
 });
 
+test("writeScopeFor confines a stage by its own declared output, not by which skill it runs", () => {
+  for (const outputPath of ["llm-doc", "llm-doc/loop/docs", "llm-doc/loop/refactor/REFACTOR.md"]) {
+    assert.equal(f.writeScopeFor({ kind: "skill", skillId: "skills/anything", outputPath }), "llm-doc", outputPath);
+  }
+  // Doc-writer is reused by Factory's own "Doc review" custom stage with output ".": it must keep full write
+  // access (real docstrings anywhere), not be shut into llm-doc/ just because the skill id matches the Docs loop's.
+  for (const outputPath of [".", null, undefined, "docs", "llm-doc-other/x"]) {
+    assert.equal(f.writeScopeFor({ kind: "skill", skillId: "skills/doc-writer", outputPath }), null, String(outputPath));
+  }
+  // A skill that legitimately writes real code or tests anywhere in the repo: no outputPath at all, still unscoped.
+  assert.equal(f.writeScopeFor({ kind: "skill", skillId: "skills/refactor-apply", outputPath: "." }), null);
+  assert.equal(f.writeScopeFor({ kind: "testMap", skillId: null, outputPath: "llm-doc/x" }), null, "a non-skill stage has no scope to confine");
+});
+
+test("only the stages whose own output is under llm-doc/ never repair: Setup stages create real repo files and keep repairing", () => {
+  const byKey = (defaultKey) => {
+    for (const spec of DEFAULT_LOOP_SPECS) {
+      const s = spec.config.stages.find((x) => x.defaultKey === defaultKey);
+      if (s) return s;
+    }
+    return undefined;
+  };
+  for (const defaultKey of ["plan-structure-index", "plan-director", "refactor-plan", "doc-index", "doc-writer"]) {
+    const stage = byKey(defaultKey);
+    assert.ok(stage, defaultKey);
+    assert.equal(stage.allowsRepair, false, defaultKey);
+    assert.equal(f.writeScopeFor(stage), "llm-doc", defaultKey);
+  }
+  // Test Setup / Refactor Setup run skills/test-structure-setup, whose job (per its own SKILL.md) is creating
+  // pytest.ini, tests/unit/, Package.swift test targets etc. at the REPO ROOT, not under llm-doc/ (its outputPath
+  // is "."): they must keep full write access and repair like any other code-changing stage.
+  for (const defaultKey of ["test-setup", "refactor-setup", "test-write", "refactor-test-write", "refactor-apply", "refactor-conform"]) {
+    const stage = byKey(defaultKey);
+    assert.ok(stage, defaultKey);
+    assert.equal(stage.allowsRepair ?? true, true, defaultKey);
+    assert.equal(f.writeScopeFor(stage), null, defaultKey);
+  }
+});
+
 test("applying the factory template keeps runOnce, resolves Verify, keeps custom ids and sets up npm projects", () => {
   const npm = f.withSetupCommand(applyTemplate(f.FACTORY_TEMPLATE, "npm test"), "npm test");
   assert.equal(npm.stages.length, 9);
@@ -488,6 +527,19 @@ test("the Test loop's step plan is bookkeeping: a skill call or a repair may edi
   assert.deepEqual(f.guardedPaths(testLoop, writer, [plan, "src/a.ts"]), ["src/a.ts"], "the Test Write call");
   assert.deepEqual(f.guardedPaths(refactorLoop, null, [plan]), [plan], "another loop's repair may not");
   assert.deepEqual(f.guardedPaths(testLoop, null, ["llm-doc/loop/test/TEST-MAP.md"]), ["llm-doc/loop/test/TEST-MAP.md"], "only the plan file");
+});
+
+test("a Structure stage's repair may create a missing pytest.ini, but never edit an existing one or any other config", () => {
+  const testLoop = { defaultKey: "test", config: { stages: [] } };
+  const structure = { kind: "testMap", testOp: "structure" };
+  const structureCheck = { kind: "testMap", testOp: "structure" };
+  const graph = { kind: "codeGraph" };
+  const paths = ["pytest.ini", "pkg/pytest.ini", "Makefile"];
+  assert.deepEqual(f.guardedPaths(testLoop, null, paths, ["pytest.ini", "pkg/pytest.ini"], [], structure), ["Makefile"], "both created pytest.ini are exempt, Makefile is not");
+  assert.deepEqual(f.guardedPaths(testLoop, null, paths, ["pytest.ini", "pkg/pytest.ini"], [], structureCheck), ["Makefile"], "the Structure Check stage gets the same exemption");
+  assert.deepEqual(f.guardedPaths(testLoop, null, paths, [], [], structure), paths, "an EXISTING pytest.ini (not in created) is still judged");
+  assert.deepEqual(f.guardedPaths(testLoop, null, paths, ["pytest.ini"], [], graph), paths, "a repair of a non-Structure stage gets no exemption");
+  assert.deepEqual(f.guardedPaths(testLoop, null, paths, ["pytest.ini"]), paths, "no repairOf at all (the default) gets no exemption");
 });
 
 test("agentRunBody: only plan-writing skills carry role plan", () => {
