@@ -81,6 +81,13 @@ pub fn validate_root(chosen: &Path, home: &Path) -> Result<PathBuf, String> {
     Ok(real)
 }
 
+/// True when `root` equals, contains or sits inside `protected` (the host's own data folder). Both paths are
+/// compared as given, so pass canonical paths. A project there would let the webview's project-rooted file
+/// commands reach host state such as the saved Loop approvals.
+pub fn overlaps_dir(root: &Path, protected: &Path) -> bool {
+    root.starts_with(protected) || protected.starts_with(root)
+}
+
 /// The canonical home directory as a path, or an empty path when it is unknown.
 pub fn home_or_empty() -> PathBuf {
     home_dir().map(PathBuf::from).unwrap_or_default()
@@ -281,6 +288,16 @@ pub fn plain_path(p: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn overlaps_dir_covers_equal_parent_and_child() {
+        let data = Path::new("/home/u/data/llm-ide-desktop");
+        assert!(super::overlaps_dir(data, data));
+        assert!(super::overlaps_dir(Path::new("/home/u/data"), data));
+        assert!(super::overlaps_dir(&data.join("sub"), data));
+        assert!(!super::overlaps_dir(Path::new("/home/u/data/llm-ide-desktop-2"), data));
+        assert!(!super::overlaps_dir(Path::new("/home/u/proj"), data));
+    }
+
     use super::*;
 
     #[test]

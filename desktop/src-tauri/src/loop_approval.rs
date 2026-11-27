@@ -5,7 +5,7 @@
 //! compromised webview can skip it. This module is the boundary.
 //!
 //! The host resolves the stage list and the fault `verify:` commands ITSELF, shows a native Cancel-first dialog that
-//! names the exact commands and the working folder, and only then mints a random in-memory token. The token is bound
+//! names the exact commands and the working folder, and only then mints a random token. The token is bound
 //! to:
 //!
 //! - the exact command bytes' SHA-256 (editing a command invalidates the approval),
@@ -19,13 +19,31 @@
 //! webview cannot mint a token without the native dialog; it can only ask for one.
 //!
 //! Unlike `host_approval` (which signs a token for the Node core), the verifier lives in the same process as the
-//! mint, so a random 192-bit in-memory token is enough; there is no second process to convince.
+//! mint, so a random 192-bit token is enough; there is no second process to convince.
+//!
+//! # Persistence ("remember approvals")
+//!
+//! Approved grants survive an app restart so the dialog is not shown again for the same exact commands, until the
+//! 7-day TTL. The app's store is saved to `loop-approvals.json` in the desktop data dir (`fsutil::desktop_data_dir`,
+//! the folder of `recent-projects.json`), written atomically with mode 0600. It holds only the grant DATA (command
+//! hashes, loop/stage ids, canonical project root, working folder) and the expiry, as `{"version":1,"grants":[..]}`.
+//!
+//! - Tokens are NEVER written. Every grant loaded from disk is given a fresh random token; `find_at` hands that
+//!   token to the page exactly as it does for a grant minted this session.
+//! - The file lives outside every project root, so the webview's project-rooted fs commands cannot read or write it.
+//!   Anything that can write the user's app-data dir can already replace the app, its secrets and its prefs, so the
+//!   file adds no new way to mint an approval without the native dialog. As defence in depth, a loaded grant whose
+//!   expiry is later than `now + GRANT_TTL_MS` is dropped (a hand-edited "never expires" entry is not honoured).
+//! - A missing, unreadable, corrupt or unknown-version file loads as empty (logged once) and is never treated as
+//!   approval. It is loaded lazily on first use and expired grants are dropped on load and on every write.
+//! - `loop_revoke_approvals` removes the persisted file as well as the in-memory grants.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::confirm::{now_ms, OpenFlag, RateLimit};
 use crate::loop_runner::{
@@ -33,15 +51,14 @@ use crate::loop_runner::{
     resolve_stage, FaultSpec, StageSpec,
 };
 
-/// How long one approval lasts. User decision 2026-11-25: the old 4 h re-prompt interrupted Factory runs for
-/// commands the user had already approved. A changed command still needs a new approval, because the grant is bound
-/// to the exact command hashes — but the hash only covers the command STRING (e.g. `make test`), not the scripts
-/// or repo files it runs, which a Loop's own code steps can rewrite mid-run. An unbounded grant (the store is
-/// in-memory, so it otherwise lasts until the app quits) would let a scheduled, unattended run (`loop_approval_status`,
-/// invariants.md "A scheduled run never prompts") reuse a stale approval against rewritten scripts for as long as a
-/// tray app stays open, which can be weeks. 7 days comfortably outlasts any single interactive Factory run while
-/// bounding that exposure; past it, a scheduled run just skips (same path as no grant at all) instead of reusing
-/// something stale.
+/// How long one approval lasts (7 days; persisted across restarts, see the module doc). User decision 2026-11-25:
+/// the old 4 h re-prompt interrupted Factory runs for commands the user had already approved. A changed command
+/// still needs a new approval, because the grant is bound to the exact command hashes. The hash covers only the
+/// command STRING (e.g. `make test`), not the scripts or repo files it runs, which a Loop's own code steps can
+/// rewrite mid-run, so an unbounded grant would let an unattended scheduled run
+/// (`loop_approval_status`, invariants.md "A scheduled run never prompts") reuse a stale approval indefinitely.
+/// Seven days outlasts any single interactive Factory run while bounding that exposure; after it, a scheduled run
+/// skips (the same path as having no grant) instead of reusing something stale.
 pub const GRANT_TTL_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 /// The one button that approves a Loop command set.
 pub const APPROVE_ACCEPT: &str = "Run these commands";
@@ -87,33 +104,179 @@ struct Grant {
     expires_ms: u64,
 }
 
-/// In-memory grants. One instance is used by the app; tests use their own so they never share state.
+/// Grants keyed by token. One instance (file-backed) is used by the app; tests use their own so they never share
+/// state. `new()` is memory-only; `with_file` persists the grant data (never the tokens).
 pub struct ApprovalStore {
     grants: Mutex<HashMap<String, Grant>>,
+    file: Option<PathBuf>,
+    loaded: AtomicBool,
+}
+
+/// File name of the persisted grants inside the desktop data dir.
+pub const APPROVALS_FILE: &str = "loop-approvals.json";
+const FILE_VERSION: u32 = 1;
+const FILE_MAX_BYTES: usize = 4 * 1024 * 1024;
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StoredGrant {
+    project: String,
+    work: String,
+    stages: HashMap<String, HashMap<String, String>>,
+    faults: HashMap<String, String>,
+    expires_ms: u64,
+}
+
+#[derive(Serialize, Deserialize)]
+struct StoredFile {
+    version: u32,
+    grants: Vec<StoredGrant>,
+}
+
+fn mint_token() -> Result<String, String> {
+    let mut raw = [0u8; 24];
+    getrandom::fill(&mut raw).map_err(|e| format!("cannot generate an approval token: {e}"))?;
+    Ok(crate::fsutil::hex(&raw))
 }
 
 impl ApprovalStore {
     pub fn new() -> Self {
-        Self { grants: Mutex::new(HashMap::new()) }
+        Self { grants: Mutex::new(HashMap::new()), file: None, loaded: AtomicBool::new(true) }
+    }
+
+    /// A store that loads `file` lazily on first use and rewrites it after every change.
+    pub fn with_file(file: PathBuf) -> Self {
+        Self { grants: Mutex::new(HashMap::new()), file: Some(file), loaded: AtomicBool::new(false) }
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Grant>> {
-        self.grants.lock().unwrap_or_else(|p| p.into_inner())
+        let mut grants = self.grants.lock().unwrap_or_else(|p| p.into_inner());
+        // Checked under the map lock, so exactly one caller loads.
+        if !self.loaded.swap(true, Ordering::SeqCst) {
+            if let Some(file) = &self.file {
+                Self::load_into(&mut grants, file, now_ms());
+            }
+        }
+        grants
+    }
+
+    /// Same standard as `fsutil::private_dir`: owned by this user, no group/other permission bits.
+    #[cfg(unix)]
+    fn is_private_file(meta: &std::fs::Metadata) -> bool {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid has no preconditions.
+        let me = unsafe { libc::geteuid() };
+        meta.uid() == me && meta.mode() & 0o077 == 0
+    }
+
+    #[cfg(not(unix))]
+    fn is_private_file(_meta: &std::fs::Metadata) -> bool {
+        true
+    }
+
+    fn load_into(grants: &mut HashMap<String, Grant>, file: &Path, now: u64) {
+        let raw = match std::fs::symlink_metadata(file) {
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return,
+            Ok(m) if m.is_file() && m.len() <= FILE_MAX_BYTES as u64 && Self::is_private_file(&m) => std::fs::read_to_string(file),
+            Ok(_) => {
+                eprintln!(
+                    "loop approvals: {} is not a private plain file (symlink, other owner, group/other access or too large); ignored",
+                    file.display()
+                );
+                return;
+            }
+            Err(e) => Err(e),
+        };
+        let parsed = raw.map_err(|e| e.to_string()).and_then(|t| serde_json::from_str::<StoredFile>(&t).map_err(|e| e.to_string()));
+        let stored = match parsed {
+            Ok(s) if s.version == FILE_VERSION => s,
+            Ok(s) => {
+                eprintln!("loop approvals: unknown file version {}; ignored", s.version);
+                return;
+            }
+            Err(e) => {
+                eprintln!("loop approvals: cannot read {}: {e}; ignored", file.display());
+                return;
+            }
+        };
+        let latest = now.saturating_add(GRANT_TTL_MS);
+        for g in stored.grants {
+            if g.expires_ms <= now || g.expires_ms > latest {
+                continue;
+            }
+            let Ok(token) = mint_token() else { continue };
+            let data = GrantData { project: PathBuf::from(g.project), work: PathBuf::from(g.work), stages: g.stages, faults: g.faults };
+            grants.insert(token, Grant { data, expires_ms: g.expires_ms });
+        }
+    }
+
+    /// Rewrites (or removes, when empty) the file. Callers that only add a grant log a failure (the grant still
+    /// works this session); a revoke reports it.
+    fn persist(&self, grants: &HashMap<String, Grant>) -> Result<(), String> {
+        let Some(file) = &self.file else { return Ok(()) };
+        if !grants.is_empty() {
+            return Self::write_file(file, grants);
+        }
+        match std::fs::remove_file(file) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            // Removal failed: an empty grant list must still replace the old content, or a revoke would not last.
+            Err(_) => Self::write_file(file, grants),
+        }
+    }
+
+    fn write_file(file: &Path, grants: &HashMap<String, Grant>) -> Result<(), String> {
+        let stored = StoredFile {
+            version: FILE_VERSION,
+            // A path that is not valid UTF-8 cannot round-trip, so that grant stays session-only.
+            grants: grants
+                .values()
+                .filter_map(|g| {
+                    Some(StoredGrant {
+                        project: g.data.project.to_str()?.to_string(),
+                        work: g.data.work.to_str()?.to_string(),
+                        stages: g.data.stages.clone(),
+                        faults: g.data.faults.clone(),
+                        expires_ms: g.expires_ms,
+                    })
+                })
+                .collect(),
+        };
+        let body = serde_json::to_vec(&stored).map_err(|e| e.to_string())?;
+        if let Some(dir) = file.parent() {
+            crate::fsutil::private_dir(dir)?;
+        }
+        crate::fsutil::write_private_atomic(file, &body, FILE_MAX_BYTES)
     }
 
     fn purge(grants: &mut HashMap<String, Grant>, now: u64) {
         grants.retain(|_, g| g.expires_ms > now);
     }
 
+    fn supersedes(new: &GrantData, old: &GrantData) -> bool {
+        if new.project != old.project || new.work != old.work {
+            return false;
+        }
+        // Only a CHANGED command supersedes: a grant that agrees with the new one on every shared key stays valid.
+        let changed_stage = new.stages.iter().any(|(lp, st)| {
+            old.stages.get(lp).is_some_and(|o| st.iter().any(|(k, h)| o.get(k).is_some_and(|oh| oh != h)))
+        });
+        changed_stage || new.faults.iter().any(|(k, h)| old.faults.get(k).is_some_and(|oh| oh != h))
+    }
+
     /// Stores `data` under a fresh random token, valid from `now`.
     pub(crate) fn insert_at(&self, data: GrantData, now: u64) -> Result<(String, u64), String> {
-        let mut raw = [0u8; 24];
-        getrandom::fill(&mut raw).map_err(|e| format!("cannot generate an approval token: {e}"))?;
-        let token = crate::fsutil::hex(&raw);
+        let token = mint_token()?;
         let expires = now + GRANT_TTL_MS;
         let mut grants = self.lock();
         Self::purge(&mut grants, now);
+        // A new approval supersedes older ones for the same folders whose command for a shared loop/stage or fault
+        // id DIFFERS, so an edited command does not leave the previously approved one valid.
+        grants.retain(|_, g| !Self::supersedes(&data, &g.data));
         grants.insert(token.clone(), Grant { data, expires_ms: expires });
+        if let Err(e) = self.persist(&grants) {
+            eprintln!("loop approvals: cannot save the approvals file: {e}");
+        }
         Ok((token, expires))
     }
 
@@ -172,8 +335,12 @@ impl ApprovalStore {
         Ok(())
     }
 
-    pub(crate) fn clear(&self) {
-        self.lock().clear();
+    /// Drops every grant and the persisted file.
+    /// Errors when the persisted file could neither be removed nor emptied, so the caller must not claim a revoke.
+    pub(crate) fn clear(&self) -> Result<(), String> {
+        let mut grants = self.lock();
+        grants.clear();
+        self.persist(&grants).map_err(|e| format!("the approvals file could not be cleared: {e}"))
     }
 
     #[cfg(test)]
@@ -192,7 +359,13 @@ static STORE: OnceLock<ApprovalStore> = OnceLock::new();
 
 /// The process-wide store the Tauri commands use.
 pub fn store() -> &'static ApprovalStore {
-    STORE.get_or_init(ApprovalStore::new)
+    STORE.get_or_init(|| match crate::fsutil::desktop_data_dir() {
+        Ok(dir) => ApprovalStore::with_file(dir.join(APPROVALS_FILE)),
+        Err(e) => {
+            eprintln!("loop approvals: no data dir ({e}); approvals will not survive a restart");
+            ApprovalStore::new()
+        }
+    })
 }
 
 /// A native dialog request: exactly the commands and folder the user is about to approve.
@@ -332,7 +505,7 @@ fn approval_text(req: &ApprovalRequest) -> Result<String, String> {
     }
     body.push_str(
         "Only these exact commands are approved. If a command changes, the approval no longer matches and nothing runs. \
-         The approval is for this loop, this folder and these command hashes only, and it lasts up to 7 days or until you quit LLM-IDE, whichever is sooner.",
+         The approval is for this loop, this folder and these command hashes only, and it is remembered for up to 7 days, across app restarts, and is asked again if a command changes. Scheduled runs of this loop will use this approval without asking while it lasts.",
     );
     if body.chars().count() > MAX_DIALOG_CHARS {
         return Err("there are too many commands to show in one approval dialog; split the loop or run the stages individually".into());
@@ -478,8 +651,8 @@ pub fn loop_approval_status(loop_id: String) -> Result<LoopApprovalStatus, Strin
 
 /// Drops every Loop approval this app has minted. Safe to expose: it only removes permissions.
 #[tauri::command]
-pub fn loop_revoke_approvals() {
-    store().clear();
+pub fn loop_revoke_approvals() -> Result<(), String> {
+    store().clear()
 }
 
 #[cfg(test)]
@@ -593,7 +766,7 @@ mod tests {
         assert!(shown.contains("printf approved"), "{shown}");
         assert!(shown.contains("exact commands"), "{shown}");
         assert!(shown.contains("7 days"), "{shown}");
-        assert!(shown.contains("until you quit"), "{shown}");
+        assert!(shown.contains("across app restarts"), "{shown}");
         assert_eq!(store.len(), 0, "a declined dialog stores nothing");
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -663,5 +836,173 @@ mod tests {
         let status = status_with(&store, &root, "l1", 1_000).unwrap();
         assert!(status.approved && status.token.is_none());
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn temp_file(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("llmide-approvals-file-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir.join(APPROVALS_FILE)
+    }
+
+    fn cleanup(file: &Path) {
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    #[test]
+    fn a_grant_survives_a_restart_and_matches_only_identical_data() {
+        let file = temp_file("restart");
+        let root = PathBuf::from("/proj");
+        let d = data(&root, &root, "s1", "printf ok");
+        let now = now_ms();
+        let first = ApprovalStore::with_file(file.clone());
+        let (old_token, expires) = first.insert_at(d.clone(), now).unwrap();
+        let second = ApprovalStore::with_file(file.clone());
+        let (token, found_expires) = second.find_at(&d, now + 1_000).expect("remembered");
+        assert_eq!(found_expires, expires);
+        assert_ne!(token, old_token, "tokens are re-minted, not restored");
+        assert!(second.authorize_stage_at(&token, &root, &root, "l1", "s1", "printf ok", now + 1_000).is_ok());
+        assert!(second.authorize_stage_at(&old_token, &root, &root, "l1", "s1", "printf ok", now + 1_000).is_err());
+        let changed = data(&root, &root, "s1", "printf changed");
+        assert!(second.find_at(&changed, now + 1_000).is_none(), "a changed command is a new approval");
+        assert!(second.find_at(&data(&root, Path::new("/other"), "s1", "printf ok"), now + 1_000).is_none(), "another folder");
+        cleanup(&file);
+    }
+
+    #[test]
+    fn tokens_are_never_written_to_disk() {
+        let file = temp_file("notoken");
+        let root = PathBuf::from("/proj");
+        let store = ApprovalStore::with_file(file.clone());
+        let (token, _) = store.insert_at(data(&root, &root, "s1", "printf ok"), now_ms()).unwrap();
+        let text = std::fs::read_to_string(&file).unwrap();
+        assert!(!text.contains(&token), "{text}");
+        assert!(text.contains("\"version\":1"), "{text}");
+        cleanup(&file);
+    }
+
+    #[test]
+    fn expired_and_overlong_grants_are_dropped_on_load() {
+        let file = temp_file("expired");
+        let root = PathBuf::from("/proj");
+        let store = ApprovalStore::with_file(file.clone());
+        let now = now_ms();
+        store.insert_at(data(&root, &root, "s1", "printf old"), now - GRANT_TTL_MS - 5_000).unwrap();
+        store.insert_at(data(&root, &root, "s2", "printf fresh"), now).unwrap();
+        // A hand-edited entry that never expires is not honoured.
+        let mut stored: StoredFile = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let forged = StoredGrant {
+            project: "/proj".into(),
+            work: "/proj".into(),
+            stages: HashMap::from([("l1".to_string(), HashMap::from([("s3".to_string(), command_hash("printf forged"))]))]),
+            faults: HashMap::new(),
+            expires_ms: u64::MAX,
+        };
+        stored.grants.push(forged);
+        std::fs::write(&file, serde_json::to_string(&stored).unwrap()).unwrap();
+        let loaded = ApprovalStore::with_file(file.clone());
+        assert!(loaded.find_at(&data(&root, &root, "s1", "printf old"), now).is_none());
+        assert!(loaded.find_at(&data(&root, &root, "s3", "printf forged"), now).is_none());
+        assert!(loaded.find_at(&data(&root, &root, "s2", "printf fresh"), now).is_some());
+        assert_eq!(loaded.len(), 1);
+        cleanup(&file);
+    }
+
+    #[test]
+    fn revoke_clears_the_file() {
+        let file = temp_file("revoke");
+        let root = PathBuf::from("/proj");
+        let store = ApprovalStore::with_file(file.clone());
+        store.insert_at(data(&root, &root, "s1", "printf ok"), now_ms()).unwrap();
+        assert!(file.exists());
+        store.clear().unwrap();
+        assert!(!file.exists());
+        assert_eq!(ApprovalStore::with_file(file.clone()).len(), 0);
+        cleanup(&file);
+    }
+
+    #[test]
+    fn a_corrupt_or_unknown_version_file_loads_empty() {
+        let file = temp_file("corrupt");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        for body in ["{broken", "", "[]", r#"{"version":99,"grants":[]}"#] {
+            std::fs::write(&file, body).unwrap();
+            let store = ApprovalStore::with_file(file.clone());
+            assert_eq!(store.len(), 0, "{body}");
+            // The store still works and replaces the bad file on the next write.
+            let root = PathBuf::from("/proj");
+            store.insert_at(data(&root, &root, "s1", "printf ok"), now_ms()).unwrap();
+            assert_eq!(ApprovalStore::with_file(file.clone()).len(), 1, "{body}");
+        }
+        cleanup(&file);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let file = temp_file("mode");
+        let root = PathBuf::from("/proj");
+        ApprovalStore::with_file(file.clone()).insert_at(data(&root, &root, "s1", "printf ok"), now_ms()).unwrap();
+        let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        cleanup(&file);
+    }
+
+    #[test]
+    fn a_new_approval_supersedes_older_grants_for_the_same_stage() {
+        let root = PathBuf::from("/proj");
+        let store = ApprovalStore::new();
+        let old = data(&root, &root, "s1", "printf old");
+        let (old_token, _) = store.insert_at(old.clone(), 1_000).unwrap();
+        let other = data(&root, &root, "s9", "printf other");
+        let (other_token, _) = store.insert_at(other, 1_000).unwrap();
+        let new = data(&root, &root, "s1", "printf new");
+        let (new_token, _) = store.insert_at(new, 2_000).unwrap();
+        // Approving one stage again with the SAME command keeps a whole-loop grant that covers it.
+        let whole = {
+            let mut d = data(&root, &root, "s1", "printf new");
+            d.stages.get_mut("l1").unwrap().insert("s2".into(), command_hash("printf two"));
+            d
+        };
+        let (whole_token, _) = store.insert_at(whole.clone(), 2_500).unwrap();
+        let single = data(&root, &root, "s1", "printf new");
+        store.insert_at(single, 2_600).unwrap();
+        assert!(store.authorize_stage_at(&whole_token, &root, &root, "l1", "s2", "printf two", 3_000).is_ok(), "whole-loop grant kept");
+        assert!(store.find_at(&whole, 3_000).is_some());
+        assert!(store.authorize_stage_at(&old_token, &root, &root, "l1", "s1", "printf old", 3_000).is_err());
+        assert!(store.find_at(&old, 3_000).is_none());
+        assert!(store.authorize_stage_at(&new_token, &root, &root, "l1", "s1", "printf new", 3_000).is_ok());
+        assert!(store.authorize_stage_at(&other_token, &root, &root, "l1", "s9", "printf other", 3_000).is_ok(), "unrelated stage kept");
+        let elsewhere = data(Path::new("/p2"), Path::new("/p2"), "s1", "printf old");
+        store.insert_at(elsewhere.clone(), 3_000).unwrap();
+        assert!(store.find_at(&elsewhere, 3_000).is_some() && store.find_at(&data(&root, &root, "s1", "printf new"), 3_000).is_some());
+    }
+
+    #[test]
+    fn revoke_reports_failure_and_empties_the_file_when_it_cannot_be_removed() {
+        // A directory at the file path: remove_file fails, the atomic write over it fails too, so clear() errors.
+        let file = temp_file("revoke-fail");
+        std::fs::create_dir_all(&file).unwrap();
+        let store = ApprovalStore::with_file(file.clone());
+        assert!(store.clear().is_err());
+        let _ = std::fs::remove_dir_all(file.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unsafe_approvals_file_loads_empty() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let root = PathBuf::from("/proj");
+        let file = temp_file("unsafe");
+        ApprovalStore::with_file(file.clone()).insert_at(data(&root, &root, "s1", "printf ok"), now_ms()).unwrap();
+        assert_eq!(ApprovalStore::with_file(file.clone()).len(), 1);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert_eq!(ApprovalStore::with_file(file.clone()).len(), 0, "group/other readable");
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let real = file.with_file_name("real.json");
+        std::fs::rename(&file, &real).unwrap();
+        symlink(&real, &file).unwrap();
+        assert_eq!(ApprovalStore::with_file(file.clone()).len(), 0, "symlink");
+        cleanup(&file);
     }
 }

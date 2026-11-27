@@ -53,7 +53,20 @@ pub fn is_too_broad(real: &str, home: Option<&str>) -> bool {
 
 /// Canonicalises `chosen`, requires a directory, and refuses too-broad roots.
 pub fn validate_root(chosen: &Path) -> Result<PathBuf, String> {
-    llmide_workspace_core::paths::validate_root(chosen, &local_home())
+    let real = llmide_workspace_core::paths::validate_root(chosen, &local_home())?;
+    refuse_data_dir_overlap(&real)?;
+    Ok(real)
+}
+
+/// A project root must not equal, contain or sit inside the app's own data dir: the webview's project-rooted fs
+/// commands could otherwise read or rewrite host state (saved Loop approvals, secrets).
+fn refuse_data_dir_overlap(real: &Path) -> Result<(), String> {
+    let Ok(dir) = crate::fsutil::desktop_data_dir() else { return Ok(()) };
+    let dir = std::fs::canonicalize(&dir).unwrap_or(dir);
+    if llmide_workspace_core::paths::overlaps_dir(real, &dir) {
+        return Err("that folder overlaps the app's own data folder and cannot be a project".into());
+    }
+    Ok(())
 }
 
 fn display_name(root: &Path) -> String {
