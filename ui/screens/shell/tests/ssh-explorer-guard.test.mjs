@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { load } from "./helpers.mjs";
 
-const { setHostBridge, setRemoteModeProvider, setSshModeProvider, invokeHost } = await load("host.ts");
+const { setHostBridge, setRemoteModeProvider, setSshModeProvider, invokeHost, host } = await load("host.ts");
 
 // Every command the Explorer, its search, watch, source control and terminal send to the host.
 const FS = ["fs_list_dir", "fs_read_file", "fs_read_image", "fs_read_range", "fs_write_file", "fs_create", "fs_rename", "fs_copy", "fs_delete", "fs_watch_start", "fs_watch_set", "fs_watch_stop"];
@@ -118,6 +118,67 @@ test("refusal_text_names_ssh_mode in ssh mode, and keeps the remote text in hub 
       assert.equal(e.message, "This action uses the local computer and is unavailable in remote mode.");
       return true;
     });
+  } finally {
+    reset();
+  }
+});
+
+// The saved-login commands: the host keeps the login per server in SSH mode and refuses them itself in hub mode.
+const SAVED_LOGIN = ["local_login_save", "local_login_session", "local_login_relogin", "local_login_store_refresh", "local_login_status", "local_login_forget"];
+
+function recordingBridge() {
+  const calls = [];
+  setHostBridge({ async invoke(cmd) { calls.push(cmd); return cmd; } });
+  return calls;
+}
+
+test("ssh mode admits the six saved-login commands", async () => {
+  const calls = recordingBridge();
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    for (const cmd of SAVED_LOGIN) assert.equal(await invokeHost(cmd), cmd, cmd);
+    assert.deepEqual(calls, SAVED_LOGIN);
+  } finally {
+    reset();
+  }
+});
+
+test("hub mode still refuses the saved-login commands", async () => {
+  const calls = recordingBridge();
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => false);
+  try {
+    for (const cmd of SAVED_LOGIN) {
+      await assert.rejects(invokeHost(cmd), (e) => e.code === "remote_mode" && e.command === cmd, cmd);
+    }
+    assert.deepEqual(calls, []);
+  } finally {
+    reset();
+  }
+});
+
+test("local mode is unchanged for the saved-login commands", async () => {
+  const calls = recordingBridge();
+  try {
+    for (const cmd of SAVED_LOGIN) assert.equal(await invokeHost(cmd), cmd, cmd);
+    assert.deepEqual(calls, SAVED_LOGIN);
+  } finally {
+    reset();
+  }
+});
+
+test("ssh mode: the real host wrappers reach the bridge with the saved-login command names", async () => {
+  const calls = [];
+  setHostBridge({ async invoke(cmd) { calls.push(cmd); return null; } });
+  setRemoteModeProvider(() => true);
+  setSshModeProvider(() => true);
+  try {
+    await host.localLoginSave("a@b.c", "pw");
+    await host.localLoginSession();
+    await host.localLoginStatus();
+    await host.localLoginForget();
+    assert.deepEqual(calls, ["local_login_save", "local_login_session", "local_login_status", "local_login_forget"]);
   } finally {
     reset();
   }

@@ -213,9 +213,20 @@ const SSH_EXPLORER_EXACT = new Set([
 const SSH_PROJECT_SETUP_EXACT = new Set([
   "project_paths", "project_memory", "project_rebuild_folders", "read_graph_file", "repo_clone",
 ]);
+/**
+ * The saved-login commands ("Keep me signed in"). Safe to admit in ssh mode: the host keeps the login per server and
+ * pinned host key and releases a credential only to the server core behind its own verified forward. Hub mode is refused
+ * by the host (`untrusted_core`) and stays refused here. Exact names on purpose: no prefix match, so a future
+ * `local_login_*` command is not admitted by accident.
+ */
+const SSH_SAVED_LOGIN_EXACT = new Set([
+  "local_login_save", "local_login_session", "local_login_relogin",
+  "local_login_store_refresh", "local_login_status", "local_login_forget",
+]);
+/** Whether ssh mode admits `command` beyond the remote-safe set: Explorer, project setup and saved-login commands. */
 function sshExplorerAdmitted(command: string): boolean {
   if (command === "fs_open_pdf") return false;
-  return SSH_EXPLORER_EXACT.has(command) || SSH_PROJECT_SETUP_EXACT.has(command)
+  return SSH_EXPLORER_EXACT.has(command) || SSH_PROJECT_SETUP_EXACT.has(command) || SSH_SAVED_LOGIN_EXACT.has(command)
     || command.startsWith("fs_") || command.startsWith("git_") || command.startsWith("pty_");
 }
 
