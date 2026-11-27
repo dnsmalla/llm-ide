@@ -350,6 +350,34 @@ test("the Refactor Structure stage discovers tests and writes both structure rep
   assert.deepEqual(writes.map(([p]) => p), ["llm-doc/loop/test/TEST-STRUCTURE.md", "system/loop/test/TEST-STRUCTURE.json"]);
 });
 
+test("a missing test structure fails the stage only after the Setup stage ran in this run", async () => {
+  const fs = {
+    async read() { throw Object.assign(new Error("not found"), { code: "not_found" }); },
+    async list(path) {
+      if (path === ".") return { entries: [] };
+      throw Object.assign(new Error("not found"), { code: "not_found" });
+    },
+    async create() {},
+    async write() {},
+  };
+  const { ctx } = ctxOf({ fs, projectRoot: "/p", runRoot: "/p" });
+  const structure = stage({ id: "test/test-structure", name: "Test Structure", kind: "testMap", command: null, testOp: "structure" });
+  const setup = stage({ id: "test/test-setup", name: "Test Setup", kind: "skill", command: null, skillId: "skills/test-structure-setup" });
+  const deps = createStageDeps(ctx, loopOf([structure, setup]));
+  const before = await deps.runStage(structure, []);
+  assert.equal(before.ok, true, "before Setup, missing is a finding for Setup, not a failure");
+  assert.match(before.output, /0 test root/);
+  assert.match(before.output, /lists every source file as untested/);
+  const check = stage({ id: "test/test-structure-check", name: "Test Structure Check", kind: "testMap", command: null, testOp: "structure" });
+  const out = (st, ok = true) => ({ stage: st, ok, output: "" });
+  const after = await deps.runStage(check, [out(structure), out(setup)]);
+  assert.equal(after.ok, false, "Setup ran and detection still finds nothing");
+  const rerun = await deps.runStage(check, [out(structure), out(setup), out(check, false)]);
+  assert.equal(rerun.ok, false, "a re-run of the same check after its repair still sees that Setup ran");
+  const nextIteration = await deps.runStage(structure, [out(structure), out(setup), out(check, false)]);
+  assert.equal(nextIteration.ok, true, "the next iteration's first detection runs before that iteration's Setup");
+});
+
 /** `fakeFs` plus the write/create the Graph snapshot needs; writes are recorded in `writes`. */
 function fakeWritableFs(files) {
   const writes = [];

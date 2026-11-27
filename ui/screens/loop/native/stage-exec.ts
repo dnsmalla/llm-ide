@@ -31,6 +31,7 @@ import { changedPathArgs, repoPrefixFor, stageHostArgs } from "./worktree-run.ts
 
 /** The core's default request timeout is 30 s; an agent call runs as long as its body allows, plus this transport grace. */
 const REPAIR_TIMEOUT_MS = 30 * 60 * 1000;
+const STRUCTURE_SETUP_SKILL = "skills/test-structure-setup";
 
 /** `invokeHost`'s shape; tests pass a fake. */
 export type HostInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
@@ -385,6 +386,17 @@ export function scopeStructure(structure: TestStructure, inputPath: string): Tes
   };
 }
 
+/** `prior` spans every iteration, so a Setup from an earlier iteration only counts until another structure stage ran.
+ *  The stage's own earlier outcomes are skipped: a re-run after its repair must still see the Setup before it. */
+function setupRanSinceLastStructure(prior: Prior, self: LoopStage): boolean {
+  for (let i = prior.length - 1; i >= 0; i--) {
+    const st = prior[i].stage;
+    if (st.kind === "skill" && st.skillId === STRUCTURE_SETUP_SKILL) return true;
+    if (st.kind === "testMap" && st.testOp === "structure" && st.id !== self.id) return false;
+  }
+  return false;
+}
+
 async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior, target: LoopDefinition): Promise<StageRunResult> {
   if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
   // The Test loop points at the project that owns its tests; Refactoring's input path is only a code scope, so its
@@ -392,8 +404,13 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
   const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
   const structure = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
   if (s.testOp === "structure") {
+    // A missing structure is a finding for the Setup stage, not a failure: only once Setup ran since the last
+    // structure detection and detection still finds nothing has the loop no way forward. Failing earlier sends the
+    // report to the repair agent, which cannot change what the detector looks for, and blocks Setup from running.
+    const failsWhenMissing = setupRanSinceLastStructure(prior, s);
+    if (structure.status === "missing" && !failsWhenMissing) structure.notes.push("No test roots found yet: until a test layout is detected, Test Map reads no existing tests and lists every source file as untested.");
     const writes = await writeTestStructure(ctx.fs, prefix, structure);
-    return { ok: structure.status === "ok", output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
+    return { ok: structure.status === "ok" || !failsWhenMissing, output: [`${structure.roots.length} test root(s)`, ...structure.roots.map((r) => `${r.packageDir || "."}: ${r.runner} · ${r.command}`), ...structure.notes, `wrote ${writes.md} and ${writes.json}`].join("\n") };
   }
   // graph_generate("code") writes graph-code.json; a missing or non-graph file falls back to file matching.
   let graphPath = graphPathFor(ctx.runId);
@@ -512,8 +529,8 @@ export function addendumSection(stage: Pick<LoopStage, "promptAddendum">): strin
 /**
  * A created pytest.ini is only safe to exempt from the protected-path guard (see `guardedPaths`' `repairOf`) when
  * nothing else already configures pytest beside it: pytest.ini always wins over a pyproject.toml, setup.cfg or
- * tox.ini in the same folder, even when empty, so creating one next to an existing-but-undetected config (the
- * Structure detector only recognises pytest.ini and a pyproject.toml naming pytest, not setup.cfg or tox.ini) would
+ * tox.ini in the same folder, even when empty, so creating one next to an existing config (setup.cfg or tox.ini
+ * count as competing even without a pytest section, which the Structure detector would not recognise) would
  * silently shadow it. Every other created path is returned unchanged; only a pytest.ini entry can be dropped here.
  */
 export async function createdPytestInisWithoutCompetingConfig(ctx: StageExecContext, created: readonly string[]): Promise<string[]> {

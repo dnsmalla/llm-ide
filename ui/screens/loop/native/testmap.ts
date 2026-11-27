@@ -25,6 +25,15 @@ async function firstDir(fs: TestMapFs, base: string, names: string[]): Promise<s
   return null;
 }
 
+/** Every place pytest reads its settings from, plus `conftest.py`, which only pytest loads: a repo that runs pytest
+ *  through a Makefile with just a root conftest.py has a working runner even without a pytest.ini. */
+async function pytestConfigured(fs: TestMapFs, base: string): Promise<boolean> {
+  if (await file(fs, join(base, "pytest.ini")) !== null || await file(fs, join(base, "conftest.py")) !== null) return true;
+  if ((await file(fs, join(base, "pyproject.toml")))?.includes("pytest")) return true;
+  if (/^\[tool:pytest\]/m.test((await file(fs, join(base, "setup.cfg"))) ?? "")) return true;
+  return /^\[pytest\]/m.test((await file(fs, join(base, "tox.ini"))) ?? "");
+}
+
 export async function detectTestStructure(fs: TestMapFs, repoPrefix: string, now = new Date()): Promise<TestStructure> {
   const prefix = repoPrefix ? `${repoPrefix}/` : "";
   const roots: TestRoot[] = [];
@@ -61,8 +70,9 @@ export async function detectTestStructure(fs: TestMapFs, repoPrefix: string, now
       if (testDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${testDir}`, runner: "xctest", command: pkg ? `cd ${pkg} && swift test` : "swift test", languages: ["swift"] });
       else notes.push(`${label}: Package.swift has a testTarget but no Tests directory`);
     }
-    if (await file(fs, `${join(base, "pytest.ini")}`) !== null || ((await file(fs, `${join(base, "pyproject.toml")}`))?.includes("pytest") ?? false)) {
-      const pyDir = await firstDir(fs, base, ["tests", "test"]);
+    const pyDir = await firstDir(fs, base, ["tests", "test"]);
+    // conftest.py usually sits inside the tests folder rather than next to it.
+    if (await pytestConfigured(fs, base) || (pyDir !== null && await file(fs, join(base, `${pyDir}/conftest.py`)) !== null)) {
       if (pyDir) roots.push({ packageDir: pkg, testDir: `${pkg ? `${pkg}/` : ""}${pyDir}`, runner: "pytest", command: pkg ? `cd ${pkg} && ${pytestCommand()}` : pytestCommand(), languages: ["py"] });
       else notes.push(`${label}: pytest configured but no tests directory`);
     }

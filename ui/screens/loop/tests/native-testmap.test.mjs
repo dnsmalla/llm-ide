@@ -43,6 +43,21 @@ test("a Python root runs pytest through the interpreter, not a bare launcher", a
   assert.equal(sub.roots.find((r) => r.runner === "pytest").command, `cd svc && ${PY} -m pytest`);
 });
 
+test("a Python root is found from any pytest config: conftest.py, setup.cfg [tool:pytest], tox.ini [pytest]", async () => {
+  const at = new Date("2026-01-01T00:00:00Z");
+  for (const config of [{ "conftest.py": "" }, { "setup.cfg": "[metadata]\n[tool:pytest]\n" }, { "tox.ini": "[tox]\n[pytest]\n" }]) {
+    const s = await detectTestStructure(mem({ ...config, "tests/test_a.py": "" }), "", at);
+    assert.equal(s.status, "ok", Object.keys(config)[0]);
+    assert.equal(s.roots[0].testDir, "tests");
+  }
+  const inside = await detectTestStructure(mem({ "tests/conftest.py": "", "tests/test_a.py": "" }), "", at);
+  assert.equal(inside.roots.find((r) => r.runner === "pytest")?.testDir, "tests", "conftest.py inside tests/");
+  // A setup.cfg or tox.ini without a pytest section is not a pytest config.
+  for (const config of [{ "setup.cfg": "[metadata]\n" }, { "tox.ini": "[tox]\n" }]) {
+    assert.equal((await detectTestStructure(mem({ ...config, "tests/test_a.py": "" }), "", at)).status, "missing", Object.keys(config)[0]);
+  }
+});
+
 test("missing test roots are reported, not invented", async () => {
   const s = await detectTestStructure(mem({ "README.md": "" }), "", new Date("2026-01-01T00:00:00Z"));
   assert.equal(s.status, "missing");
