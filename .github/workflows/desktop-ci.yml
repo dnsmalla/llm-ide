@@ -170,6 +170,16 @@ jobs:
         working-directory: desktop/src-tauri
         run: cargo test --locked --lib
 
+      # Path-dependency crates: `cargo test --lib` above does not run their tests. Each has its own Cargo.lock;
+      # they share desktop/src-tauri/target through desktop/.cargo/config.toml, so the cache above covers them.
+      - name: cargo test (workspace-core)
+        working-directory: desktop/workspace-core
+        run: cargo test --locked
+
+      - name: cargo test (workspace-helper)
+        working-directory: desktop/workspace-helper
+        run: cargo test --locked
+
       # The bundled core as the release stages it (pinned Node, production deps), then its dependency check and smoke.
       - name: Stage and smoke-test the bundled core
         if: runner.os == 'Linux'

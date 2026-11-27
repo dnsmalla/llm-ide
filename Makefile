@@ -28,7 +28,9 @@ clean-cache:
 
 .PHONY: test-desktop test-desktop-node
 # Desktop gates: node tests, capability/DOMPurify checks, generated-token drift
-# check, then `cargo test --lib` when a REAL cargo exists. A toolchain counts
+# check, then `cargo test --lib` (src-tauri) plus the full tests of the path-dependency
+# crates workspace-core and workspace-helper (`cargo test --lib` in src-tauri never
+# runs those) when a REAL cargo exists. A toolchain counts
 # only if `cargo --version` prints "cargo ..." (a broken rustup shim prints
 # "rustup ..." instead); when PATH only holds the shim, fall back to the rustup
 # stable toolchain's own binary so the tests are not skipped silently. The node
@@ -55,8 +57,11 @@ test-desktop: test-desktop-node
 	fi; \
 	if [ -n "$$CARGO" ] && "$$CARGO" --version 2>/dev/null | grep -q '^cargo '; then \
 	  TOOLCHAIN_BIN="$$(dirname "$$CARGO")"; \
-	  cd desktop/src-tauri && PATH="$$TOOLCHAIN_BIN:$$PATH" "$$CARGO" test --lib; \
-	else echo "test-desktop: no working cargo (a shim that prints 'rustup ...' does not count); skipping cargo test --lib"; fi
+	  export PATH="$$TOOLCHAIN_BIN:$$PATH"; \
+	  (cd desktop/src-tauri && "$$CARGO" test --lib) && \
+	  (cd desktop/workspace-core && "$$CARGO" test --locked) && \
+	  (cd desktop/workspace-helper && "$$CARGO" test --locked); \
+	else echo "test-desktop: no working cargo (a shim that prints 'rustup ...' does not count); skipping cargo tests"; fi
 
 # --- swift (iOS SharedProtocol) and gates ---------------------------------------
 
