@@ -80,11 +80,14 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   useEffect(() => setHidden(loadHiddenRunIds(scope, storage())), [scope]);
   const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null);
   const [confirmWorktreeRunId, setConfirmWorktreeRunId] = useState<string | null>(null);
+  // True when the confirm bar is for a run with no worktree at all (it worked on the main tree): Discard then only
+  // hides the card, after saying so — never auto-hidden, unlike a confirmed-gone shared worktree.
+  const [confirmHideOnly, setConfirmHideOnly] = useState(false);
   const [discardStatus, setDiscardStatus] = useState<WorktreeStatus | null>(null);
   const [discardProvider, setDiscardProvider] = useState<"github" | "gitlab" | null>(null);
   const [readingDiscard, setReadingDiscard] = useState(false);
   const [discardBusy, setDiscardBusy] = useState(false);
-  const [discardMsg, setDiscardMsg] = useState<string | null>(null);
+  const [discardMsg, setDiscardMsg] = useState<{ text: string; kind: "error" | "info" } | null>(null);
   const loopId = boardLoop?.id ?? null;
 
   useEffect(() => {
@@ -235,29 +238,73 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
+  /** Hides one card from this board's view (the journal entry itself is never deleted). */
+  const hideRun = (entryId: string) => {
+    setHidden((h) => {
+      const next = new Set(h);
+      next.add(entryId);
+      saveHiddenRunIds(scope, next, storage());
+      return next;
+    });
+  };
+
   /** Opens the inline confirm for one card's Discard, after checking it is actually safe to offer (a worktree
    *  exists, and this is the loop's newest run so its shared branch is not still needed by another one).
    *  The worktree's own runId is the loop's slug for a non-Factory run (loop_worktree_prepare's `runId` argument,
    *  NativeLoopScreen's executeLoop), never the journal entry's own id (a fresh UUID per run) — it has to be read
-   *  from the run's record (`decodeFactoryFields(record).worktree.runId`), the same field reopenWorktree reads. */
+   *  from the run's record (`decodeFactoryFields(record).worktree.runId`), the same field reopenWorktree reads.
+   *  A non-Factory loop reuses ONE worktree for every run (same slug), so discarding the newest run's card removes
+   *  it for every older card of that same loop too: the next one of those finds no worktree left (`"gone"`, not
+   *  `"refused"` — that check only runs once a worktree is actually found). There is nothing left to revert there,
+   *  so Discard still does its other half — hide the card — right away, with no confirm needed.
+   *  A failed record or worktree-list read ("unreadable") and a run with no worktree at all ("no-worktree", it
+   *  worked on the main tree) are NEVER auto-hidden: the former because the real state is unknown, the latter
+   *  because its edits may still be sitting live, uncommitted, in the main tree — both need the person to say so.
+   *  `loadRunRecord` never rejects: a missing OR an unreadable/corrupt record both resolve to `null` alike
+   *  (history.ts), so `null` has to be treated as "unreadable" here, not as "no worktree" — the record genuinely
+   *  having no `worktree` field (decodeFactoryFields(record).worktree === null for a record that DID load) is the
+   *  only thing that means "no-worktree". */
   const openDiscard = async (run: LoopRunIndexEntry) => {
     setDiscardMsg(null);
     const record = await loadRunRecord(fs, run.id, run.startedAt).catch(() => null);
-    const fields = decodeFactoryFields(record);
-    let worktrees: RunInfo[] = [];
-    try { worktrees = await invokeHost<RunInfo[]>("loop_worktree_list"); } catch { /* treated as "no worktree" below */ }
+    const fields = record === null ? { ok: false as const } : { ok: true as const, ...decodeFactoryFields(record) };
+    const worktrees = await invokeHost<RunInfo[]>("loop_worktree_list")
+      .then((list) => ({ ok: true as const, list }))
+      .catch(() => ({ ok: false as const }));
     const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
     const target = discardTarget(run, fields, worktrees, cards.map((c) => c.run), runningLoopId);
-    if (target.kind === "missing") { setDiscardMsg("This run has no worktree to discard: it was already removed, or this run worked directly on the main tree."); return; }
-    if (target.kind === "refused") { setDiscardMsg(target.reason); return; }
+    if (target.kind === "unreadable") { setDiscardMsg({ text: "Could not check this run's worktree; try again.", kind: "error" }); return; }
+    if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
+    if (target.kind === "gone") {
+      hideRun(run.id);
+      setDiscardMsg({ text: "Nothing to revert for this run — its worktree is already gone (removed by discarding another run of the same loop). The card is hidden.", kind: "info" });
+      return;
+    }
+    if (target.kind === "no-worktree") {
+      setConfirmDiscardId(run.id);
+      setConfirmWorktreeRunId(null);
+      setConfirmHideOnly(true);
+      return;
+    }
     const worktreeRunId = target.info.runId;
     setConfirmDiscardId(run.id);
     setConfirmWorktreeRunId(worktreeRunId);
+    setConfirmHideOnly(false);
     setDiscardStatus(null);
-    setDiscardProvider(fields.ship?.provider ?? null);
+    setDiscardProvider(fields.ok ? fields.ship?.provider ?? null : null);
     setReadingDiscard(true);
     void invokeHost<unknown>("loop_worktree_status", { runId: worktreeRunId }).then(decodeWorktreeStatus).catch(() => null)
       .then((status) => setDiscardStatus(status)).finally(() => setReadingDiscard(false));
+  };
+
+  /** This run never had a worktree (it worked directly on the main tree): Discard can only hide the card, after
+   *  saying so in the confirm bar — any uncommitted edits it left are untouched. */
+  const confirmHide = (entryId: string) => {
+    setConfirmDiscardId(null);
+    setConfirmWorktreeRunId(null);
+    setConfirmHideOnly(false);
+    setDiscardMsg({ text: "The card is hidden. Its edits, if any, are still in the working tree — Discard did not revert anything.", kind: "info" });
+    hideRun(entryId);
   };
 
   /** Removes the run's worktree and branch (reverting every change it made that was never shipped), then hides its
@@ -270,14 +317,9 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       setConfirmDiscardId(null);
       setConfirmWorktreeRunId(null);
       setDiscardMsg(null);
-      setHidden((h) => {
-        const next = new Set(h);
-        next.add(entryId);
-        saveHiddenRunIds(scope, next, storage());
-        return next;
-      });
+      hideRun(entryId);
     } catch (e) {
-      setDiscardMsg(`The worktree could not be removed: ${e instanceof Error ? e.message : String(e)}`);
+      setDiscardMsg({ text: `The worktree could not be removed: ${e instanceof Error ? e.message : String(e)}`, kind: "error" });
     } finally {
       setDiscardBusy(false);
     }
@@ -313,7 +355,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
         </form>
       ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}
-      {discardMsg ? <p className="fx-error" role="status">{discardMsg}</p> : null}
+      {discardMsg ? <p className={discardMsg.kind === "error" ? "fx-error" : "fx-hint"} role="status">{discardMsg.text}</p> : null}
       <div className="fx-lanes" role="list" aria-label={`${scope} board`}>
         {lanes.map((lane) => {
           const inLane = allCards.filter((c) => c.lane === lane);
@@ -330,11 +372,18 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
                     {isLive ? null : confirmDiscardId === run.id ? (
                       <div className="fx-actions" role="group" aria-label="Confirm discard">
                         <span className="fx-hint" role="alert">
-                          Remove this run's worktree and branch? This reverts every change it made that is not already shipped.{" "}
-                          {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, discardProvider ? { provider: discardProvider } : null)}
+                          {confirmHideOnly
+                            ? "This run worked directly on the main tree: Discard cannot revert it through a worktree, and any uncommitted edits it left are still there. This only hides the card."
+                            : <>Remove this run's worktree and branch? This reverts every change it made that is not already shipped.{" "}
+                                {readingDiscard ? "Reading the worktree…" : discardWarning(discardStatus, discardProvider ? { provider: discardProvider } : null)}</>}
                         </span>
-                        <button type="button" className="fx-btn fx-danger" disabled={discardBusy || readingDiscard || !confirmWorktreeRunId} onClick={() => confirmWorktreeRunId && void confirmDiscard(run.id, confirmWorktreeRunId)}>Discard</button>
-                        <button type="button" className="fx-btn" onClick={() => { setConfirmDiscardId(null); setConfirmWorktreeRunId(null); }}>Cancel</button>
+                        <button
+                          type="button" className="fx-btn fx-danger" disabled={discardBusy || readingDiscard || (!confirmHideOnly && !confirmWorktreeRunId)}
+                          onClick={() => (confirmHideOnly ? confirmHide(run.id) : confirmWorktreeRunId && void confirmDiscard(run.id, confirmWorktreeRunId))}
+                        >
+                          {confirmHideOnly ? "Hide card" : "Discard"}
+                        </button>
+                        <button type="button" className="fx-btn" onClick={() => { setConfirmDiscardId(null); setConfirmWorktreeRunId(null); setConfirmHideOnly(false); }}>Cancel</button>
                       </div>
                     ) : (
                       <div className="fx-actions">

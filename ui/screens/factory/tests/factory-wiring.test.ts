@@ -59,3 +59,13 @@ test("the loop-run board guards async results with the local alive flag and does
   assert.match(src, /if \(!alive\) return;/);
   assert.equal(/\[fs, projectRoot, scope, tick, active\]/.test(src), false, "tick is not an effect dependency");
 });
+
+test("Discard never treats an unreadable run record the same as a real no-worktree (main-tree) run", () => {
+  // loadRunRecord (history.ts) never rejects: a missing OR a corrupt/unreadable record both resolve to null alike,
+  // so openDiscard must branch on `record === null` itself before decodeFactoryFields ever runs — otherwise a
+  // record that merely failed to read looks identical to one that loaded fine with no worktree field, and Discard
+  // tells the person "this ran on the main tree" (wrong) instead of "could not check" (honest).
+  const src = read("../LoopRuns.tsx");
+  assert.match(src, /const record = await loadRunRecord\(fs, run\.id, run\.startedAt\)\.catch\(\(\) => null\);/);
+  assert.match(src, /const fields = record === null \? \{ ok: false as const \} : \{ ok: true as const, \.\.\.decodeFactoryFields\(record\) \};/);
+});

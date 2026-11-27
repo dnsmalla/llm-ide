@@ -63,21 +63,26 @@ test("discardTarget: the worktree runId comes from the run's own record, never f
   // run.id is a fresh UUID per run; a non-Factory loop's worktree is prepared with the loop's slug instead, so the
   // two never match. The worktree list only carries the slug.
   const run = { id: "entry-uuid-1", loopId: "L1", loopName: "Refactoring", startedAt: "2026-11-27T00:00:00.000Z" };
-  const fields = { worktree: { runId: "refactoring", branch: "loop/refactoring", baseCommit: "abc", repo: "r" } };
+  const withWorktree = { ok: true, worktree: { runId: "refactoring", branch: "loop/refactoring", baseCommit: "abc", repo: "r" } };
   const info = { runId: "refactoring", project: "/p", repo: "r", worktree: "/p/system/loop-worktrees/refactoring", branch: "loop/refactoring", baseCommit: "abc" };
-  assert.deepEqual(discardTarget(run, fields, [info], [run], null), { kind: "ok", info });
+  const list = (...items) => ({ ok: true, list: items });
+  assert.deepEqual(discardTarget(run, withWorktree, list(info), [run], null), { kind: "ok", info });
   // Looking it up by the journal entry's own id (the bug) would find nothing.
-  assert.deepEqual(discardTarget(run, fields, [{ ...info, runId: run.id }], [run], null), { kind: "missing" });
-  // No record, or a record with no worktree at all: missing, not a crash.
-  assert.deepEqual(discardTarget(run, {}, [info], [run], null), { kind: "missing" });
-  assert.deepEqual(discardTarget(run, { worktree: null }, [info], [run], null), { kind: "missing" });
-  // The worktree once existed but was already removed: not in the current list.
-  assert.deepEqual(discardTarget(run, fields, [], [run], null), { kind: "missing" });
+  assert.deepEqual(discardTarget(run, withWorktree, list({ ...info, runId: run.id }), [run], null), { kind: "gone" });
+  // This run never had a worktree (it worked on the main tree): not the same as "gone" — its edits may still be
+  // sitting live there, so the caller must ask before hiding, never fold this into an auto-hide.
+  assert.deepEqual(discardTarget(run, { ok: true, worktree: null }, list(info), [run], null), { kind: "no-worktree" });
+  // The worktree once existed but was already removed: not in the current list — genuinely gone.
+  assert.deepEqual(discardTarget(run, withWorktree, list(), [run], null), { kind: "gone" });
+  // The record or the live worktree list could not be read: unknown state, never "gone" or "no-worktree" — those
+  // would make the caller hide a card whose real worktree/branch might still be sitting there untouched.
+  assert.deepEqual(discardTarget(run, { ok: false }, list(info), [run], null), { kind: "unreadable" });
+  assert.deepEqual(discardTarget(run, withWorktree, { ok: false }, [run], null), { kind: "unreadable" });
   // An older run of a loop whose branch a newer run still needs: refused, same rule as the Factory board.
   const newer = { id: "entry-uuid-2", loopId: "L1", startedAt: "2026-11-27T01:00:00.000Z" };
-  assert.equal(discardTarget(run, fields, [info], [run, newer], null).kind, "refused");
+  assert.equal(discardTarget(run, withWorktree, list(info), [run, newer], null).kind, "refused");
   // The loop is running right now: refused even though it is the newest run.
-  assert.equal(discardTarget(run, fields, [info], [run], "L1").kind, "refused");
+  assert.equal(discardTarget(run, withWorktree, list(info), [run], "L1").kind, "refused");
 });
 
 test("the task is whitespace-collapsed in the event", () => {

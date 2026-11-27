@@ -106,7 +106,9 @@ export function saveHiddenRunIds(name: string, ids: ReadonlySet<string>, storage
 
 export type DiscardTarget =
   | { kind: "ok"; info: RunInfo }
-  | { kind: "missing" }
+  | { kind: "gone" }
+  | { kind: "no-worktree" }
+  | { kind: "unreadable" }
   | { kind: "refused"; reason: string };
 
 /**
@@ -115,18 +117,32 @@ export type DiscardTarget =
  * slug (shared by every run of that loop), read back here from the run's record
  * (`fields.worktree.runId` — the same field `reopenWorktree` reads). Using `run.id` for the host calls instead
  * would always report "no worktree", even when one exists.
+ *
+ * `fields` and `worktrees` must say whether the record and the live worktree list were actually read — a failed
+ * read (loop_worktree_list always refuses in SSH mode; no project may be open; a record read can fail) must never
+ * be folded into "confirmed gone": that would let the caller silently hide a card whose worktree, branch and
+ * unshipped changes are still there, with no way back (hiding is a one-way, per-viewer action).
+ * - `"no-worktree"`: the record has no `worktree.runId` at all — this run worked directly on the main tree (a loop
+ *   with `alwaysUseWorktree: false`). There is nothing to revert through a worktree, but its edits may still sit
+ *   live, uncommitted, in the main tree: the caller must say so and ask before hiding, never hide silently.
+ * - `"gone"`: the record names a worktree id, the live list was read successfully, and that id is not in it — the
+ *   shared worktree this loop's runs all point to was already removed by discarding another one of its cards.
+ *   Genuinely nothing left to revert: safe for the caller to hide without asking.
+ * - `"unreadable"`: the record or the live list could not be read. Unknown state: never hide, never offer to.
  */
 export function discardTarget(
   run: LoopRunIndexEntry,
-  fields: Pick<FactoryRunFields, "worktree">,
-  worktrees: readonly RunInfo[],
+  fields: { ok: true; worktree: FactoryRunFields["worktree"] } | { ok: false },
+  worktrees: { ok: true; list: readonly RunInfo[] } | { ok: false },
   runsOfThisLoop: readonly Pick<LoopRunIndexEntry, "id" | "loopId" | "startedAt">[],
   runningLoopId: string | null,
 ): DiscardTarget {
+  if (!fields.ok) return { kind: "unreadable" };
   const worktreeRunId = fields.worktree?.runId ?? null;
-  if (!worktreeRunId) return { kind: "missing" };
-  const info = worktrees.find((w) => w.runId === worktreeRunId);
-  if (!info) return { kind: "missing" };
+  if (!worktreeRunId) return { kind: "no-worktree" };
+  if (!worktrees.ok) return { kind: "unreadable" };
+  const info = worktrees.list.find((w) => w.runId === worktreeRunId);
+  if (!info) return { kind: "gone" };
   const refusal = branchDiscardRefusal(info, runsOfThisLoop, run, runningLoopId);
   return refusal ? { kind: "refused", reason: refusal } : { kind: "ok", info };
 }
