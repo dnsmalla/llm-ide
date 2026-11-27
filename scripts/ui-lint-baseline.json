@@ -1,0 +1,58 @@
+{
+  "ui/screens/chat/ChatScreen.tsx": {
+    "errors": 0,
+    "warnings": 4
+  },
+  "ui/screens/chat/Composer.tsx": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "ui/screens/docgen/DocGenScreen.tsx": {
+    "errors": 0,
+    "warnings": 3
+  },
+  "ui/screens/docgen/SourcePanel.tsx": {
+    "errors": 5,
+    "warnings": 4
+  },
+  "ui/screens/explorer/ExplorerScreen.tsx": {
+    "errors": 2,
+    "warnings": 4
+  },
+  "ui/screens/factory/LoopRuns.tsx": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "ui/screens/gantt/GanttScreen.tsx": {
+    "errors": 0,
+    "warnings": 2
+  },
+  "ui/screens/issues/IssuesScreen.tsx": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "ui/screens/library/index.tsx": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "ui/screens/library/write/NoteWorkspace.tsx": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "ui/screens/loop/native/NativeLoopScreen.tsx": {
+    "errors": 0,
+    "warnings": 5
+  },
+  "ui/screens/settings/index.tsx": {
+    "errors": 0,
+    "warnings": 1
+  },
+  "ui/screens/shell/Shell.tsx": {
+    "errors": 0,
+    "warnings": 5
+  },
+  "ui/screens/shell/ShellTerminalDock.tsx": {
+    "errors": 0,
+    "warnings": 1
+  }
+}
