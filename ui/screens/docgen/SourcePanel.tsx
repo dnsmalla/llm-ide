@@ -174,6 +174,44 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
   }, [dir, load]);
   useEffect(() => () => { walkCtl.current?.abort(); listing.current.dispose(); }, []);
 
+  const siblings = useMemo(() => (preview ? siblingImages(rows, 12, preview.path) : []), [preview, rows]);
+  useEffect(() => {
+    if (!fs) return;
+    setThumbs({});
+    if (!preview) thumbCache.current.clear();
+  }, [preview?.path, fs]);
+  useEffect(() => {
+    if (!fs || !preview || !env.readImage) return undefined;
+    let live = true;
+    setThumbsReady(false);
+    void (async () => {
+      try {
+      for (const r of siblings) {
+        if (!live) return;
+        if (r.path === preview.path) continue;
+        const cached = thumbCache.current.get(r.path);
+        if (cached) { setThumbs((old) => (old[r.path] === cached ? old : { ...old, [r.path]: cached })); continue; }
+        try {
+          const full = await env.readImage!(r.path);
+          if (!live) return;
+          if (!full) continue;
+          const thumb = await shrinkDataUrl(full);
+          if (!live) return;
+          thumbCache.current.set(r.path, thumb);
+          setThumbs((old) => ({ ...old, [r.path]: thumb }));
+        } catch { /* a sibling that cannot be read is simply omitted */ }
+      }
+      } finally { if (live) setThumbsReady(true); }
+    })();
+    return () => { live = false; };
+  }, [preview?.path, siblings, env.readImage, fs]);
+  useEffect(() => {
+    if (!fs) return;
+    if (preview && !wasOpen.current) stripRef.current?.querySelector<HTMLButtonElement>("[data-current]")?.focus();
+    wasOpen.current = preview !== null;
+  }, [preview?.path, fs]);
+  useEffect(() => { if (fs) closePreview(false); }, [dir, fs]);
+
   if (!fs) return <p className="dg-muted">Project files need the desktop app.</p>;
 
   const addFolder = () => {
@@ -201,40 +239,6 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     );
   };
 
-  const siblings = useMemo(() => (preview ? siblingImages(rows, 12, preview.path) : []), [preview, rows]);
-  useEffect(() => {
-    setThumbs({});
-    if (!preview) thumbCache.current.clear();
-  }, [preview?.path]);
-  useEffect(() => {
-    if (!preview || !env.readImage) return undefined;
-    let live = true;
-    setThumbsReady(false);
-    void (async () => {
-      try {
-      for (const r of siblings) {
-        if (!live) return;
-        if (r.path === preview.path) continue;
-        const cached = thumbCache.current.get(r.path);
-        if (cached) { setThumbs((old) => (old[r.path] === cached ? old : { ...old, [r.path]: cached })); continue; }
-        try {
-          const full = await env.readImage!(r.path);
-          if (!live) return;
-          if (!full) continue;
-          const thumb = await shrinkDataUrl(full);
-          if (!live) return;
-          thumbCache.current.set(r.path, thumb);
-          setThumbs((old) => ({ ...old, [r.path]: thumb }));
-        } catch { /* a sibling that cannot be read is simply omitted */ }
-      }
-      } finally { if (live) setThumbsReady(true); }
-    })();
-    return () => { live = false; };
-  }, [preview?.path, siblings, env.readImage]);
-  useEffect(() => {
-    if (preview && !wasOpen.current) stripRef.current?.querySelector<HTMLButtonElement>("[data-current]")?.focus();
-    wasOpen.current = preview !== null;
-  }, [preview?.path]);
 
   const openPreview = async (path: string) => {
     if (!env.readImage || path === preview?.path) return;
@@ -251,7 +255,6 @@ function FilesTab({ env, selection, onAdd, onRemove, surface, initialViewport, u
     if (restoreFocus && path) requestAnimationFrame(() => viewRefs.current.get(path)?.focus());
   };
 
-  useEffect(() => { closePreview(false); }, [dir]);
   const root = roots.find((r) => dir === r.path || dir.startsWith(`${r.path}/`)) ?? roots[0]!;
   const rel = dir === root.path ? "" : dir.slice(root.path.length + 1);
   const crumbs = rel === "" ? root.label : `${root.label} / ${rel}`;
