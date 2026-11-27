@@ -147,9 +147,12 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1 ($2)" >&2; 
 
 # Prefer the rustup stable toolchain's own cargo: a `cargo` earlier on PATH can be a broken rustup proxy
 # (it prints "this is the version for the rustup toolchain manager") or a Homebrew rust, which cannot build this.
-for d in "$HOME/.rustup/toolchains/stable-$RUST_TRIPLE/bin"; do
-  [ -x "$d/cargo" ] && PATH="$d:$PATH" && break
-done
+# Skipped when RUSTUP_TOOLCHAIN is set: the caller (CI) pinned a toolchain on purpose and this would override it.
+if [ -z "${RUSTUP_TOOLCHAIN:-}" ]; then
+  for d in "$HOME/.rustup/toolchains/stable-$RUST_TRIPLE/bin"; do
+    [ -x "$d/cargo" ] && PATH="$d:$PATH" && break
+  done
+fi
 [ -x "$HOME/.cargo/bin/cargo" ] && PATH="$PATH:$HOME/.cargo/bin"
 need node "install Node 22+"; need npm "comes with Node"; need cargo "install Rust with rustup (https://rustup.rs)"
 need codesign "Xcode command line tools: xcode-select --install"; need plutil "macOS"
@@ -294,7 +297,12 @@ if [ "$DMG" = 1 ]; then
     local stage; stage="$(mktemp -d)"
     cp -R "$APP" "$stage/"; ln -s /Applications "$stage/Applications"
     rm -f "$DMG_OUT"
-    hdiutil create -quiet -volname "LLM-IDE" -srcfolder "$stage" -format UDZO -ov "$DMG_OUT"
+    # hdiutil intermittently fails with "Resource busy" right after a copy; retry before giving up.
+    local attempt=1
+    until hdiutil create -quiet -volname "LLM-IDE" -srcfolder "$stage" -format UDZO -ov "$DMG_OUT"; do
+      [ "$attempt" -lt 3 ] || { rm -rf "$stage"; return 1; }
+      attempt=$((attempt + 1)); sleep 5
+    done
     rm -rf "$stage"
   }
   run "Make the .dmg" make_dmg
