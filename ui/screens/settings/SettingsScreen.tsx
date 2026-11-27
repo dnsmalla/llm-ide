@@ -97,7 +97,8 @@ export function SettingsScreen({ env, registry = settingsRegistry, initialSectio
   // team-wide member/invite panels inside it stay owner/admin-only and re-check the enforced role.
 
   const hasProject = Boolean(env.host.activeProjectPath?.());
-  // Self-Heal shows only after the host said this debug build records (shell/self-heal.ts); never in a release build.
+  // Self-Heal shows only after the host said this build records (shell/self-heal.ts): on by default in a debug
+  // build, or in a release build once the person opted in with LLMIDE_SELF_HEAL=1.
   const devOn = useSyncExternalStore(subscribeSelfHeal, selfHealEnabled, () => false);
   const hidden = new Set(env.serverMode === "remote" || env.serverMode === "ssh" ? REMOTE_GROUP_HIDDEN : []);
   const dead = new Set(APP_GROUPS.filter((g) => g.status === "mac-only" || (g.status === "dev-only" && !devOn) || hidden.has(g.id)).map((g) => g.id));

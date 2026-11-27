@@ -1,6 +1,7 @@
 //! Self-Heal fix runs, host side (plan B).
 //!
-//! Debug builds only: every command refuses unless `self_heal::enabled()`. The webview drives one manual run:
+//! Every command refuses unless `self_heal::enabled()` (on by default in a debug build, opt-in with
+//! `LLMIDE_SELF_HEAL=1` in a release build). The webview drives one manual run:
 //! 1. the core picks the batch (`POST /kb/self-heal/runs`);
 //! 2. `self_heal_prepare` adds a fresh git worktree of the source checkout at
 //!    `<data dir>/self-heal/loop-worktrees/<run id>` (the `loop-worktrees` segment is what the core's Loop agent
@@ -376,7 +377,7 @@ pub async fn self_heal_remove(run_id: String) -> Result<(), String> {
 
 fn ready() -> Result<(PathBuf, PathBuf), String> {
     if !crate::self_heal::enabled() {
-        return Err("Self-Heal runs only in a debug build".into());
+        return Err("Self-Heal is off: it runs by default in a debug build, or in a release build with LLMIDE_SELF_HEAL=1".into());
     }
     Ok((source_root()?, worktrees_dir()?))
 }

@@ -29,7 +29,7 @@ export function buildChatReport(description: string, messages: readonly Message[
 }
 
 export interface ReportDeps {
-  /** Records one chat report; false when Self-Heal is off (a release build). */
+  /** Records one chat report; false when Self-Heal is off (a release build that never opted in). */
   report: (message: string) => Promise<boolean>;
   /** How many reports are still waiting to reach the core. */
   pending: () => number;
@@ -40,7 +40,7 @@ export async function reportFromChat(deps: ReportDeps, description: string, mess
   const d = oneLine(description);
   if (!d) return "Describe what is wrong: /self-heal <what is wrong>.";
   if (!(await deps.report(buildChatReport(d, messages)))) {
-    return "Self-Heal is only available in debug desktop builds, so nothing was recorded.";
+    return "Self-Heal is off in this build (it runs by default in a debug build, or in a release build once LLMIDE_SELF_HEAL=1 is set), so nothing was recorded.";
   }
   return deps.pending() > 0
     ? "Saved. It reaches Self-Heal as soon as the core is reachable. Then open Settings → Self-Heal → Try to fix."

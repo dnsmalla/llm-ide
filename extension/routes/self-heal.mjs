@@ -1,8 +1,8 @@
 // Self-Heal routes (plan A: incidents; plan B, the fix runs; contract schema/http/self-heal.schema.json).
 // server.mjs imports this module only while config.selfHeal is on (LLMIDE_SELF_HEAL=1, which the Tauri host passes
-// only in a debug build). Otherwise every path answers 404 feature_disabled before this module loads. Every route
-// needs the JWT AND the bus host proof, so only the desktop UI of the core the host spawned reaches the store.
-// Nothing here logs incident text.
+// by default in a debug build, and in a release build only once a person opts in). Otherwise every path answers
+// 404 feature_disabled before this module loads. Every route needs the JWT AND the bus host proof, so only the
+// desktop UI of the core the host spawned reaches the store. Nothing here logs incident text.
 //
 //   GET    /kb/self-heal/incidents              { incidents }          the user's incidents, newest first
 //   POST   /kb/self-heal/incidents              { recorded, skipped }  record 1-50 reports (an unusable one, or one an

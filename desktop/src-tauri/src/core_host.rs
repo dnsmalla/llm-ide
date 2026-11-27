@@ -1923,8 +1923,8 @@ fn real_launch(ctx: &LaunchCtx<'_>) -> Result<Launch, String> {
     if host_api_dev_env(cfg!(debug_assertions), std::env::var("LLMIDE_HOST_API_DEV").ok().as_deref()) {
         cmd.env("LLMIDE_HOST_API_DEV", "1");
     }
-    // Self-Heal incident capture: debug builds only (self_heal::enabled), an explicit `.env` like the dev flag, never
-    // a widened core_env ALLOWED.
+    // Self-Heal incident capture: on by default in a debug build, opt-in with LLMIDE_SELF_HEAL=1 in a release build
+    // (self_heal::enabled), an explicit `.env` like the dev flag, never a widened core_env ALLOWED.
     if crate::self_heal::enabled() {
         cmd.env("LLMIDE_SELF_HEAL", "1");
     }

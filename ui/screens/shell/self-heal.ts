@@ -1,6 +1,6 @@
 // Self-Heal capture, webview side (plan A).
-// Debug desktop builds only: the host's `self_heal_take` answers `enabled: false` in a release build, and then
-// nothing is kept, posted or shown. In a debug build, every 15 s the pump:
+// On by default in a debug build, opt-in with LLMIDE_SELF_HEAL=1 in a release build: the host's `self_heal_take`
+// answers `enabled: false` otherwise, and then nothing is kept, posted or shown. While on, every 15 s the pump:
 //   1. drains the host's reports (core stderr, panic records);
 //   2. adds what this webview reported: Chat and Loop errors, any section's crash, uncaught errors and unexpected
 //      host-command failures;
@@ -35,7 +35,7 @@ let pending: IncidentReport[] = [];
 const listeners = new Set<() => void>();
 let lastDeps: PumpDeps | null = null;
 
-/** True once the host said this is a debug build that records (Settings shows the Self-Heal group then). */
+/** True once the host said this build records (Settings shows the Self-Heal group then). */
 export const selfHealEnabled = (): boolean => enabled;
 export const pendingCount = (): number => pending.length;
 

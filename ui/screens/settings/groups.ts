@@ -9,7 +9,7 @@ export type GroupStatus =
   | "host" //           needs a desktop host command that does not exist yet
   | "core-route" //     needs a core route that does not exist yet
   | "mac-only" //       a Swift-app feature with no desktop counterpart
-  | "dev-only"; //      shown only when the host reports a debug build that records (Self-Heal)
+  | "dev-only"; //      shown only when the host reports a build that records (Self-Heal: debug by default, or a release build with LLMIDE_SELF_HEAL=1)
 
 export interface GroupDef {
   /** Stable id: the deep-link anchor (`settings:<id>`) and the storage key. */

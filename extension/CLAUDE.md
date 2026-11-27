@@ -136,10 +136,10 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
 - **Off switch**: `LLMIDE_SYNC=off` starts no scheduler; per user, Settings "Sync on" (`sync_state.enabled`). A hub (`LLMIDE_HUB=1`) starts no scheduler and answers every `/kb/sync/*` with `403 SYNC_LOCAL_ONLY` (the Settings card hides).
 - **Never** log keys, folder names, the SSH private key, the MEGA email or password, or decrypted content.
 
-## Self-Heal (debug desktop builds)
+## Self-Heal (desktop)
 
 - **Switch**:
-  - `config.selfHeal` = `LLMIDE_SELF_HEAL=1` and not production. The Tauri host passes it only in a debug build (`desktop/src-tauri/src/self_heal.rs` `enabled()`; opt out with `LLMIDE_SELF_HEAL=0` in the host's env).
+  - `config.selfHeal` = `LLMIDE_SELF_HEAL=1` and not production. On by default in a debug build (opt out with `LLMIDE_SELF_HEAL=0`); off by default in a release build (opt in with `LLMIDE_SELF_HEAL=1`), so the host passes it to the core it spawns only when the gate says so (`desktop/src-tauri/src/self_heal.rs` `enabled()`/`gate()`; user decision 2026-11-27).
   - Off: `/kb/self-heal/*` answers `404 {"error":"feature_disabled","feature":"self_heal"}`, `routes/self-heal.mjs` is never imported, and `/health` does not list the paths.
   - It is not a `FEATURE_ROUTE_GROUPS` entry, because an unset `LLMIDE_FEATURES` means all on.
 - **Capture (plan A)**:
@@ -155,6 +155,7 @@ The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are nev
   5. `POST /kb/self-heal/runs/:id/outcome` maps the verdicts.
   - Review / Apply (`git apply` of the reviewed patch, never a commit) / Discard end with `POST /kb/self-heal/runs/:id/resolve`.
   - The source checkout must be on the user's repo allow-list, and the Auto Tasks feature (which owns the Loop agent) must be on.
+  - `self_heal_fix.rs`'s `source_root()` refuses the fix loop outright ("Self-Heal needs a source checkout, and this app runs its bundled core") when the app runs its bundled core (`runtime_for(...).mode == "bundled"`, the default for an installed release build) rather than a configured source-checkout backend. In that case plan A (incident capture, now available in a release build with `LLMIDE_SELF_HEAL=1`) still works; only "Try to fix" and the daily automatic run need a source-checkout backend.
   - While a run is open, the core skips `log` and `server` reports.
   - **Learning across runs (API 151, migration 0079):** each incident keeps `history` (newest 4: a failed attempt's verdict and the redacted 2000-character tail of the failing `make regression`, sent as the outcome's `verifyOutput`; an applied fix; a recurrence after it). `renderBatch` lists it, fenced, as "attempt N of 3 … take a different approach", the prompt asks for a test that fails without the fix, and Settings shows it under "Earlier attempts".
   - **Notes in the repo (plan 2026-11-19 phase 4):** an applied fix (`resolve` with `applied`) and an incident that reaches `needsHuman` are appended as `## <date> · fixed|needs a person · <category>` sections to `<source checkout>/system/self-improvement/self-heal.md` (redacted text only, at most 256 KiB, oldest sections dropped; the repo is re-checked against the allow-list; best effort). A new run's BATCH.md quotes the newest 5 notes for its incidents' categories, fenced as data.

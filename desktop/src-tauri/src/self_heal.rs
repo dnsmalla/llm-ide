@@ -1,9 +1,9 @@
 //! Self-Heal capture, host side (plan A).
 //!
-//! Debug builds only:
-//! - `enabled()` is false in a release build whatever the environment. A release build therefore records nothing,
-//!   passes no `LLMIDE_SELF_HEAL` to the core and answers `self_heal_take` with `enabled: false`.
+//! On by default in a debug build; opt-in in a release build:
 //! - A debug build records unless `LLMIDE_SELF_HEAL=0`.
+//! - A release build records nothing unless `LLMIDE_SELF_HEAL=1` is set explicitly (user decision 2026-11-27: this
+//!   autonomous incident-capture + fix loop may run in the app people actually use daily, but only when asked for).
 //!
 //! Two host sources:
 //! - the spawned core's stderr: one report per error line plus its `at …` frames, or per JSON logger `error` line;
@@ -46,9 +46,14 @@ pub struct Take {
     pub incidents: Vec<HostIncident>,
 }
 
-/// The switch: a debug build, unless the developer set `LLMIDE_SELF_HEAL=0`.
+/// The switch: on by default in a debug build (opt out with `LLMIDE_SELF_HEAL=0`), off by default in a release
+/// build (opt in with `LLMIDE_SELF_HEAL=1`). An explicit value always wins over the build's own default.
 pub fn gate(debug: bool, value: Option<&str>) -> bool {
-    debug && value != Some("0")
+    match value {
+        Some("0") => false,
+        Some("1") => true,
+        _ => debug,
+    }
 }
 
 pub fn enabled() -> bool {
@@ -236,7 +241,7 @@ pub fn on_core_stderr_end() {
     }
 }
 
-/// The webview's pump: everything queued since the last call, or `enabled: false` in a release build.
+/// The webview's pump: everything queued since the last call, or `enabled: false` while the gate is off.
 #[tauri::command]
 pub fn self_heal_take() -> Take {
     if !enabled() {
@@ -258,12 +263,13 @@ mod tests {
     }
 
     #[test]
-    fn the_gate_is_debug_only_and_honours_an_explicit_off() {
-        assert!(gate(true, None));
+    fn the_gate_defaults_by_build_and_an_explicit_value_always_wins() {
+        assert!(gate(true, None), "a debug build records by default");
         assert!(gate(true, Some("1")));
         assert!(!gate(true, Some("0")), "LLMIDE_SELF_HEAL=0 opts a debug build out");
-        assert!(!gate(false, None), "a release build never records");
-        assert!(!gate(false, Some("1")), "not even when asked");
+        assert!(!gate(false, None), "a release build records nothing by default");
+        assert!(gate(false, Some("1")), "a release build opts in with LLMIDE_SELF_HEAL=1");
+        assert!(!gate(false, Some("0")), "an explicit 0 still opts a release build out");
     }
 
     #[test]
