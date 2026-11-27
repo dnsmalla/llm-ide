@@ -41,10 +41,11 @@ import { runningLoopIdsOf } from "./improve/panel-model.ts";
 import { liveRuns, subscribe as subscribeRuns, trackExternalRun, withBaselineFor } from "./run-manager.ts";
 import { createModelTracker } from "./step-model.ts";
 import { appendRunRecord, decodeFactoryFields, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
-import { copyStateBackIfMissed, copyStateIn } from "./run-end.ts";
+import { copyStateBackIfMissed } from "./run-end.ts";
 import { finishLoopRun } from "./run-finish.ts";
-import { branchDiscardRefusal, lastShipUrl, providerSaysMerged } from "./loop-branch.ts";
-import { configWithSetup, isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
+import { prepareLoopRun } from "./run-start.ts";
+import { branchDiscardRefusal, lastShipUrl } from "./loop-branch.ts";
+import { isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
 import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
@@ -52,7 +53,7 @@ import { FactoryPicker } from "./FactoryPicker.tsx";
 import { ShipPanel } from "./ShipPanel.tsx";
 import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
-import { decodeWorktreeDiff, decodeWorktreeStatus, shipTarget, type WorktreeDiff } from "./ship-model.ts";
+import { decodeWorktreeDiff, shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
 import { clearLiveCard, setLiveCard, updateLiveModel, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
@@ -685,121 +686,27 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = batchRollbackReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
-    // The native Rust dialog (or a still-valid grant for exactly the same command hashes) is the approval. A
-    // scheduled run never opens a dialog: it reuses an existing grant or skips, so the app cannot self-approve.
-    let approvalToken: string | null = null;
-    try {
-      if (scheduled) {
-        const status = await approvalStatus(target.id);
-        if (!status.approved) {
-          setNotice(`“${target.name}” needs a native host approval for its exact shell commands before a scheduled run; run it once from here.`);
-          return;
-        }
-        // `token` is null when there is nothing to approve (no shell or fault verify commands).
-        approvalToken = status.token;
-      } else {
-        const approval = await approveLoop(target.id);
-        if (!approval) { setNotice("The Loop commands were not approved; the run did not start."); return; }
-        approvalToken = approval.token;
-      }
-      await refreshApproval(target.id);
-    } catch (e) {
-      setNotice(e instanceof Error ? e.message : "The Loop commands could not be approved.");
-      return;
-    }
-    // The approval dialog is modal and can outlive the screen: a leave while it was open must not start the loop
-    // (the unmount cleanup only cancels a run whose runningRef is already set).
-    if (unmountedRef.current) return;
-    // `runningRef` is set only after the awaits below; this flag stops a second click from starting a second run
-    // (and a second worktree) while the first is still being prepared. Every early `return` below clears it.
-    if (startingRef.current) return;
-    startingRef.current = true;
-    // Any run start (Run, queue, schedule, picker) closes the picker so a stale card cannot linger over it.
-    setPickerLoop(null);
-    // A missing input folder would leave the stages with nothing to work on, so refuse before any worktree exists.
-    if (target.inputPath) {
-      const repoRel = start ? start.repoRel : workRelative;
-      const folder = repoRel ? `${repoRel}/${target.inputPath}` : target.inputPath;
-      const isFolder = await fs.list(folder).then(() => true, () => false);
-      if (!isFolder) {
-        setNotice(`The input path “${target.inputPath}” does not exist in this repository, so the run did not start.`);
-        startingRef.current = false;
-        return;
-      }
-    }
-    let prepared: RunInfo | null = null;
-    let reusedWorktree = false;
-    // The previous draft MR of a loop restarted after it merged: the core checks with the provider before it lets the first push replace that head.
-    let mergedMr: string | null = null;
-    if (useWorktree) {
-      const root = projectRoot ?? "";
-      const workRel = workRoot === root ? "" : repoPrefixFor(root, workRoot ?? "");
-      if (!root || (!start && workRoot !== root && workRel === "")) {
-        setNotice("The repository for this run could not be resolved, so no worktree was created and the run did not start.");
-        startingRef.current = false;
-        return;
-      }
-      // One branch per loop: the slug (name + loop id) is the worktree folder, the run id and the branch name (loop/<slug>).
-      const worktrees = isFactoryLoop(target) ? [] : await invokeHost<RunInfo[]>("loop_worktree_list").catch(() => [] as RunInfo[]);
-      const slug = loopBranchSlug(target.name, target.id, worktrees.map((w) => w.runId));
-      let fresh = false;
-      let baseRef: string | null = null;
-      if (!isFactoryLoop(target)) {
-        // Git sees a merge or fast-forward by itself; a squash or rebase merge is only visible to the provider.
-        const last = await lastShipUrl(fs, runs, target.id).catch(() => null);
-        fresh = await providerSaysMerged((path, body) => core.requestRaw(path, { method: "POST", body, timeoutMs: 20_000 }), last);
-        if (fresh && last) mergedMr = last.url;
-        const old = worktrees.find((w) => w.runId === slug);
-        if (fresh && old) {
-          // The restarted branch is cut from the real base: the core fetches it (the host's git has no credentials).
-          try {
-            const to = shipTarget(old, readRepoConfig());
-            const base = await invokeHost<string | null>("loop_repo_branch", { runId: slug });
-            const r = to && base ? await core.requestRaw("/kb/loop/sync-base", { method: "POST", body: { worktree: old.worktree, branch: old.branch, provider: to.provider, repo: to.slug, base }, timeoutMs: 90_000 }) : null;
-            if (r && r.status === 200) baseRef = `origin/${base}`;
-            else setRunLog((l) => [...l, "The base branch could not be fetched, so the restarted branch is cut from your local copy of it."]);
-          } catch { /* cut from the local base */ }
-        }
-      }
-      reusedWorktree = !fresh && worktrees.some((w) => w.runId === slug);
-      const task = start ? start.task : `# ${target.name}\n\nLoop run in an isolated worktree. No work item was picked; the loop's goal applies.\n`;
-      try {
-        prepared = await invokeHost<RunInfo>("loop_worktree_prepare", { repoRel: start ? start.repoRel : workRel, runId: isFactoryLoop(target) ? newRunId(new Date(), Math.random) : slug, base: baseRef, task, loopSlug: isFactoryLoop(target) ? null : slug, fresh });
-      } catch (e) {
-        setNotice(`The isolated worktree could not be created: ${e instanceof Error ? e.message : String(e)}. The run did not start.`);
-        startingRef.current = false;
-        return;
-      }
-      // Check stages read the worktree through the project-scoped fs; a worktree outside the expected folder would
-      // make the prefix "" and silently point them at the main tree.
-      if (repoPrefixFor(root, prepared.worktree) !== `system/loop-worktrees/${prepared.runId}`) {
-        setNotice(`The worktree ${prepared.worktree} is not under this project's system/loop-worktrees/ folder, so the run did not start. The worktree was kept.`);
-        startingRef.current = false;
-        return;
-      }
-      if (unmountedRef.current) { startingRef.current = false; return; }
-    }
-    const activeRun = prepared;
-    let runConfig = target.config;
-    // Edits an earlier run left uncommitted on this loop's branch: say so, and never ship them without a look.
-    // A status that cannot be read (null) counts as "leftovers present": the run holds for review instead of shipping on a guess.
-    const leftoverFiles: number | null = activeRun && !isFactoryLoop(target) ? await invokeHost<unknown>("loop_worktree_status", { runId: activeRun.runId }).then((raw) => decodeWorktreeStatus(raw)?.changedFiles ?? null).catch(() => null) : 0;
-    if (leftoverFiles === null) setNotice("The worktree's state could not be read, so this run's changes will wait for your review instead of opening a merge request.");
-    else if (leftoverFiles > 0) setNotice(`${leftoverFiles} uncommitted file${leftoverFiles === 1 ? "" : "s"} from an earlier run on this loop's branch. This run's changes will wait for your review instead of opening a merge request.`);
-    if (!isFactoryLoop(target)) {
-      let needed = false;
-      if (activeRun) {
-        const copied = await copyStateIn({ syncStateIn: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "in" }); } }, activeRun.branch);
-        if (!copied.ok) {
-          setNotice(copied.message);
-          startingRef.current = false;
-          return;
-        }
-        const setup = target.config.stages.find((st) => st.enabled && isSetupStage(st));
-        needed = setup ? await setupNeeded(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setup.command ?? "") : false;
-      }
-      runConfig = configWithSetup(target.config, needed);
-    }
+    const result = await prepareLoopRun({
+      host: (command, args) => invokeHost(command, args),
+      folderExists: (path) => fs.list(path).then(() => true, () => false),
+      approveLoop,
+      approvalStatus,
+      refreshApproval,
+      lastShip: (loopId) => lastShipUrl(fs, runs, loopId),
+      post: (path, body, timeoutMs) => core.requestRaw(path, { method: "POST", body, timeoutMs }),
+      readRepoConfig,
+      newRunId: () => newRunId(new Date(), Math.random),
+      setupNeeded: (prefix, command) => setupNeeded(fs, prefix, command),
+      isUnmounted: () => unmountedRef.current,
+      beginStarting: () => { if (startingRef.current) return false; startingRef.current = true; return true; },
+      endStarting: () => { startingRef.current = false; },
+      closePicker: () => setPickerLoop(null),
+      log: (line) => setRunLog((l) => [...l, line]),
+    }, { target, scheduled, start, command, oneItem, useWorktree, projectRoot, workRoot, workRelative });
+    if (!result.ok) { if (result.notice !== null) setNotice(result.notice); return; }
+    const { info: activeRun, reusedWorktree, mergedMr, leftoverFiles, approvalToken } = result;
+    let runConfig = result.runConfig;
+    if (result.notice !== null) setNotice(result.notice);
     if (isFactoryLoop(target) && activeRun) {
       const detected = await detectTestCommand(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree)).catch(() => null);
       const filled = withDetectedVerify(target, detected?.command ?? null);
@@ -826,7 +733,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunRecord(null);
     setShipRun(null);
     setRunningStage(true);
-    setRunLog((l) => [...l, `▶ ${target.name}`, ...(oneItem ? [`Task: ${command?.trim()}`] : []), ...(activeRun ? [`⎇ isolated worktree system/loop-worktrees/${activeRun.runId} on ${activeRun.branch}, started from ${activeRun.baseCommit.slice(0, 7)}`, ...(leftoverFiles === null ? ["The worktree's state could not be read; the end of this run waits for your review."] : leftoverFiles > 0 ? [`${leftoverFiles} uncommitted file(s) from an earlier run are in this worktree; the end of this run waits for your review.`] : [])] : []), ""]);
+    setRunLog((l) => [...l, ...result.logLines]);
     const started = Date.now();
     let summaryPath: string | null = null;
     // Set once the Loop's saved state is back in the main tree; the finally block copies it back when the run threw first.
