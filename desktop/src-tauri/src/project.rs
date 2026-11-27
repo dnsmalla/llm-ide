@@ -14,7 +14,6 @@
 //!   widen access.
 //! - Commands return only the chosen root and its display name.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -220,37 +219,15 @@ fn valid_recent(dir: &Path) -> Vec<PathBuf> {
     load_recent(dir).iter().filter_map(|p| validate_root(Path::new(p)).ok()).collect()
 }
 
-/// Mirrors the Mac's `ProjectStore.openFolder`: a folder opened while empty becomes a project.
-///
-/// The Mac validates the folder (marker, or empty) and then scaffolds the canonical tree, so opening a new
-/// empty folder does not leave a bare directory that the core refuses to register. Here the marker check is
-/// the same; when it is absent and the folder is empty (a `.DS_Store` is tolerated, the Mac quirk is not worth
-/// copying) the tree is scaffolded idempotently. A NON-empty folder without the marker is left untouched: the
-/// desktop app can open any folder for Explorer and Chat, and only Doc Gen needs the marker (its screen says so).
-///
-/// A scaffold failure is logged, not fatal: the folder still opens, exactly like the Mac.
-fn ensure_scaffold(root: &Path) -> Result<(), String> {
-    if root.join("system/project.json").is_file() {
-        return Ok(());
-    }
-    let empty = fs::read_dir(root)
-        .map_err(|e| format!("cannot read the chosen folder: {e}"))?
-        .filter_map(|e| e.ok())
-        .all(|e| e.file_name() == ".DS_Store");
-    if !empty {
-        return Ok(());
-    }
-    let project = crate::project_scaffold::NewProject::fresh(&display_name(root));
-    crate::project_scaffold::scaffold(root, &project)
-}
-
 /// Held across each read-modify-write of the recent list, so two edits cannot lose one another's entry.
 static RECENT_EDIT: Mutex<()> = Mutex::new(());
 
 /// Accepts `chosen` as the active root and records it as most recent.
 fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
     let root = validate_root(chosen)?;
-    if let Err(e) = ensure_scaffold(&root) {
+    // A folder opened while empty becomes a project (rule and contract: the core's `ensure_scaffold`, shared with
+    // the SSH helper); a scaffold failure is logged, never fatal to the open.
+    if let Err(e) = llmide_workspace_core::project::scaffold::ensure_scaffold(&root) {
         eprintln!("project: scaffold not written: {e}");
     }
     {
@@ -743,6 +720,7 @@ mod recent_time_tests {
     }
 
     use super::*;
+    use std::fs;
 
     fn scratch(name: &str) -> TempDirGuard {
         let d = std::env::temp_dir().join(format!("llmide-recent-{}-{name}", std::process::id()));

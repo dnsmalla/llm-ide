@@ -370,6 +370,8 @@ impl Remote {
         }
         let folder = locked(&self.session).folder.clone();
         if let Some(folder) = folder {
+            // No `scaffold`: this is a background restore, and a folder the user emptied meanwhile must not be scaffolded
+            // (locally, scaffolding only happens on an explicit user open).
             match fresh.call("open", json!({"root": folder.root}), None) {
                 Ok(_) => self.reregister_watch(&*fresh),
                 // The channel failed again: this one is not kept, so the next call reconnects.
@@ -511,7 +513,8 @@ impl Remote {
     pub fn open(&self, connector: &dyn Connector, path: &str) -> R<ProjectInfo> {
         let _opening = locked(&self.opening);
         let client = self.ensure(connector)?;
-        let answer = client.call("open", json!({"root": path}), None)?;
+        // `scaffold: true` because the user asked for this open; an older helper ignores the extra argument.
+        let answer = client.call("open", json!({"root": path, "scaffold": true}), None)?;
         let opened = serde_json::from_value::<Opened>(answer).unwrap_or_default();
         let info = ProjectInfo { name: opened.name, root: opened.root };
         if info.name.is_empty() || info.root.is_empty() {

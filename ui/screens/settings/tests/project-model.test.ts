@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { PATHS_TEXT, bytesLabel, cloneError, decodeMemory, decodePaths, folderNote, parseBackendUrl, pathsIsNoticeOnly, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, bytesLabel, cloneError, codeDirOf, decodeMemory, decodePaths, folderNote, parseBackendUrl, projectError, safeRelativePath, syncProviderFor } from "../project-model.ts";
 
 const CLONE_AUTH_SENTENCE =
   "The repository refused access. If it is private, paste a personal access token with read access (GitHub: repo scope; GitLab: read_repository) and press Clone again.";
@@ -127,17 +127,15 @@ test("backend URLs are loopback-only and need an explicit port", () => {
   }
 });
 
-test("paths_shows_notice_for_plain_server_folder: ssh mode and isProject false shows the notice alone", () => {
-  const plain = decodePaths({ root: "/srv/home/docs", id: "", folders: [], isProject: false });
-  assert.equal(plain?.isProject, false);
-  assert.ok(plain && pathsIsNoticeOnly(plain, true));
-  assert.equal(PATHS_TEXT.plainFolder, "This folder is not an LLM-IDE project. To use project features, create one with New project in the server folder picker.");
+test("paths_plain_folder_is_a_normal_project: an explicit isProject false decodes to false, an omitted field to true", () => {
+  const plain = decodePaths({ root: "/srv/home/docs", id: "", folders: [{ name: "code", exists: false }], isProject: false });
+  assert.deepEqual(plain, { root: "/srv/home/docs", id: "", folders: [{ name: "code", exists: false }], isProject: false });
+  assert.equal("plainFolder" in PATHS_TEXT, false, "the plain-folder notice no longer exists");
 });
 
-test("paths_unchanged_in_local_mode: the full card shows, and an older host without isProject counts as a project", () => {
-  const plain = decodePaths({ root: "/Users/a/proj", id: "p", folders: [], isProject: false });
-  assert.ok(plain && !pathsIsNoticeOnly(plain, false));
-  const older = decodePaths({ root: "/srv/p", id: "p", folders: [] });
-  assert.equal(older?.isProject, true);
-  assert.ok(older && !pathsIsNoticeOnly(older, true));
+test("code_dir_of_uses_one_rule: <root>/code when a code folder is listed, else null, whatever isProject says", () => {
+  const plain = decodePaths({ root: "/srv/home/docs/", id: "", folders: [{ name: "code", exists: false }], isProject: false });
+  assert.equal(plain && codeDirOf(plain), "/srv/home/docs/code");
+  const none = decodePaths({ root: "/srv/p", id: "p", folders: [{ name: "system", exists: true }] });
+  assert.equal(none && codeDirOf(none), null);
 });

@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import type { ProjectMemory } from "../host.ts";
-import { MEMORY_TEXT, PATHS_TEXT, bytesLabel, pathsIsNoticeOnly, projectError } from "../project-model.ts";
+import { MEMORY_TEXT, bytesLabel, projectError } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { shellBus } from "../../shell/bus";
 import { inSshMode } from "../../shell/host.ts";
@@ -11,12 +11,10 @@ import { Button, ErrorText, NeedsHost } from "../ui.tsx";
  * The Mac's "Memory" project group: whether the knowledge graph was generated and the project's agent memory
  * files, read-only, with Show in Finder. Lists come from the host (the page never reads the disk).
  */
-export default function MemorySection({ initial }: { initial?: { data: ProjectMemory | null; plainFolder: boolean } } = {}) {
+export default function MemorySection({ initial }: { initial?: { data: ProjectMemory | null } } = {}) {
   const { host } = useEnv();
   // NOTE: `initial` seeds the first render for tests (server rendering runs no effects); the app never passes it.
   const [data, setData] = useState<ProjectMemory | null>(initial?.data ?? null);
-  // The memory reply has no isProject; the Paths reply does, so a plain server folder is read from there.
-  const [plainFolder, setPlainFolder] = useState(initial?.plainFolder ?? false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -25,16 +23,10 @@ export default function MemorySection({ initial }: { initial?: { data: ProjectMe
       (m) => { setData(m); setError(null); },
       (e) => { setData(null); setError(projectError(e)); },
     );
-    host.projectPaths?.().then(
-      (p) => setPlainFolder(pathsIsNoticeOnly(p, true)),
-      () => setPlainFolder(false),
-    );
   }, [host]);
   useRefreshOnFocus(load);
 
   if (!host.projectMemory) return <NeedsHost what="The project memory" />;
-  // ssh mode on a plain server folder: no memory exists there, so the card is the notice alone (as in Paths).
-  if (plainFolder && inSshMode()) return <div className="st-stack"><p className="st-hint" role="status">{PATHS_TEXT.plainFolder}</p></div>;
 
   // ssh mode: the memory files are on the server, so the button copies the server path under the project root.
   const ssh = inSshMode();

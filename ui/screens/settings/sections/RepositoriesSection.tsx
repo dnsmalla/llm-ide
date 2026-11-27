@@ -98,7 +98,7 @@ export default function RepositoriesSection() {
 
   useEffect(() => {
     host.projectPaths?.().then(
-      (p) => setCodeDir(codeDirOf(p, inSshMode())),
+      (p) => setCodeDir(codeDirOf(p)),
       () => setCodeDir(null),
     );
   }, [host]);

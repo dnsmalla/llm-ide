@@ -183,6 +183,33 @@ pub fn scaffold(root: &Path, project: &NewProject) -> Result<(), String> {
     Ok(())
 }
 
+/// Scaffolds a folder that was just opened, the way the desktop does for a local folder.
+///
+/// Writes only when the folder has no `system/project.json` AND is empty (a lone `.DS_Store` counts as empty and
+/// is left alone): then it lays out the tree with `NewProject::fresh(<folder display name>)`. A folder with the
+/// marker is not touched (Rebuild is the explicit way to fill gaps), and a non-empty folder without it is never
+/// written: the app opens any folder for Explorer and Chat, and only project features need the marker.
+/// An entry that cannot be read counts as content, so a folder with a broken listing is left alone.
+/// Every write is write-if-absent. The caller decides whether a failure is fatal; opening treats it as not.
+pub fn ensure_scaffold(root: &Path) -> Result<(), String> {
+    if super::layout::is_project(root) {
+        return Ok(());
+    }
+    let is_empty = fs::read_dir(root)
+        .map_err(|e| format!("cannot read the chosen folder: {e}"))?
+        .all(|e| matches!(&e, Ok(entry) if entry.file_name() == ".DS_Store"));
+    if !is_empty {
+        return Ok(());
+    }
+    scaffold(root, &NewProject::fresh(&crate::text::folder_display_name(root)))
+}
+
+/// Rebuild: recreates the missing layout and seed files of any folder, keeping the identity of an existing marker
+/// (`layout::project_meta`). Write-if-absent, so it never overwrites. One function so host and helper cannot diverge.
+pub fn rebuild(root: &Path) -> Result<(), String> {
+    scaffold(root, &super::layout::project_meta(root))
+}
+
 /// `.claude/settings.json` exactly as `JSONSerialization` (pretty printed, sorted keys) writes it.
 fn claude_settings(p: &NewProject) -> String {
     format!(

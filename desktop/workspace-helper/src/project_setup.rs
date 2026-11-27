@@ -20,9 +20,6 @@ pub const GRAPH_MAX_FILE_BYTES: u64 = 48 * 1024 * 1024;
 /// The room a graph answer needs around its text (the request id and the envelope). The answer must fit one line.
 const ANSWER_ENVELOPE_BYTES: usize = 4096;
 
-/// The text the desktop shows for a folder without `system/project.json`. Fixed, because the app matches the code.
-pub const NOT_A_PROJECT_MESSAGE: &str = "This folder is not an LLM-IDE project.";
-
 /// Creates `<parent>/<name>` and scaffolds it. The parent must be inside the server home, and the home itself is a
 /// valid parent (`~/name` is a project, as it is locally). The core still refuses a target that is too broad.
 /// Needs no open folder and opens none.
@@ -45,14 +42,11 @@ pub fn memory(session: &Session) -> R<Value> {
     to_value(&layout::memory(&session.root()?))
 }
 
-/// Recreates the missing scaffold folders and files of an existing project. Refuses a folder without the marker
-/// before anything is written, and never overwrites a file that exists.
+/// Recreates the missing scaffold folders and files of the open folder, the same call the desktop makes. It works
+/// in any open folder (a plain one gains the layout and the marker) and never overwrites a file that exists.
 pub fn rebuild(session: &Session) -> R<Value> {
     let root = session.root()?;
-    if !layout::is_project(&root) {
-        return err("not_a_project", NOT_A_PROJECT_MESSAGE);
-    }
-    scaffold::scaffold(&root, &layout::project_meta(&root)).map_err(scaffold_error)?;
+    scaffold::rebuild(&root).map_err(scaffold_error)?;
     Ok(Value::Null)
 }
 

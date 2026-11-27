@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 
 use llmide_workspace_core::git::git_binary;
 use llmide_workspace_core::paths::checked_root;
-use llmide_workspace_core::project::layout;
 use llmide_workspace_core::project::clone::{self, CloneRequest, Credential, Token};
 use llmide_workspace_core::search::{self, Query, Searches};
 use llmide_workspace_core::trash::{OsTrash, Trasher};
@@ -24,7 +23,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::clone_credential::{self, RedeemError, RedeemFiles};
-use crate::project_setup;
 use crate::protocol::{event, Out, PROTOCOL};
 use llmide_workspace_core::wire::{CloneEvent, CloneStarted, MadeDir, Hello, Opened, BUSY_CODE};
 
@@ -198,10 +196,17 @@ impl Session {
         encode(&Hello { git: git_runs(), protocol: PROTOCOL, version: env!("CARGO_PKG_VERSION").into() })
     }
 
-    /// Opens a folder. Replaces the open one, and stops its watcher and any running search, which belong to it.
-    pub fn open(&mut self, raw: &str) -> R<Value> {
+    /// Opens a folder, scaffolding it when empty and `scaffold` is true. Replaces the open one, and stops its watcher and any running search, which belong to it.
+    pub fn open(&mut self, raw: &str, scaffold: bool) -> R<Value> {
         let real = home_path(raw)?;
         let root = confined(checked_root(&real)?)?;
+        // Same rule as the desktop's local open (the core owns it): an EMPTY folder becomes a project, a non-empty
+        // one is never written. Only an open the user asked for scaffolds; the desktop's re-open after a reconnect
+        // does not, as locally nothing writes in the background. NOTE: a failure is ignored on purpose, as locally: the folder still opens and
+        // Rebuild can retry; the helper has no channel for non-fatal warnings.
+        if scaffold {
+            let _ = llmide_workspace_core::project::scaffold::ensure_scaffold(&root);
+        }
         self.stop_folder_work();
         // The same display name the desktop shows for a local folder (control characters removed, capped).
         let name = llmide_workspace_core::text::folder_display_name(&root);
@@ -291,13 +296,10 @@ impl Session {
     }
 
     /// Starts a clone into the open project's `code/` folder on its own thread and returns at once. The outcome
-    /// arrives as a `clone` event. Refused before anything starts: no open folder, a folder that is not a project
-    /// (a clone never makes `code/` in a plain folder), no git, an invalid request, or a clone already running.
+    /// arrives as a `clone` event. Works in any open folder (git makes `code/` as needed, as locally). Refused before
+    /// anything starts: no open folder, no git, an invalid request, or a clone already running.
     pub fn clone_start(&mut self, req: CloneRequest) -> R<Value> {
         let root = self.root()?;
-        if !layout::is_project(&root) {
-            return err("not_a_project", project_setup::NOT_A_PROJECT_MESSAGE);
-        }
         let Some(git) = (self.git_lookup)() else {
             return err("git_missing", GIT_MISSING_MESSAGE);
         };

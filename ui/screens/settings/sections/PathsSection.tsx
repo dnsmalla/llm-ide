@@ -3,7 +3,7 @@ import { shellBus } from "../../shell/bus";
 import { inSshMode } from "../../shell/host.ts";
 import { COPY_SERVER_PATH_LABEL, fileManagerActionFor } from "../../shell/server-path.ts";
 import type { ProjectPaths } from "../host.ts";
-import { PATHS_TEXT, folderNote, pathsIsNoticeOnly, projectError, syncProviderFor } from "../project-model.ts";
+import { PATHS_TEXT, folderNote, projectError, syncProviderFor } from "../project-model.ts";
 import { useEnv, useRefreshOnFocus } from "../context.tsx";
 import { createHostFs } from "../../explorer/fs.ts";
 import { call } from "../core-api.ts";
@@ -91,7 +91,7 @@ export default function PathsSection({ initial }: { initial?: ProjectPaths | nul
   };
 
   const exportProject = async (kind: "data" | "plans") => {
-    if (!data) return;
+    if (!data || !data.isProject) return;
     setExporting(kind);
     setError(null);
     setExportNotice(null);
@@ -112,9 +112,6 @@ export default function PathsSection({ initial }: { initial?: ProjectPaths | nul
     }
   };
 
-  // A plain server folder (ssh mode) has no project layout, so the card is the notice alone.
-  const noticeOnly = Boolean(data && pathsIsNoticeOnly(data, inSshMode()));
-  if (noticeOnly) return <div className="st-stack"><p className="st-hint" role="status">{PATHS_TEXT.plainFolder}</p></div>;
   const sync = notes ? syncProviderFor(notes) : null;
   const notesInProject = Boolean(data && notes && notes.startsWith(`${data.root.replace(/\/+$/, "")}/`));
   const notesRel = data && notesInProject && notes ? notes.slice(data.root.replace(/\/+$/, "").length + 1) : null;
@@ -170,9 +167,9 @@ export default function PathsSection({ initial }: { initial?: ProjectPaths | nul
             </div>
           ) : null}
           <div className="st-row">
-            <Button disabled={exporting !== null} onClick={() => void exportProject("data")}>{exporting === "data" ? "Exporting…" : "Export Project Data"}</Button>
-            <Button disabled={exporting !== null} onClick={() => void exportProject("plans")}>{exporting === "plans" ? "Exporting…" : "Export Plans"}</Button>
-            <span className="st-hint">Writes the canonical source/meetings, llm-doc/plans, README badge and system/sync.json. Plans-only writes llm-doc/plans.</span>
+            <Button disabled={exporting !== null || !data.isProject} onClick={() => void exportProject("data")}>{exporting === "data" ? "Exporting…" : "Export Project Data"}</Button>
+            <Button disabled={exporting !== null || !data.isProject} onClick={() => void exportProject("plans")}>{exporting === "plans" ? "Exporting…" : "Export Plans"}</Button>
+            <span className="st-hint">{data.isProject ? "Writes the canonical source/meetings, llm-doc/plans, README badge and system/sync.json. Plans-only writes llm-doc/plans." : "Press Rebuild missing folders first: this folder is not a project yet."}</span>
           </div>
           {exportNotice ? <p className="st-ok" role="status">{exportNotice}</p> : null}
           {rebuilt ? <p className="st-ok" role="status">{rebuilt}</p> : null}

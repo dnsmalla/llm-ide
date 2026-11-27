@@ -215,3 +215,57 @@ fn the_new_root_opens_as_a_project() {
     let root = create(&parent, "Openable").unwrap();
     assert_eq!(crate::paths::validate_root(&root, &test_home()).unwrap(), root);
 }
+
+#[test]
+fn ensure_scaffold_fills_an_empty_folder() {
+    let root = scratch("ensure-empty");
+    ensure_scaffold(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+    assert!(root.join("code").is_dir());
+    let marker = fs::read_to_string(root.join("system/project.json")).unwrap();
+    let name = root.file_name().unwrap().to_string_lossy().into_owned();
+    assert!(marker.contains(&name), "the marker carries the folder's display name: {marker}");
+}
+
+#[test]
+fn ensure_scaffold_counts_a_lone_ds_store_as_empty_and_keeps_it() {
+    let root = scratch("ensure-ds-store");
+    fs::write(root.join(".DS_Store"), "junk").unwrap();
+    ensure_scaffold(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+    assert_eq!(fs::read_to_string(root.join(".DS_Store")).unwrap(), "junk");
+}
+
+#[test]
+fn ensure_scaffold_leaves_a_non_empty_folder_alone() {
+    let root = scratch("ensure-nonempty");
+    fs::write(root.join("notes.txt"), "mine").unwrap();
+    ensure_scaffold(&root).unwrap();
+    assert!(!root.join("system").exists());
+    assert!(!root.join("code").exists());
+    assert_eq!(fs::read_to_string(root.join("notes.txt")).unwrap(), "mine");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+}
+
+#[test]
+fn ensure_scaffold_keeps_an_existing_marker_byte_for_byte() {
+    let root = scratch("ensure-marker");
+    fs::create_dir_all(root.join("system")).unwrap();
+    fs::write(root.join("system/project.json"), "{\"id\":\"keep\"}").unwrap();
+    ensure_scaffold(&root).unwrap();
+    assert_eq!(fs::read_to_string(root.join("system/project.json")).unwrap(), "{\"id\":\"keep\"}");
+    assert!(!root.join("code").exists(), "a folder with the marker is not scaffolded on open");
+}
+
+#[test]
+fn rebuild_fills_a_plain_folder_and_keeps_existing_files() {
+    let root = scratch("rebuild-plain");
+    fs::write(root.join("notes.txt"), b"keep me").unwrap();
+    rebuild(&root).unwrap();
+    assert!(root.join("system/project.json").is_file());
+    assert!(root.join("system").is_dir());
+    assert_eq!(fs::read(root.join("notes.txt")).unwrap(), b"keep me");
+    let marker = fs::read(root.join("system/project.json")).unwrap();
+    rebuild(&root).unwrap();
+    assert_eq!(fs::read(root.join("system/project.json")).unwrap(), marker);
+}
