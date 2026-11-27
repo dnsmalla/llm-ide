@@ -68,14 +68,21 @@ before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
 ### 2. Build and install the desktop app (macOS)
 
 ```bash
+rustup target add x86_64-unknown-linux-musl        # once; needed for the SSH server bundle
+node desktop/scripts/stage-hub-core.mjs            # Linux server bundle for SSH mode -> desktop/hub-dist/
 scripts/build-desktop-mac.sh                       # about 3 minutes warm; longer on the first run
 ditto desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app /Applications/LLM-IDE.app
 open /Applications/LLM-IDE.app
 ```
 
-The script stages the core, builds the app, signs it (with your Apple Development identity if you
-have one, otherwise ad-hoc), and smoke-tests the bundled core. It does **not** install the app:
-copy it to `/Applications` yourself after every build, or you will keep running the old copy.
+The script stages the core, builds the app, puts the SSH server bundle from `desktop/hub-dist/`
+inside it, signs it (with your Apple Development identity if you have one, otherwise ad-hoc), and
+smoke-tests the bundled core. It does **not** install the app: copy it to `/Applications` yourself
+after every build, or you will keep running the old copy.
+
+Re-run `stage-hub-core.mjs` whenever you update the code; the build prints the date of the
+bundle it includes (`SSH bundle: … (staged …)`). Skip that step if you do not need SSH mode —
+the app still builds, and only SSH Connect is unavailable.
 Add `--dmg` to also produce a disk image. On Windows and Linux, run `node scripts/stage-core.mjs`
 and `npm run tauri build` in `desktop/` (see [Building a release](#building-a-release)).
 
@@ -116,6 +123,9 @@ systemd or Node.js.
 - Linux on x86_64 with at least 2 GB free in your home folder
 - An SSH login (host, port, user, and a key file or password)
 - A POSIX login shell (bash, dash, zsh or ksh) and the `sha256sum`, `tar` and `setsid` commands
+- glibc 2.34 or later (Ubuntu 22.04+, Debian 12+, RHEL 9+) for the standard bundle; older servers
+  need the compat bundle (`stage-hub-core.mjs --compat-sqlite <module>`, see
+  [desktop/PACKAGING.md](desktop/PACKAGING.md))
 - Optional: the Claude CLI installed on the server and signed in, for AI features
 
 **Connect**
