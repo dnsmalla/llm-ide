@@ -5,7 +5,7 @@
 // What differs between the loops is one StepRecipe: refactor batches depend on each other (one blocked batch ends the
 // run), test steps do not (the run goes on, up to a streak of blocked ones).
 import { isSetupStage } from "./loop-setup.ts";
-import { MAX_STEPS_PER_RUN, type LoopEngineConfig, type LoopStage } from "./model.ts";
+import { MAX_STEPS_PER_RUN, clampIterations, type LoopEngineConfig, type LoopStage } from "./model.ts";
 import { pauseBetween, runBudget, runNativeLoop, stepReviewNote, type LoopIterationOutcome, type LoopRunOutcome, type RunnerDeps, type StageOutcome, type StepReviewOutcome } from "./runner.ts";
 
 export interface StepDriverOpts {
@@ -34,8 +34,11 @@ export interface StepRecipe {
   baselineStageKey: string | null;
   /** Run the baseline after planning and only to learn whether the suite was already red (see runSteps). */
   baselineAfterPlanning?: boolean;
-  /** Run every step stage with repair off and in one round (see runSteps). */
+  /** Run every step stage with repair off (see runSteps). */
   noRepair?: boolean;
+  /** With noRepair: the rounds a step gets, capped by the loop's own iteration setting. The extra rounds are verify
+   *  loopbacks to the apply skill only (no other stage is repaired); absent = one round. */
+  stepRounds?: number;
   /** Skip a step's checks (the stages after its apply skill) when the agent marked it skipped and changed no file. */
   skipChecksWhenSkipped?: boolean;
   /** With baselineAfterPlanning: whether the plan says tests already exist. A red suite that exists stops the run before any step. */
@@ -250,10 +253,10 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     pending = tree;
     // A later batch retakes the baseline from the tree the previous batch left, so its graph check judges only itself.
     // A recipe that only adds files never repairs a failed step: the generic repair agent may change source and build
-    // config until the suite is green, which is exactly what such a step must not do. It gets one round too: a second
-    // round would re-run the apply skill, whose step is already marked, so it would take the NEXT step, and the guard
-    // would not let it rewrite the test file it made. The step fails, is rolled back and blocked with the failure as
-    // its reason.
+    // config until the suite is green, which is exactly what such a step must not do. Its extra rounds (stepRounds) are
+    // verify loopbacks to the apply skill alone, which is told to fix the tests it just created and not to take the
+    // next step, and the guard lets it edit what it created for this step. A step still red after them fails, is
+    // rolled back and blocked with the failure as its reason.
     const stepStages = (k === 1 ? batch : [...snapshot, ...batch]).map((s) => (r.noRepair ? { ...s, allowsRepair: false } : s));
     // "Touch no other step" is only asked of the agent. A mark it put on another step would hide that step's work
     // for good (only todo steps are ever re-read), so every other step's status is put back, right after the apply
@@ -267,8 +270,9 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     };
     // A step the agent skipped without writing anything has nothing to check: the run ends after the apply skill, so
     // its Test, map and prune stages (a full suite run each time) are not run. Any other step runs all its stages.
-    const stepDeps: RunnerDeps = !(r.skipChecksWhenSkipped || r.blockById) ? deps : {
-      ...deps,
+    const stepBase: RunnerDeps = r.noRepair ? { ...deps, reviewEndsRun: true } : deps;
+    const stepDeps: RunnerDeps = !(r.skipChecksWhenSkipped || r.blockById) ? stepBase : {
+      ...stepBase,
       async endAfter(stage) {
         if (!(stage.kind === "skill" && stage.skillId === r.applySkill)) return false;
         if (r.blockById) await keepMarks();
@@ -278,7 +282,7 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
         return untouched;
       },
     };
-    const sub = await runNativeLoop({ ...config, ...left, ...(r.noRepair ? { maxIterations: 1 } : {}), stages: stepStages }, stepDeps);
+    const sub = await runNativeLoop({ ...config, ...left, ...(r.noRepair ? { maxIterations: redBefore ? 1 : Math.min(clampIterations(config.maxIterations), r.stepRounds ?? 1) } : {}), stages: stepStages }, stepDeps);
     stages.push(...sub.stages);
     iterations.push(...sub.iterations);
     iterationsUsed += sub.iterationsUsed;
@@ -290,8 +294,8 @@ export async function runSteps(r: StepRecipe, config: LoopEngineConfig, deps: Ru
     if (r.blockById && !marksKept) await keepMarks();
 
     if (sub.cancelled) { pending = null; note = sub.statusSummary; break; }
-    // With one round, a review that asks for changes ends the step's run as "not passed" although its tests are
-    // green. Rolling back a working test over a review note would lose it for good, so the step is kept and the
+    // A review that asks for changes ends the step's run at once (reviewEndsRun) as "not passed" although its tests
+    // are green. Rolling back a working test over a review note would lose it for good, so the step is kept and the
     // review stays open (it is counted as unresolved in the run summary).
     const reviewOnly = r.noRepair === true && !sub.passed && sub.loopback?.reason === "review";
     if (reviewOnly) opts.log(`${todo.id}: the review asked for changes; its tests pass, so the ${r.noun} is kept and the review stays open`);

@@ -11,7 +11,7 @@ import { evaluateArtifact } from "./artifact.ts";
 import { ROADMAP_CONTRACT, checkRoadmap } from "./refactor-areas.ts";
 import { TEST_PLAN_PATH, mergeTestPlan, writeTestPlan } from "./test-plan.ts";
 import { ensureDir, runCodeGraph, type GraphDoc } from "./codegraph.ts";
-import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, REVIEW_PATH, agentRunBody, factoryRole, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
+import { FACTORY_INTAKE_SKILL, FACTORY_REPAIR_HINT, FACTORY_REVIEW_SKILL, FINDINGS_FILE, PLAN_FILE, REFACTOR_MOVE_SKILLS, REVIEW_PATH, TEST_WRITING_SKILLS, agentRunBody, factoryRole, fencedBlock, findingsSection, guardedPaths, isFactoryLoop, reviewDiffSection, unresolvedStepReviewsSection } from "./factory.ts";
 import { changesCode, headAndTail, type FindingsEntry, type LoopbackContext } from "./loopback.ts";
 import { importOnlyFiles } from "./import-only.ts";
 import { followsRegistry, registrySource, stagePromptText } from "./default-stage.ts";
@@ -68,6 +68,10 @@ export interface HaltState {
   isError: boolean;
   /** The files each move stage's batch named when it first ran, so a loopback round keeps that scope. */
   plannedByStage?: Map<string, string[]>;
+  /** The test files each test-writing stage created for its current step: reset when the stage starts a step (a run
+   *  without loopback), added to by its fix rounds. Those rounds may edit them; they are untracked by then, so the
+   *  snapshot before the call would otherwise count them as the user's own edits. Another step's files stay guarded. */
+  createdTestsByStage?: Map<string, Set<string>>;
 }
 
 type ShellRun = { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; cancelled?: boolean };
@@ -194,6 +198,30 @@ function factoryReportPath(s: LoopStage): string | null {
 }
 
 
+const DEFECT_MARK = /xfail\s*\([^)]*?reason\s*=\s*(["'])defect:\s*(.*?)\1/g;
+
+/** The defects a test writer pinned as strict expected failures, one log line each, so they reach the run record. */
+async function logPinnedDefects(ctx: StageExecContext, writes: readonly string[]): Promise<void> {
+  const prefix = repoPrefixFor(ctx.projectRoot, ctx.runRoot);
+  for (const p of writes.filter((w) => isTestFileName(w))) {
+    let text: string | null = null;
+    try { const r = await ctx.fs.read(prefix ? `${prefix}/${p}` : p, 2_000_000); text = r.status === "ok" ? r.text : null; } catch { /* deleted or unreadable */ }
+    for (const m of (text ?? "").matchAll(DEFECT_MARK)) ctx.log(`defect pinned by an expected-failure test in ${p}: ${m[2]}`);
+  }
+}
+
+/**
+ * What a test writer is told in a fix round. It has no shell, so the failing run below is the first time it sees its
+ * tests execute. Without this it would read the plan's first todo entry (its own is already marked) and start the next.
+ */
+export function testFixRoundNote(files: readonly string[]): string {
+  return [
+    "This is a fix round for the tests you wrote in the previous round, which failed their checks or review (findings below). Do not start another plan entry and do not change any plan marks.",
+    files.length ? `Fix the failing tests in the test files you created: ${files.join(", ")}. Change no other file.` : "Fix the failing tests in the test files you created. Change no other file.",
+    'Where a test fails because the code under test is itself broken (not the test), keep the test and mark it as an expected failure naming the defect — for pytest `@pytest.mark.xfail(strict=True, reason="defect: <what is broken>")` — instead of deleting or weakening it. Never edit the source.',
+  ].join("\n");
+}
+
 async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinition, halt: HaltState, loopback?: LoopbackContext): Promise<StageRunResult> {
   if (!s.skillId) return { ok: false, output: "This skill stage has no skill id." };
   const report = factoryReportPath(s);
@@ -239,10 +267,14 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
     if (notes !== null && notes.trim() !== "") parts.push(unresolvedStepReviewsSection(notes));
   }
   // A code stage re-run after a failed round gets the findings inline too (data-fenced), so no registry prompt changes.
+  const writesTests = !isFactoryLoop(target) && s.skillId !== null && TEST_WRITING_SKILLS.has(s.skillId);
   if (loopback && loopback.findings.trim() !== "") {
     parts.push(`Round ${loopback.round} of ${loopback.maxRounds}.`);
+    if (writesTests) parts.push(testFixRoundNote([...(halt.createdTestsByStage?.get(s.id) ?? [])]));
     parts.push(findingsSection(loopback.findings));
   }
+  if (writesTests && !loopback) halt.createdTestsByStage?.delete(s.id);
+  const own = writesTests ? halt.createdTestsByStage?.get(s.id) ?? new Set<string>() : new Set<string>();
   const before = await dirtyBefore(ctx);
   // The batch's file list as planned, read BEFORE the agent runs: apply edits the plan itself (it marks the batch done),
   // so a list read afterwards could name a module the agent added to it.
@@ -263,8 +295,9 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
     check: async (paths, b, created) => {
       // The Test loop may add new test files, but it must not rewrite an existing test to make the suite pass.
       // Skip those edits explicitly (revert them and keep going) instead of failing the whole run.
+      const runCreated = paths.filter((p) => own.has(p));
       const skipped = s.skillId === "skills/test-gap-writer" && !isFactoryLoop(target)
-        ? paths.filter((p) => isTestFileName(p) && !created.includes(p))
+        ? paths.filter((p) => isTestFileName(p) && !created.includes(p) && !runCreated.includes(p))
         : [];
       // A path is only dropped from the guard once it is really reverted: a failed revert would otherwise leave the
       // edited test on disk while the guard no longer sees it (fail open).
@@ -281,7 +314,7 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
       // An advisory stage must not stop the run: protected files it touched are reverted and skipped. A failed or
       // refused revert leaves them to the guard, which halts (fail closed).
       const advisoryHits = s.severity === "advisory" && target.config.protectedPathPolicy === "revert"
-        ? protectedPaths(guardedPaths(target, s, paths, created), target.config.extraProtectedGlobs).filter((p) => !skipped.includes(p))
+        ? protectedPaths(guardedPaths(target, s, paths, [...created, ...runCreated]), target.config.extraProtectedGlobs).filter((p) => !skipped.includes(p))
         : [];
       const plan = advisoryHits.length ? revertPlan(advisoryHits, b, created) : null;
       if (plan?.revert) {
@@ -294,11 +327,20 @@ async function runSkill(ctx: StageExecContext, s: LoopStage, target: LoopDefinit
         }
       }
       const judged = paths.filter((p) => (!skipped.includes(p) || notReverted.includes(p)) && !skippedProtected.includes(p));
-      return guardProtected(ctx, guardedPaths(target, s, judged, created, await importOnlyTests(ctx, target, s, judged, created, plannedFiles)), target, b, created);
+      // A run-created test counts as created for the exemption only; the revert plan keeps the call's own `created`.
+      const violation = await guardProtected(ctx, guardedPaths(target, s, judged, [...created, ...runCreated], await importOnlyTests(ctx, target, s, judged, created, plannedFiles)), target, b, created);
+      if (violation === null && writesTests) {
+        const newTests = created.filter((p) => isTestFileName(p));
+        const set = (halt.createdTestsByStage ??= new Map()).get(s.id) ?? new Set<string>();
+        for (const p of newTests) set.add(p);
+        halt.createdTestsByStage.set(s.id, set);
+      }
+      return violation;
     },
   });
   const stop = stopReason(g);
   if (g.result === null || stop !== null) return haltOn(ctx, halt, g.violation, stop);
+  if (writesTests) await logPinnedDefects(ctx, g.writes.filter((p) => halt.createdTestsByStage?.get(s.id)?.has(p)));
   // A succeeded agent call that did not write its report is a failed stage, not a pass on the file just deleted.
   if (report && !wroteReport(g.result, report)) {
     return { ok: false, output: `the report was not written: ${report}. The stage failed instead of reading an older report.` };
@@ -397,12 +439,23 @@ function setupRanSinceLastStructure(prior: Prior, self: LoopStage): boolean {
   return false;
 }
 
+/**
+ * The test layout a run works with. The Test loop points at the project that owns its tests, so it looks inside its
+ * input path first; Refactoring's input path is only a code scope, so its test root stays at the repository root. An
+ * input path is often a plain code folder (src/billing) whose tests live at the root: with no layout inside it, the
+ * root's layout is used.
+ */
+async function detectRunStructure(ctx: StageExecContext, prefix: string, target: LoopDefinition): Promise<TestStructure> {
+  const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
+  const inside = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
+  if (!inputPath || inside.status === "ok") return inside;
+  const atRoot = await detectTestStructure(ctx.fs, prefix);
+  return atRoot.status === "ok" ? { ...atRoot, notes: [`No test layout inside ${inputPath}; using the repository root's.`, ...atRoot.notes] } : inside;
+}
+
 async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, prior: Prior, target: LoopDefinition): Promise<StageRunResult> {
   if (s.testOp !== "structure" && s.testOp !== "map") return { ok: false, output: `testMap ${s.testOp ?? "operation"} is not ported yet` };
-  // The Test loop points at the project that owns its tests; Refactoring's input path is only a code scope, so its
-  // test root stays at the repository root.
-  const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
-  const structure = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
+  const structure = await detectRunStructure(ctx, prefix, target);
   if (s.testOp === "structure") {
     // A missing structure is a finding for the Setup stage, not a failure: only once Setup ran since the last
     // structure detection and detection still finds nothing has the loop no way forward. Failing earlier sends the
@@ -438,10 +491,7 @@ async function runTestMap(ctx: StageExecContext, s: LoopStage, prefix: string, p
 }
 
 async function runTestPruneStage(ctx: StageExecContext, prefix: string, target: LoopDefinition): Promise<StageRunResult> {
-  // The Test loop points at the project that owns its tests; Refactoring's input path is only a code scope, so its
-  // test root stays at the repository root.
-  const inputPath = target.defaultKey === "test" ? target.inputPath ?? "" : "";
-  const structure = scopeStructure(await detectTestStructure(ctx.fs, inputPath ? `${prefix ? `${prefix}/` : ""}${inputPath}` : prefix), inputPath);
+  const structure = await detectRunStructure(ctx, prefix, target);
   const notes: string[] = [];
   const findings = await scanTestPrune(ctx.fs, prefix, structure, notes);
   const path = await writeTestPrune(ctx.fs, prefix, findings);

@@ -548,6 +548,58 @@ test("F6: a non-factory test-writing stage keeps its own test files, but a repai
   assert.deepEqual(calls.find(([c]) => c === "loop_revert_paths"), ["loop_revert_paths", { paths: ["tests/test_tax.py"], created: ["tests/test_tax.py"], runId: "r1" }]);
 });
 
+test("a test writer's fix round may edit the tests it created earlier in the run, is told which, and its pinned defects are logged", async () => {
+  let dirtyCalls = 0;
+  // Round 1's new file is untracked from then on, so the snapshot before round 2 lists it as already changed.
+  const { host, calls } = fakeHost({ loop_changed_paths: () => (dirtyCalls++ === 0 ? [] : ["tests/test_new.py"]) });
+  const replies = [
+    { reply: "wrote", resultSubtype: "success", changedPaths: ["tests/test_new.py"], createdPaths: ["tests/test_new.py"] },
+    { reply: "fixed", resultSubtype: "success", changedPaths: ["tests/test_new.py", "tests/test_golden.py"], createdPaths: [] },
+    { reply: "next step", resultSubtype: "success", changedPaths: ["tests/test_new.py"], createdPaths: [] },
+  ];
+  const sent = [];
+  const core = { async request(_path, opts) { sent.push(opts.body.message); return replies[sent.length - 1]; } };
+  const { fs } = fakeFs({ "system/loop-worktrees/r1/tests/test_new.py": '@pytest.mark.xfail(strict=True, reason="defect: abstract methods are not implemented")\ndef test_a(): ...' });
+  const { ctx, log } = ctxOf({ host, core, fs });
+  const loop = { ...loopOf([stage()]), defaultKey: "refactor" };
+  const writer = stage({ id: "g1", name: "Refactor Test Write", kind: "skill", command: null, skillId: "skills/test-gap-writer" });
+  const deps = createStageDeps(ctx, loop);
+  assert.equal((await deps.runStage(writer, [])).ok, true);
+  const r = await deps.runStage(writer, [], { round: 2, maxRounds: 2, findings: "Round 1 (tests)\nFAILED tests/test_new.py::test_a" });
+  assert.equal(r.ok, true, r.output);
+  assert.equal(deps.halt(), null, "editing its own new test is not a protected-path violation");
+  const reverted = calls.filter(([c]) => c === "loop_revert_paths").flatMap(([, a]) => a.paths);
+  assert.deepEqual(reverted, ["tests/test_golden.py"], "an older test is still skipped; the run's own test is kept");
+  assert.match(sent[1], /fix round[\s\S]*tests\/test_new\.py/);
+  assert.doesNotMatch(sent[0], /fix round/);
+  assert.ok(log.some((l) => /defect pinned .*tests\/test_new\.py: abstract methods are not implemented/.test(l)), log.join("\n"));
+  // The next step (a run of the stage without loopback) may not rewrite the previous step's test.
+  await deps.runStage(writer, []);
+  const after = calls.filter(([c]) => c === "loop_revert_paths").flatMap(([, a]) => a.paths);
+  assert.deepEqual(after, ["tests/test_golden.py", "tests/test_new.py"], "another step's test is guarded again");
+});
+
+test("a Test loop whose input path has no test layout uses the repository root's", async () => {
+  const files = { "conftest.py": "", "tests/test_a.py": "", "src/billing/tax.py": "" };
+  const fs = {
+    async read(p) { if (!(p in files)) throw Object.assign(new Error("missing"), { code: "not_found" }); return { status: "ok", text: files[p], hash: "h" }; },
+    async list(dir) {
+      const prefix = dir === "." ? "" : `${dir}/`;
+      const names = new Map();
+      for (const p of Object.keys(files)) if (p.startsWith(prefix)) { const rest = p.slice(prefix.length); names.set(rest.split("/")[0], rest.includes("/") ? "dir" : "file"); }
+      if (names.size === 0 && dir !== ".") throw Object.assign(new Error("missing"), { code: "not_found" });
+      return { entries: [...names].map(([name, kind]) => ({ name, kind, path: `${prefix}${name}` })) };
+    },
+    async create() {}, async write() {},
+  };
+  const { ctx } = ctxOf({ fs, projectRoot: "/p", runRoot: "/p" });
+  const s = stage({ id: "test/test-structure", name: "Test Structure", kind: "testMap", command: null, testOp: "structure" });
+  const r = await createStageDeps(ctx, { ...loopOf([s]), defaultKey: "test", inputPath: "src/billing" }).runStage(s, []);
+  assert.equal(r.ok, true);
+  assert.match(r.output, /^1 test root\(s\)\n\.: pytest/);
+  assert.match(r.output, /No test layout inside src\/billing; using the repository root's\./);
+});
+
 const advisoryRun = (severity, hostAnswers = {}) => {
   const { host, calls } = fakeHost(hostAnswers);
   const { core } = fakeCore({ reply: "updated docs", resultSubtype: "success", changedPaths: ["src/test_data_generator.py", "src/ok.py"], createdPaths: [] });

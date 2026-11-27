@@ -79,6 +79,9 @@ export interface RunnerDeps {
    * Null = no loopback for this stage (the repair path applies).
    */
   gateLoopback?(stage: LoopStage): Promise<{ codeStageId: string; findings: string } | null>;
+  /** True: a step review asking for changes ends the run at once (left unresolved) instead of looping back. For a
+   *  test-only step whose tests already pass, a review round that turns them red would roll back working tests. */
+  reviewEndsRun?: boolean;
   /** Typed run progress for the board; never parsed out of the log. */
   onProgress?(event: ProgressEvent): void;
   /** Waits `ms` (the stage pause). Default: a 100 ms-tick wait that ends early once `isCancelled` is true. */
@@ -467,9 +470,9 @@ async function runLoopInner(config: LoopEngineConfig, deps: RunnerDeps, reviews:
       const noChange = unchanged >= LOOPBACK_IDENTICAL_STOP;
       // Rounds remained when only the no-change rule fired; the recorded reason must say so, not "round limit".
       const stoppedEarly = iteration < maxRounds && noChange;
-      if (iteration >= maxRounds || noChange) {
+      if (iteration >= maxRounds || noChange || (trigger.source === "review" && deps.reviewEndsRun === true)) {
         // A gate-triggered stop has no per-step review to close; recording one would add a fake "unresolved" step review.
-        if (trigger.source === "review" && !trigger.fromGate) await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, stoppedEarly ? "no change since the previous round" : "round limit reached");
+        if (trigger.source === "review" && !trigger.fromGate) await endStepReview(code, "unresolved", groupAttempts.get(trigger.group.closerId) ?? 0, trigger.text, stoppedEarly ? "no change since the previous round" : iteration < maxRounds ? "a review does not start a fix round for this step" : "round limit reached");
         const summary = stoppedSummary(iteration, trigger.source, stoppedEarly);
         deps.log(summary);
         return { passed: false, costUsd: spentUsd, iterationsUsed, stages: outcomes, iterations, failedStage: trigger.verify, statusSummary: summary, stoppedAtLimit: true, loopback: { rounds: iteration, maxRounds, reason: trigger.source, findings: findingsText(findings.concat(entry)), stopped: true } };

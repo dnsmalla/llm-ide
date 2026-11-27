@@ -88,16 +88,18 @@ const S = [
 const cfg = (over = {}) => decodeConfig({ stages: S, maxIterations: 1, maxRepairsPerStage: 1, consecutiveFailureStop: 3, stageDelaySeconds: 0, ...over });
 const T = (id, status = "todo") => `### ${id} a/${id}.py (status: ${status})\n- Area: a\n`;
 
-function fake(plan, { fail = [], skip = [], leave = [] } = {}) {
-  const st = { plan, ran: [], restores: [], current: null, snaps: {}, n: 0 };
+function fake(plan, { fail = [], skip = [], leave = [], fixes = [] } = {}) {
+  const st = { plan, ran: [], restores: [], current: null, snaps: {}, n: 0, fixed: new Set() };
   const deps = {
-    async runStage(s) {
+    async runStage(s, _prior, loopback) {
       st.ran.push(s.id);
-      if (s.id === "write") {
+      // A fix round (loopback) works on the step it already wrote, as the writer is told to.
+      if (s.id === "write" && loopback) { if (fixes.includes(st.current)) st.fixed.add(st.current); }
+      else if (s.id === "write") {
         st.current = nextTodo(TEST_RECIPE, st.plan).id;
         if (!leave.includes(st.current)) st.plan = st.plan.replace(`### ${st.current} a/${st.current}.py (status: todo)`, `### ${st.current} a/${st.current}.py (status: ${skip.includes(st.current) ? "skipped" : "done"})`);
       }
-      if (s.id === "test" && fail.includes(st.current)) return { ok: false, output: "TAP version 13\nok 1 - a\nnot ok 2 - totals add the tax\n  expected 3" };
+      if (s.id === "test" && fail.includes(st.current) && !st.fixed.has(st.current)) return { ok: false, output: "TAP version 13\nok 1 - a\nnot ok 2 - totals add the tax\n  expected 3" };
       return { ok: true, output: "" };
     },
     async repair() { return { ok: false, output: "no" }; }, log() {}, isCancelled() { return false; },
@@ -279,16 +281,26 @@ test("a Test Write that fails its own check is never repaired: rolled back, bloc
   assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: write — .*\(the reply has no 'Covered:' line\)/);
 });
 
-test("a failing new test gets no second round and no repair, whatever the loop's settings: rolled back, blocked, next step", async () => {
+test("a failing new test gets one fix round and never a repair: still red after it, it is rolled back, blocked, next step", async () => {
   const { st, deps, opts } = fake(T("T1") + T("T2"), { fail: ["T1"] });
   let repairs = 0;
   deps.repair = async () => { repairs += 1; return { ok: true, output: "" }; };
   const out = await runTestSteps(cfg({ maxIterations: 3, maxRepairsPerStage: 3 }), deps, opts);
   assert.equal(repairs, 0, "the repair agent is not bound by the test writer's rules");
-  // A second round would re-run Test Write, which would take T2 (T1 is already marked) and leave T1 looking done.
-  assert.equal(st.ran.filter((i) => i === "write").length, 2, "one Test Write per step, none repeated");
+  assert.equal(st.ran.filter((i) => i === "write").length, 3, "T1 written and fixed once, then T2");
   assert.match(st.plan, /### T1 a\/T1\.py \(status: blocked\)\n- Blocked: test — /);
   assert.match(out.statusSummary, /^1 step done \(T2\); T1 rolled back: /);
+});
+
+test("a failing new test fixed in its fix round keeps the step; one round only when the loop is set to one", async () => {
+  const a = fake(T("T1") + T("T2"), { fail: ["T1"], fixes: ["T1"] });
+  const out = await runTestSteps(cfg({ maxIterations: 3 }), a.deps, a.opts);
+  assert.equal(out.passed, true);
+  assert.match(a.st.plan, /### T1 a\/T1\.py \(status: done\)/);
+  assert.deepEqual(a.st.restores, [], "nothing rolled back");
+  const b = fake(T("T1") + T("T2"), { fail: ["T1"], fixes: ["T1"] });
+  await runTestSteps(cfg({ maxIterations: 1 }), b.deps, b.opts);
+  assert.match(b.st.plan, /### T1 a\/T1\.py \(status: blocked\)/, "the loop's own iteration setting caps the rounds");
 });
 
 test("a step may only mark itself: a mark it puts on another step is put back", async () => {
@@ -318,7 +330,8 @@ test("a review that asks for changes does not roll back a step whose tests pass"
   deps.snapshotBefore = async () => ({ tree: "t0" });
   deps.reviewStep = async () => { reviews += 1; return { verdict: "changes", findings: "[medium] name the test after the behaviour" }; };
   const out = await runTestSteps(cfg({ maxIterations: 3, maxPassesPerRun: 1 }), deps, opts);
-  assert.equal(reviews, 1, "the review did run");
+  assert.equal(reviews, 1, "the review ran once: it never starts a fix round that could turn passing tests red");
+  assert.equal(st.ran.filter((i) => i === "write").length, 1);
   assert.equal(st.restores.length, 0, "nothing is rolled back");
   assert.match(st.plan, /### T1 a\/T1\.py \(status: done\)/);
   assert.match(out.statusSummary, /^1 step done \(T1\)/);
