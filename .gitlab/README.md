@@ -92,13 +92,8 @@ before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
 
 ## Install from a DMG (no build needed)
 
-1. Open the project's **Releases** page on GitLab and download the `.dmg` for your Mac:
-
-   | Your Mac | File | `uname -m` prints |
-   |---|---|---|
-   | Apple silicon (M1 or later) | `LLM-IDE-<version>-arm64.dmg` | `arm64` |
-   | Intel | `LLM-IDE-<version>-x64.dmg` | `x86_64` |
-
+1. Get `LLM-IDE-<version>-arm64.dmg` from the maintainer. It runs on Apple silicon Macs
+   (M1 or later; `uname -m` prints `arm64`). On an Intel Mac, build from source instead.
 2. Open the `.dmg` and drag **LLM-IDE** onto **Applications**.
 3. The app is **not signed or notarized**, so macOS blocks the first launch. Do one of:
    - Run `xattr -dr com.apple.quarantine /Applications/LLM-IDE.app` and open it normally. This also
@@ -106,21 +101,22 @@ before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
    - Or open it once, then go to System Settings > Privacy & Security and click **Open Anyway**.
 4. Install the Claude CLI and run `claude login`; the app uses it for AI features.
 
-Each release lists the SHA-256 of every file; compare with `shasum -a 256 <file>.dmg`.
+If the maintainer shared a SHA-256 value, compare it with `shasum -a 256 <file>.dmg`.
 
-### Publishing a release (maintainers)
+### Making a DMG to share (maintainers)
+
+Build it on your own Mac; no CI is involved.
 
 ```bash
-scripts/release-dmg.sh <version>            # e.g. 0.1.0; add --dry-run to preview
+node desktop/scripts/stage-hub-core.mjs                                   # fresh SSH bundle
+LLMIDE_OMIT_SOURCE_ROOT=1 LLMIDE_ADHOC_SIGN=1 scripts/build-desktop-mac.sh --dmg
+shasum -a 256 desktop/src-tauri/target/release/bundle/macos/LLM-IDE-*.dmg  # share with the file
 ```
 
-It builds both DMGs on GitHub Actions (`desktop-dmg.yml`), uploads them to the GitLab package
-registry and creates the GitLab Release. Needs `gh` and `glab` logged in, and `jq`. No signing
-secrets are involved.
-
-- `--yes` — continue without asking when this checkout differs from GitHub `main`.
-- `--run-id <id>` — resume a failed release from an already finished build (no rebuild; files
-  already uploaded are skipped).
+- `LLMIDE_OMIT_SOURCE_ROOT=1` keeps your checkout path out of the app you hand out.
+- `LLMIDE_ADHOC_SIGN=1` signs ad-hoc instead of with a personal certificate from your keychain.
+- The DMG is written next to the app in `desktop/src-tauri/target/release/bundle/macos/` and is
+  built for your Mac's chip only.
 
 ## Build and install the desktop app
 
