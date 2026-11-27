@@ -27,6 +27,7 @@ cd web && npm run dev
 # Testing (lint/format/docs targets: see Makefile)
 make test             # Extension/core tests (Node test runner)
 make test-desktop     # Desktop node checks + cargo test --lib
+make lint-ui          # React hook lint (ui/, desktop/src, web/src), ratcheted vs scripts/ui-lint-baseline.json
 make regression       # Pre-push regression gate (contracts, desktop/ui/web, agent/v2, graph-kit)
 make test-shared-protocol   # iOS wire types (ios_app/SharedProtocol)
 

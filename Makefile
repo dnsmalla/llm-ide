@@ -110,7 +110,15 @@ test-ios-app:
 # graph-kit-checkout goes FIRST: it is a one-line precondition. The extension
 # suite (`make test`) and cargo (`make test-desktop`) stay separate: the
 # pre-push hook runs `make test` for extension/ pushes, desktop-ci runs cargo.
-regression: graph-kit-checkout graphkit-pin-check contract-gates test-desktop-node typecheck-desktop agent-v2-gates graph-gates
+regression: graph-kit-checkout graphkit-pin-check contract-gates test-desktop-node typecheck-desktop lint-ui agent-v2-gates graph-gates
+
+# React hook-bug gate (rules-of-hooks + exhaustive-deps) for ui/screens, ui/kit/src,
+# desktop/src and web/src; ratcheted against scripts/ui-lint-baseline.json. Uses
+# extension/'s ESLint (npm ci --prefix extension). After fixing hook problems:
+# node scripts/ui-lint-ratchet.mjs --update
+.PHONY: lint-ui
+lint-ui:
+	node scripts/ui-lint-ratchet.mjs
 
 # The graph verification gates, run from the graph-kit submodule: graph-layout-lab
 # asserts the layout engine against exact N² ground truth and Louvain reference

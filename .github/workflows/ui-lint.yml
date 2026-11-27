@@ -1,0 +1,54 @@
+name: ui-lint
+
+# React hook-bug gate for ui/screens, ui/kit/src, desktop/src and web/src
+# (rules-of-hooks + exhaustive-deps, ratcheted against scripts/ui-lint-baseline.json).
+# Same command as `make lint-ui`; the ESLint toolchain is extension/'s.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'ui/**'
+      - 'web/**'
+      - 'desktop/src/**'
+      - 'extension/eslint.ui.config.mjs'
+      - 'extension/package-lock.json'
+      - 'scripts/ui-lint-*'
+      - '.github/workflows/ui-lint.yml'
+  pull_request:
+    paths:
+      - 'ui/**'
+      - 'web/**'
+      - 'desktop/src/**'
+      - 'extension/eslint.ui.config.mjs'
+      - 'extension/package-lock.json'
+      - 'scripts/ui-lint-*'
+      - '.github/workflows/ui-lint.yml'
+
+concurrency:
+  group: ui-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      # --ignore-scripts: the linter needs no native build (better-sqlite3).
+      - name: Install ESLint toolchain
+        run: npm ci --prefix extension --no-audit --no-fund --ignore-scripts
+
+      - name: Lint UI hooks
+        run: make lint-ui
