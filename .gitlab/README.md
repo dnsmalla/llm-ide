@@ -65,21 +65,35 @@ cd llm-ide-app
 If you cloned without `--recurse-submodules`, run `git submodule update --init --recursive graph-kit`
 before `./setup.sh`. The `graph-kit` submodule (the graph engine) is public.
 
-### 2. Run the desktop app
+### 2. Build and install the desktop app (macOS)
+
+```bash
+scripts/build-desktop-mac.sh                       # about 3 minutes warm; longer on the first run
+ditto desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app /Applications/LLM-IDE.app
+open /Applications/LLM-IDE.app
+```
+
+The script stages the core, builds the app, signs it (with your Apple Development identity if you
+have one, otherwise ad-hoc), and smoke-tests the bundled core. It does **not** install the app:
+copy it to `/Applications` yourself after every build, or you will keep running the old copy.
+Add `--dmg` to also produce a disk image. On Windows and Linux, run `node scripts/stage-core.mjs`
+and `npm run tauri build` in `desktop/` (see [Building a release](#building-a-release)).
+
+### 3. Or run it in development mode
 
 ```bash
 cd desktop
-npm run tauri dev   # opens the app window; the app starts its own core
+npm run tauri dev   # opens the app window with live reload; the app starts its own core
 ```
 
-### 3. Run the core on its own (optional)
+### 4. Run the core on its own (optional)
 
 ```bash
 cd extension
 npm run server      # http://127.0.0.1:3456 — check with: curl http://127.0.0.1:3456/health
 ```
 
-### 4. Load the Chrome extension (optional)
+### 5. Load the Chrome extension (optional)
 
 ```bash
 cd extension
