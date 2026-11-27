@@ -15,7 +15,7 @@
 // register fixtures themselves.
 //
 // Coverage: the share of (method, path, status) pairs that have a fixture and
-// were replayed live with a passing response. Asserted at >= 60 %. The last
+// were replayed live with a passing response. Asserted at >= COVERAGE_TARGET (57 %). The last
 // test prints the skip table with reasons, and the known drifts.
 
 import { test, before, after } from 'node:test';

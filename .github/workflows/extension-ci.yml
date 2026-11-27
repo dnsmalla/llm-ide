@@ -10,11 +10,15 @@ on:
     paths:
       - 'extension/**'
       - 'deploy/vps/**'   # tests/sync-own-server.test.mjs reads the vhost and sshd block
+      - 'schema/http/**'   # tests/http-contract-live.test.mjs replays these fixtures and schemas
+      - 'scripts/lib/**'   # ...through the conformance helpers it imports
       - '.github/workflows/extension-ci.yml'
   pull_request:
     paths:
       - 'extension/**'
       - 'deploy/vps/**'   # tests/sync-own-server.test.mjs reads the vhost and sshd block
+      - 'schema/http/**'   # tests/http-contract-live.test.mjs replays these fixtures and schemas
+      - 'scripts/lib/**'   # ...through the conformance helpers it imports
       - '.github/workflows/extension-ci.yml'
 
 concurrency:
