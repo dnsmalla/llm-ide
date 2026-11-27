@@ -225,6 +225,22 @@ if [ "${LLMIDE_OMIT_SOURCE_ROOT:-0}" != "1" ]; then
   chmod 600 "$APP/Contents/Resources/source-root.txt"
 fi
 
+# SSH server mode uploads a Linux core bundle, and an app copied to /Applications has no checkout to find one in,
+# so ship the bundle staged in desktop/hub-dist (by desktop/scripts/stage-hub-core.mjs) in Resources/hub, where
+# ssh_cmds::bundle_in looks first. Only this version's names (CARGO_PKG_VERSION) are copied. Without a staged
+# bundle the app still builds; SSH Connect then says the build has no server files.
+rm -rf "$APP/Contents/Resources/hub"
+HUB_VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' "$DESKTOP/src-tauri/Cargo.toml" | head -1)"
+for hub_name in "llmide-core-$HUB_VERSION-linux-x64-compat.tar.gz" "llmide-core-$HUB_VERSION-linux-x64.tar.gz"; do
+  if [ -f "$DESKTOP/hub-dist/$hub_name" ]; then
+    mkdir -p "$APP/Contents/Resources/hub"
+    cp "$DESKTOP/hub-dist/$hub_name" "$APP/Contents/Resources/hub/"
+    # WARNING: the name carries no build date, so an old staged bundle installs an old core on the server.
+    echo "  SSH bundle: $hub_name (staged $(date -r "$DESKTOP/hub-dist/$hub_name" '+%Y-%m-%d %H:%M'))"
+  fi
+done
+[ -d "$APP/Contents/Resources/hub" ] || echo "  SSH bundle: none in desktop/hub-dist (SSH server mode unavailable in this build)"
+
 # Re-sign the whole bundle in one pass so the seal covers the bundled core. No hardened runtime (see header).
 IDENTITY="${LLMIDE_CODESIGN_IDENTITY:-}"
 if [ -z "$IDENTITY" ] && [ "${LLMIDE_ADHOC_SIGN:-0}" != "1" ]; then
