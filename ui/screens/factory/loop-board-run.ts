@@ -1,5 +1,5 @@
 // Pure logic of the run bar on a non-Factory loop's Board. The Board never runs anything itself: it builds a
-// "run-loop" request that the Loop page executes through its own approval, worktree and queue path.
+// "run-loop" request that the shell answers through the run manager (approval, worktree, queue and ship are the manager's).
 import { loopUsesInputPath, normalizeInputPath } from "../loop/native/input-path.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
 import { branchDiscardRefusal, isNewestRunOfLoop } from "../loop/native/loop-branch.ts";
@@ -237,7 +237,7 @@ export interface LoopRunCardInput {
   steps: readonly string[];
   held: HeldState | null;
   /** The loop's running card: it sits at `lane`, shows `note` and offers no action. */
-  live?: { lane: string; note: string };
+  live?: { lane: string; note: string; /** How far the run is through its steps, 0..1. */ progress?: number | null };
   now?: number;
 }
 
@@ -262,6 +262,7 @@ export function loopRunCardView(input: LoopRunCardInput): CardView {
     durationSeconds: run.durationSeconds > 0 ? run.durationSeconds : null,
     costUsd: cost,
     progressLabel: `${run.iterationsUsed} iteration${run.iterationsUsed === 1 ? "" : "s"}`,
+    ...(live?.progress != null ? { progress: live.progress } : {}),
     ...(changed ? { changed } : {}),
     ...(facts?.stepReviews ? { stepReviews: facts.stepReviews } : {}),
     ...(stopped && facts?.loopback ? { loopback: facts.loopback } : {}),

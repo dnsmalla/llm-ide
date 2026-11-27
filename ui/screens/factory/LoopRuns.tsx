@@ -1,21 +1,22 @@
 // A board for every non-Factory loop: the loop's stages are the lanes, each run is a card placed at the stage it
-// reached (or Done). Facts come from system/loop-runs. The run bar only REQUESTS a run (shell bus "run-loop"): the
-// Loop page owns execution (approval dialog, worktree, queue, ship), so this board never runs or edits anything.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+// reached (or Done). Facts come from system/loop-runs and the run manager's live runs. The run bar only REQUESTS a run
+// (shell bus "run-loop", answered through the run manager): execution (approval dialog, worktree, queue, ship) is the
+// manager's, so this board never runs or edits anything.
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { shellBus } from "../shell/bus";
 import { invokeHost } from "../shell/host";
 import { pickInputPath } from "../loop/native/pick-input-path.ts";
 import { createHostFs } from "../explorer/fs";
 import { loadLoops, saveLoops } from "../loop/native/store.ts";
 import { setReviewMode } from "../loop/native/review-ui.ts";
-import { shipHeldRun } from "../loop/native/run-manager.ts";
+import { liveRuns, shipHeldRun, subscribe as subscribeRuns } from "../loop/native/run-manager.ts";
 import { FinalReviewToggle } from "./FinalReviewToggle.tsx";
 import { decodeFactoryFields, loadRunRecord, readRecentRuns, type LoopRunIndexEntry } from "../loop/native/history.ts";
 import type { RunInfo } from "../loop/native/worktree-run.ts";
 import type { LoopDefinition } from "../loop/native/model.ts";
 import { afterSend, buildRunEvent, discardTarget, heldState, loopRunCardView, loopRunLanes, type HeldState, loadHiddenRunIds, loadRunBarInput, runBarState, saveHiddenRunIds, saveRunBarInput, type RunBarInput } from "./loop-board-run.ts";
 import { RUN_COMMAND_MAX } from "../loop/native/run-command.ts";
-import { liveCardNote, readLiveCard, type LiveLoopCard } from "../loop/native/live-card.ts";
+import { liveCardNote, liveLoopCard, queuedLoopRuns } from "../loop/native/live-card.ts";
 import { LaneBoard } from "./LaneBoard.tsx";
 import { Card, type DiscardCheck } from "./Card.tsx";
 import type { CardAction } from "./board-model.ts";
@@ -40,7 +41,6 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const fs = useMemo(() => createHostFs(), []);
   const [steps, setSteps] = useState<string[]>([]);
   const [cards, setCards] = useState<RunCard[]>([]);
-  const [live, setLive] = useState<LiveLoopCard | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Bumped only by the Refresh button; the 5 s interval refreshes inside the effect without re-running it.
   const [reload, setReload] = useState(0);
@@ -62,6 +62,10 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const discardBusy = useRef(false);
   const [discardMsg, setDiscardMsg] = useState<{ text: string; kind: "error" | "info" } | null>(null);
   const loopId = boardLoop?.id ?? null;
+  // The loop's running card comes straight from the run manager (a run lives there, not in the Loop page).
+  const managed = useSyncExternalStore(subscribeRuns, liveRuns);
+  const live = loopId ? liveLoopCard(managed, projectRoot, loopId) : null;
+  const queuedBehind = loopId ? queuedLoopRuns(managed, projectRoot, loopId) : 0;
 
   useEffect(() => {
     if (!active) return;
@@ -75,7 +79,6 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     const refresh = (): void => {
       if (inFlight) return;
       inFlight = true;
-      setLive(readLiveCard());
       void Promise.all([
         readRecentRuns(fs, 100),
         loadLoops(fs).then((r) => {
@@ -114,12 +117,6 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     return () => { alive = false; window.clearInterval(timer); };
   }, [fs, projectRoot, scope, scopeId, active, reload]);
 
-  useEffect(() => {
-    const onLive = () => setLive(readLiveCard());
-    window.addEventListener("llmide-loop-live", onLive);
-    return () => window.removeEventListener("llmide-loop-live", onLive);
-  }, []);
-
   // Restore what was typed for this loop last time; `typed` stops a refresh from overwriting a draft.
   // Drop the previous loop at once: until the refresh answers, the bar must not send the old loop's id for this scope.
   useEffect(() => { setTyped(false); setRunNote(null); setPickError(null); setLoop(null); setAmbiguous(false); clearPending(); }, [scope, scopeId]);
@@ -147,7 +144,10 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     return () => window.removeEventListener("llmide-loop-board-notice", onNote);
   }, [scope, loopId]);
   // The started run is on the board now; ▶ Run may queue another one deliberately.
-  useEffect(() => { if (pending && live?.loopName === scope) clearPending(); }, [pending, live, scope]);
+  useEffect(() => { if (pending && (live || queuedBehind > 0)) clearPending(); }, [pending, live, queuedBehind]);
+  // The run just ended: its record is on disk now, so read the journal again instead of waiting for the next tick.
+  const wasLive = useRef(false);
+  useEffect(() => { if (wasLive.current && !live) setReload((n) => n + 1); wasLive.current = live !== null; }, [live]);
   const edit = (next: RunBarInput) => { setTyped(true); setPickError(null); setInput(next); saveRunBarInput(scope, next, storage()); };
   // The picker is async: what was typed while it was open must survive the pick.
   const inputRef = useRef(input);
@@ -165,14 +165,14 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const sendRun = () => {
     const ev = boardLoop ? buildRunEvent(boardLoop, input) : null;
     if (!ev) return;
-    setRunNote("Sent to the Loop page…");
-    // Disabled until the Loop page answers, so a double click cannot queue a duplicate; no answer in 15 s means the
-    // page is not reachable (not mounted, or busy loading).
+    setRunNote("Sent…");
+    // Disabled until the request is answered, so a double click cannot queue a duplicate; no answer in 15 s means the
+    // request was lost.
     setPending(true);
     pendingTimer.current = window.setTimeout(() => {
       pendingTimer.current = null;
       setPending(false);
-      setRunNote("The Loop page did not answer. Open the Loop page and try again.");
+      setRunNote("The request was not answered. Try again.");
     }, 15_000);
     shellBus.publish(ev);
     // A remembered task would silently turn every later run into a one-item run.
@@ -181,8 +181,8 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     saveRunBarInput(scope, next, storage());
   };
 
-  const liveRun: LoopRunIndexEntry | null = live && live.loopName === scope ? {
-    id: live.runId, loopId: scope, loopName: live.loopName, startedAt: live.startedAt,
+  const liveRun: LoopRunIndexEntry | null = live && loopId ? {
+    id: live.runId, loopId, loopName: scope, startedAt: live.startedAt,
     durationSeconds: Math.max(0, Math.round((Date.now() - Date.parse(live.startedAt)) / 1000)),
     iterationsUsed: 1, statusCode: "running", statusSummary: "Running now", trigger: "manual",
   } : null;
@@ -190,7 +190,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   const shownCards = cards.filter((c) => !hidden.has(c.run.id));
   const listed = shownCards.filter((c) => c.run.id !== liveRun?.id);
   const runById = new Map<string, LoopRunIndexEntry>([...(liveRun ? [liveRun] : []), ...listed.map((c) => c.run)].map((r) => [r.id, r]));
-  const liveView = liveRun && live ? loopRunCardView({ run: liveRun, record: null, steps, held: null, live: { lane: live.stageName || steps[0] || "Running", note: liveCardNote(live) } }) : null;
+  const liveView = liveRun && live ? loopRunCardView({ run: liveRun, record: null, steps, held: null, live: { lane: live.stageName || steps[0] || "Running", note: liveCardNote(live), progress: live.progress } }) : null;
   const views = [...(liveView ? [liveView] : []), ...listed.map((c) => loopRunCardView({ ...c, steps }))];
   const lanes = loopRunLanes(steps, views);
 
@@ -236,7 +236,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     const worktrees = await invokeHost<RunInfo[]>("loop_worktree_list")
       .then((list) => ({ ok: true as const, list }))
       .catch(() => ({ ok: false as const }));
-    const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
+    const runningLoopId = live && live.loopId === run.loopId ? run.loopId : null;
     const target = discardTarget(run, fields, worktrees, cards.map((c) => c.run), runningLoopId);
     if (target.kind === "unreadable") { setDiscardMsg({ text: "Could not check this run's worktree; try again.", kind: "error" }); return { kind: "stop" }; }
     if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return { kind: "stop" }; }
@@ -328,7 +328,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
       const held = heldState(run, record, runsOfLoop);
       if (held?.kind !== "waiting" || record === null) { setDiscardMsg({ text: "This run is no longer waiting for approval. Refresh the board.", kind: "error" }); return; }
       const worktrees = await invokeHost<RunInfo[]>("loop_worktree_list").then((list) => ({ ok: true as const, list })).catch(() => ({ ok: false as const }));
-      const runningLoopId = live && live.loopName === run.loopName ? run.loopId : null;
+      const runningLoopId = live && live.loopId === run.loopId ? run.loopId : null;
       const target = discardTarget(run, { ok: true, worktree: decodeFactoryFields(record).worktree }, worktrees, runsOfLoop, runningLoopId);
       if (target.kind === "unreadable") { setDiscardMsg({ text: worktrees.ok ? "Could not check this run's worktree; try again." : "This run's worktree could not be listed (in SSH mode, approve it on the Loop page).", kind: "error" }); return; }
       if (target.kind === "refused") { setDiscardMsg({ text: target.reason, kind: "error" }); return; }
@@ -376,6 +376,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
           <button type="submit" className="fx-btn fx-primary" disabled={bar.blocked !== null || pending} title={bar.blocked ?? undefined}>▶ Run</button>
           {bar.blocked && !bar.inputError ? <p className="fx-hint">{bar.blocked}</p> : null}
           {runNote ? <p className="fx-hint" role="status">{runNote}</p> : null}
+          {queuedBehind > 0 ? <p className="fx-hint" role="status">{queuedBehind} run{queuedBehind === 1 ? "" : "s"} of this loop waiting for its turn.</p> : null}
         </form>
       ) : ambiguous && !scopeId ? <p className="fx-hint">Two loops share this name; select one on the Loop page.</p> : null}
       {error ? <p className="fx-error" role="status">{error}</p> : null}

@@ -52,13 +52,16 @@ export function shouldAutoReview(finishedRunsSinceReview: number, loop: LoopDefi
 }
 
 /**
- * Loops that must not be edited right now: the one this page is running, and the Factory loop while the run manager
- * holds a run of this project (lane runs always execute the Factory loop).
+ * Loops that must not be edited right now: the one this page is running itself, every loop the run manager is running or
+ * has queued in this project, and the Factory loop while the manager holds a Factory run of this project (lane runs always
+ * execute the Factory loop).
  */
-export function runningLoopIdsOf(input: { store: LoopProjectStore; projectRoot: string; activeLoopId: string | null; liveRuns: readonly { projectRoot: string }[] }): Set<string> {
+export function runningLoopIdsOf(input: { store: LoopProjectStore; projectRoot: string; activeLoopId: string | null; liveRuns: readonly { projectRoot: string; itemKey?: string }[] }): Set<string> {
   const ids = new Set<string>();
   if (input.activeLoopId) ids.add(input.activeLoopId);
-  if (input.liveRuns.some((r) => r.projectRoot === input.projectRoot)) {
+  const here = input.liveRuns.filter((r) => r.projectRoot === input.projectRoot);
+  for (const r of here) if (r.itemKey?.startsWith("loop:")) ids.add(r.itemKey.slice("loop:".length));
+  if (here.some((r) => !r.itemKey?.startsWith("loop:"))) {
     for (const loop of input.store.loops) if (isFactoryLoop(loop)) ids.add(loop.id);
   }
   return ids;

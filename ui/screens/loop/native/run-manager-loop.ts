@@ -8,7 +8,6 @@ import { readinessCopyPath } from "./readiness-copy.ts";
 import { FACTORY_INTAKE_SKILL, isFactoryLoop } from "./factory.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
-import { clearLiveCard, setLiveCard, updateLiveModel, updateLiveStage } from "./live-card.ts";
 import { isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
 import { lastShipUrl } from "./loop-branch.ts";
 import { loopbackLogLine } from "./loopback.ts";
@@ -17,10 +16,10 @@ import { isNativeRunnable, type LoopDefinition } from "./model.ts";
 import { faultPathsFromOutput, reopenFault } from "./regression.ts";
 import { isOneItemRun } from "./run-command.ts";
 import { copyStateBackIfMissed } from "./run-end.ts";
-import { finishLoopRun } from "./run-finish.ts";
+import { finishLoopRun, type ManualShip } from "./run-finish.ts";
 import { prepareLoopRun } from "./run-start.ts";
 import { runStatusCode, type LoopRunOutcome, type ProgressEvent as RunProgressEvent, type RunnerDeps } from "./runner.ts";
-import { shipTarget } from "./ship-model.ts";
+import { shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { createModelTracker } from "./step-model.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { writeRunArchive } from "./summary.ts";
@@ -29,6 +28,7 @@ import { changedPathArgs, repoPrefixFor, runRoot, runsInWorktree, type RunInfo }
 import type { LoopApprovalStatus } from "./approvals.ts";
 import type { RepoConfig } from "../../settings/repo-config.ts";
 import type { LoopRunIndexEntry } from "./history.ts";
+import type { WorkItem } from "./factory.ts";
 import type { FinishedRunShip } from "./run-manager-host.ts";
 
 /** What starts a non-Factory loop run: the loop (read from loop.json when the run starts) and the board's per-run overrides. */
@@ -40,6 +40,24 @@ export interface LoopRunRequest {
   inputPath?: string;
   /** A scheduled run never opens an approval dialog: it needs a grant that already covers the loop's commands. */
   scheduled?: boolean;
+}
+
+/** A finished run that needs a person (held for review, or its ship was blocked): what the Loop page's Ship panel opens with. */
+export interface LoopManualShip {
+  info: RunInfo;
+  item: WorkItem;
+  entry: LoopRunIndexEntry;
+  diff: WorktreeDiff | null;
+  reviewedPatchId: string | null;
+  mergedMr: string | null;
+  /** The loop's name (the MR title). */
+  processName: string;
+}
+
+/** What a run that reached its record reports to the manager. */
+export interface LoopRunFinished {
+  outcome: LoopRunOutcome;
+  manualShip: LoopManualShip | null;
 }
 
 /** The host-only pieces a loop run needs on top of the run manager's own deps. */
@@ -88,11 +106,23 @@ export interface LoopRunContext {
   isCancelled(): boolean;
   markCancelled(): void;
   signal: AbortSignal;
-  holdWhilePaused(): Promise<"ok" | "timedOut">;
+  holdWhilePaused(timeoutSeconds?: number): Promise<"ok" | "timedOut">;
   /** The worktree run id host calls carry (null: no worktree); lets Stop reach `loop_cancel`. */
   onPrepared(worktreeRunId: string | null): void;
   /** The worktree exists: start mirroring the log to its file. */
   startLogFile(): void;
+  /** The run's real config is known: the manager starts its typed progress (step count, round budget). */
+  onConfig(config: LoopDefinition["config"]): void;
+  /** One runner event, for the manager's typed progress. */
+  onProgress(e: RunProgressEvent): void;
+  /** The model the running agent step uses (null: none). */
+  onModel(label: string | null): void;
+  /** The run_finished signal was posted. */
+  onSignalPosted(): void;
+  /** Waits for the run's project to be open, even when the run was cancelled: the end writes the record, archive and state into it. */
+  holdForProject(): Promise<void>;
+  /** The run reached its record. */
+  onFinished(f: LoopRunFinished): void;
 }
 
 /** The issue trail goes through the core; Settings → Repositories decides what is allowed. */
@@ -197,7 +227,7 @@ async function runPrepared(d: LoopRunDeps, host: LoopRunHost, c: LoopRunContext,
   const marker = activeRun ? `${prefix}/.factory/RUN.json` : null;
   let stateSavedBack = false;
   try {
-    setLiveCard({ loopName: target.name, runId, stageName: target.config.stages.find((st) => st.enabled)?.name ?? "", startedAt: new Date(started).toISOString() });
+    c.onConfig(runConfig);
     const trailRepo = shipTarget({ repo: activeRun?.repo ?? p.workRoot ?? projectRoot }, host.readRepoConfig());
     const trail = await trailForRun(trailDeps(host, c.log), {
       item: null,
@@ -212,7 +242,7 @@ async function runPrepared(d: LoopRunDeps, host: LoopRunHost, c: LoopRunContext,
     // The runner and the stage executor both log through this, so the run archive holds the whole log.
     const followLog = (line: string) => { archiveLog.push(line); c.log(line); };
     const models = createModelTracker(d.core, runConfig.repairModel);
-    models.onChange(() => updateLiveModel(runId, models.label()));
+    models.onChange(() => c.onModel(models.label()));
     const stageCtx: StageExecContext = {
       projectRoot, runId: activeRun?.runId ?? null, runRoot: runRoot(projectRoot, activeRun, p.workRoot), fs, host: d.host, core: d.core, log: followLog,
       approvalToken: async () => p.approvalToken, signal: c.signal, isCancelled: c.isCancelled, markCancelled: c.markCancelled,
@@ -224,8 +254,8 @@ async function runPrepared(d: LoopRunDeps, host: LoopRunHost, c: LoopRunContext,
       log: followLog,
       holdWhilePaused: c.holdWhilePaused,
       onProgress(e: RunProgressEvent) {
-        if (e.type === "stage-start") updateLiveStage(runId, e.stage.name);
-        updateLiveModel(runId, models.onEvent(e));
+        c.onProgress(e);
+        c.onModel(models.onEvent(e));
         if (!trail) return;
         if (e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
         else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId, mode: "loop", iteration: e.iteration }));
@@ -234,8 +264,8 @@ async function runPrepared(d: LoopRunDeps, host: LoopRunHost, c: LoopRunContext,
     const outcome = await runLoopWithDriver({
       target, runConfig, runDeps, activeRun, oneItem: p.oneItem, projectRoot, fs, host: d.host, batchLog: c.log, passesLog: followLog,
     }, { ...DEFAULT_DRIVERS, plain: d.runLoop, ...host.drivers });
-    // The record, archive and state copy-back need the run's project open: wait for it like a stage boundary does.
-    await c.holdWhilePaused();
+    // The record, archive and state copy-back need the run's project open, and a cancelled run needs it too.
+    await c.holdForProject();
     const settled = await settleOutcome(d, c, target, p, outcome, archiveLog, started, trail);
     const finished = await finishLoopRun({
       host: d.host,
@@ -244,25 +274,30 @@ async function runPrepared(d: LoopRunDeps, host: LoopRunHost, c: LoopRunContext,
       readRuns: () => readRecentRuns(fs),
       setRuns: () => undefined,
       postRunFinished: (entry, record) => postSignal(d.core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }),
-      onSignalPosted: () => undefined,
+      onSignalPosted: c.onSignalPosted,
       syncStateBack: async () => { if (!activeRun) return; await d.host("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); stateSavedBack = true; },
       ship: async (e) => (d.autoShip ? d.autoShip(e) : ""),
       now: () => d.now().getTime(),
       newId: () => d.newId(),
       log: c.log,
-      setNotice: c.log,
+      setNotice: (text) => { c.log(text); c.notice(text); },
     }, {
       loop: target, outcome, started, trigger: runTrigger(c.request.scheduled === true), activeRun, start: null, projectRoot, runPrefix: prefix,
       leftoverFiles: p.leftoverFiles, mergedMr: p.mergedMr, changedPaths: settled.changedPaths, summaryPath: settled.summaryPath,
       needsDecision: null, gitRoot: () => runRoot(projectRoot, activeRun, p.workRoot),
     });
     // Held for review, or the shipper was blocked: the run's record carries it, and the Ship panel on the Loop page is the manual path.
-    if (finished.manualShip) c.log("Waiting for review: open this run on the Loop page to review its diff and ship it.");
+    const ship = finished.manualShip;
+    if (ship) c.log("Waiting for review: open this run on the Loop page to review its diff and ship it.");
+    c.onFinished({ outcome, manualShip: ship && activeRun ? manualShipOf(ship, activeRun, target.name) : null });
   } finally {
     if (activeRun) await copyStateBackIfMissed({ syncStateBack: async () => { await d.host("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); } }, stateSavedBack);
-    clearLiveCard(runId);
     void host.refreshApproval(target.id).catch(() => undefined);
   }
+}
+
+function manualShipOf(ship: ManualShip, info: RunInfo, processName: string): LoopManualShip {
+  return { info, item: ship.item, entry: ship.entry, diff: ship.diff, reviewedPatchId: ship.reviewedPatchId, mergedMr: ship.mergedMr, processName };
 }
 
 /** Everything the Loop page does between the driver and `finishLoopRun`: setup mark, changed paths, trail summary, reopened faults, readiness copy, archive, notification. */

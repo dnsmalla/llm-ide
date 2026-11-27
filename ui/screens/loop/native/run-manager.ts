@@ -16,7 +16,7 @@ import { runNativeLoop, runStatusCode, type LoopRunOutcome, type ProgressEvent a
 import { autoShipKind, holdsForHuman, type AutoShipKind } from "./ship-model.ts";
 import { postSignal, runSignalPayload } from "./improve/signals.ts";
 import { createModelTracker } from "./step-model.ts";
-import { runLoopRequest, type LoopRunHost, type LoopRunRequest } from "./run-manager-loop.ts";
+import { runLoopRequest, type LoopManualShip, type LoopRunFinished, type LoopRunHost, type LoopRunRequest } from "./run-manager-loop.ts";
 import { withBaselineFor } from "./loop-drivers.ts";
 import { createStageDeps, type CoreFetch, type HostInvoke, type StageExecContext } from "./stage-exec.ts";
 import { loadLoops, saveLoops } from "./store.ts";
@@ -27,7 +27,7 @@ import { stepReviewRecords } from "./review.ts";
 import { countStepReviews, summarizeSteps, type StepReviewCounts } from "./issue-trail.ts";
 
 export type { RunMode } from "./factory.ts";
-export type { LoopRunRequest } from "./run-manager-loop.ts";
+export type { LoopManualShip, LoopRunRequest } from "./run-manager-loop.ts";
 export { withBaselineFor };
 
 /** The work item fields a run needs. Task 4's WorkItemRecord is a superset. `loop` set = a non-Factory loop run (see `loopRunItem`). */
@@ -37,6 +37,15 @@ export interface RunItem { key: string; source: "issue" | "spec" | "text"; id: s
 export function loopRunItem(loop: { id: string; name: string }, request: Omit<LoopRunRequest, "loopId"> = {}): RunItem {
   return { key: `loop:${loop.id}`, source: "text", id: null, title: loop.name, body: "", repo: null, provider: null, loop: { loopId: loop.id, ...request } };
 }
+
+/** True for a non-Factory loop's run (its item key is `loop:<id>`). The Factory board shows only the others. */
+export function isLoopRun(r: { itemKey: string }): boolean { return r.itemKey.startsWith("loop:"); }
+
+/** The loop a loop run belongs to, else null. */
+export function loopIdOfRun(r: { itemKey: string }): string | null { return isLoopRun(r) ? r.itemKey.slice("loop:".length) : null; }
+
+/** The runs the Factory board and its consumers care about: loop runs have no Factory card. */
+export function factoryRuns<T extends { itemKey: string }>(runs: readonly T[]): T[] { return runs.filter((r) => !isLoopRun(r)); }
 
 export interface LiveRun {
   runId: string;
@@ -48,6 +57,8 @@ export interface LiveRun {
   startedAt: string | null;
   /** "Waiting for its project" while held, else null. */
   note: string | null;
+  /** A loop run's Pause was pressed: it holds at the next step boundary (state "paused" from then on). */
+  pauseRequested?: boolean;
   log: string[];
   /** Typed progress from the runner; null before the run starts. Elapsed is computed by the board from startedAt. */
   progress: {
@@ -106,7 +117,7 @@ export interface RunManagerDeps {
 
 /** The host's RunInfo (Phase A Task 4), camelCase on the wire. */
 interface WorktreeInfo { runId: string; project: string; repo: string; worktree: string; branch: string; baseCommit: string }
-interface ManagedRun { /** Non-Factory loop runs: the worktree id host calls carry (null = no worktree), undefined until the worktree is prepared. */ loopRunId?: string | null; live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void; /** Mirrors the log to system/loop-runs/logs/<runId>.log once the worktree exists; execute flushes it before the run is dropped. */ logWriter?: RunLogWriter }
+interface ManagedRun { /** Non-Factory loop runs: the worktree id host calls carry (null = no worktree), undefined until the worktree is prepared. */ loopRunId?: string | null; live: LiveRun; item: RunItem; reuse: boolean; cancelled: boolean; abort: AbortController; /** Where the run marker was written; execute clears it when the run throws before a record exists. */ markerPath?: string; /** Set while the run holds for its project; cancelRun calls it. */ wake?: () => void; /** Mirrors the log to system/loop-runs/logs/<runId>.log once the worktree exists; execute flushes it before the run is dropped. */ logWriter?: RunLogWriter; /** A loop run's Pause: it holds at the next step boundary until resumed. */ userPaused?: boolean; /** Set when the manager is torn down, so a hold that ignores Cancel still ends. */ dropped?: boolean }
 interface Finished { loop: LoopDefinition; info: WorktreeInfo; config: LoopEngineConfig; outcome: LoopRunOutcome }
 
 export const CONCURRENCY_KEY = "llmide.factory.concurrency";
@@ -231,9 +242,11 @@ function onProjectChange(): void {
 export function resetRunManagerForTests(): void {
   for (const run of runs.values()) {
     run.cancelled = true;
+    run.dropped = true;
     run.wake?.();
   }
   runs.clear();
+  loopListeners.clear();
   external.clear();
   lastNotice = null;
   queue = [];
@@ -317,6 +330,14 @@ export function liveRuns(): readonly LiveRun[] {
   return snapshot;
 }
 
+let factoryCache: { src: readonly LiveRun[]; out: readonly LiveRun[] } | null = null;
+/** `liveRuns()` without loop runs: what the Factory board, its cap and its summaries count. Stable between changes. */
+export function factoryLiveRuns(): readonly LiveRun[] {
+  const src = liveRuns();
+  if (factoryCache?.src !== src) factoryCache = { src, out: factoryRuns(src) };
+  return factoryCache.out;
+}
+
 /**
  * A run the Loop page is executing, shown on the board while it runs. It is NOT queued, holds no concurrency slot and
  * is never cancelled, saved or held by this manager. Returns the release that removes it.
@@ -327,6 +348,35 @@ export function trackExternalRun(run: { runId: string; itemKey: string; projectR
   return () => {
     if (external.delete(run.runId)) emit();
   };
+}
+
+/** What a finished non-Factory loop run tells its observers (the Loop page and the loop boards). */
+export interface LoopRunEnd {
+  type: "finished";
+  runId: string;
+  loopId: string;
+  projectRoot: string;
+  /** The outcome line ("The loop passed.", a refusal, ...), null when the run said nothing. */
+  notice: string | null;
+  /** The run's whole log, including the lines written after the last live snapshot. */
+  log: readonly string[];
+  /** The run ended before it started (no record): `notice` is the reason. */
+  refused: boolean;
+  /** Held for review, or the shipper was blocked: the Loop page opens its Ship panel for it. */
+  manualShip: LoopManualShip | null;
+}
+/** `signal`: the run's run_finished signal was posted, so the improvements panel can re-read. */
+export type LoopRunEvent = LoopRunEnd | { type: "signal"; projectRoot: string };
+
+const loopListeners = new Set<(e: LoopRunEvent) => void>();
+
+export function subscribeLoopRunEvents(listener: (e: LoopRunEvent) => void): () => void {
+  loopListeners.add(listener);
+  return () => { loopListeners.delete(listener); };
+}
+
+function emitLoopEvent(e: LoopRunEvent): void {
+  for (const l of [...loopListeners]) { try { l(e); } catch { /* an observer must not break the run's end */ } }
 }
 
 export function subscribe(listener: () => void): () => void {
@@ -443,6 +493,8 @@ export function cancelRun(runId: string): void {
     queue = queue.filter((id) => id !== runId);
     runs.delete(runId);
     emit();
+    // A listener waiting for this run (a board's answer, the page) is released: it will never start.
+    if (run.item.loop) emitLoopEvent({ type: "finished", runId, loopId: run.item.loop.loopId, projectRoot: run.live.projectRoot, notice: "Cancelled while queued", log: [], refused: true, manualShip: null });
     return;
   }
   run.cancelled = true;
@@ -452,6 +504,19 @@ export function cancelRun(runId: string): void {
   if (run.item.loop) {
     if (run.loopRunId !== undefined) void requireDeps().host("loop_cancel", run.loopRunId ? { runId: run.loopRunId } : {}).catch(() => undefined);
   } else void requireDeps().host("loop_cancel", { runId }).catch(() => undefined);
+  emit();
+}
+
+/**
+ * A loop run's Pause / Resume. The run holds at the next step boundary (never mid-step), like the Loop page's own pause.
+ * Loop runs only; a Factory run has no user pause.
+ */
+export function setRunPaused(runId: string, paused: boolean): void {
+  const run = runs.get(runId);
+  if (!run || !run.item.loop || run.live.state === "queued") return;
+  run.userPaused = paused;
+  run.live.pauseRequested = paused ? true : undefined;
+  if (!paused) run.wake?.();
   emit();
 }
 
@@ -535,31 +600,99 @@ async function execute(run: ManagedRun): Promise<void> {
   pump();
 }
 
+const USER_PAUSE_NOTE = "Paused";
+
+/** The typed progress of a run about to start its steps. */
+function newProgress(config: { stages: readonly LoopStage[]; maxIterations: number }, startedAt: string | null): NonNullable<LiveRun["progress"]> {
+  return { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt, substate: null, model: null };
+}
+
+/** One runner event folded into a run's typed progress (the Factory and every other loop share it). */
+function applyProgress(progress: NonNullable<LiveRun["progress"]>, e: RunProgressEvent): void {
+  if (e.type === "iteration") progress.iteration = e.iteration;
+  else if (e.type === "stage-start") {
+    progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
+    // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
+    progress.substate = null;
+    const row = progress.stages.find((r) => r.id === e.stage.id);
+    if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
+  } else if (e.type === "stage-result") {
+    const row = progress.stages.find((r) => r.id === e.stage.id);
+    if (row) row.state = e.ok ? "passed" : "failed";
+  } else if (e.type === "stage-skipped") {
+    progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
+    const row = progress.stages.find((r) => r.id === e.stage.id);
+    if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
+  } else if (e.type === "step-review") {
+    progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
+  } else if (e.type === "step-review-result") {
+    progress.substate = null;
+  } else if (e.type === "loopback") {
+    // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
+    const row = progress.stages.find((r) => r.id === e.stage.id);
+    if (row) row.state = "failed";
+    progress.substate = null;
+  } else if (e.type === "repair") {
+    progress.repairs += 1;
+    const row = progress.stages.find((r) => r.id === e.stage.id);
+    if (row && row.state !== "passed") row.state = "repaired";
+  }
+}
+
 /** A non-Factory loop run: the Loop page's steps (run-manager-loop.ts). It writes its own record; a thrown error is the run's failure. */
 async function executeLoopRun(d: RunManagerDeps, run: ManagedRun, fs: FsApi, request: LoopRunRequest): Promise<void> {
+  let notice: string | null = null;
+  let refused = false;
+  const result: { finished: LoopRunFinished | null } = { finished: null };
+  const loopStarted = d.now();
+  const log = (line: string) => {
+    appendLog(run, line);
+    if (line.startsWith("$ ")) { try { d.onStage?.(run.live.runId); } catch { /* a listener must not stop the run */ } }
+  };
   try {
     await runLoopRequest(d, {
       fs, projectRoot: run.live.projectRoot, runId: run.live.runId, request,
-      log: (line) => appendLog(run, line),
-      notice: postRunNotice,
-      refuse: (message) => fail(run, message),
+      log,
+      notice: (text) => { notice = text; },
+      // A loop's refusal belongs to the page or board that asked, not to the Factory board's one-shot notice.
+      refuse: (message) => { refused = true; notice = message; appendLog(run, message); },
       isCancelled: () => run.cancelled,
       markCancelled: () => { run.cancelled = true; },
       signal: run.abort.signal,
       holdWhilePaused: holdForProject(d, run),
+      holdForProject: async () => { await holdAt(d, run, true); },
       onPrepared: (worktreeRunId) => { run.loopRunId = worktreeRunId; },
       startLogFile: () => { run.logWriter = createRunLogWriter(fs, runLogPath(run.live.runId), run.live.log); },
+      onConfig: (config) => { run.live.progress = newProgress(config, run.live.startedAt); emit(); },
+      onProgress: (e) => { if (run.live.progress) { applyProgress(run.live.progress, e); emit(); } },
+      onModel: (label) => { if (run.live.progress && run.live.progress.model !== label) { run.live.progress.model = label; emit(); } },
+      onSignalPosted: () => emitLoopEvent({ type: "signal", projectRoot: run.live.projectRoot }),
+      onFinished: (f) => { result.finished = f; },
     });
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    fail(run, message);
+    appendLog(run, message);
+    notice = message;
     // The runner itself failed (not a stage verdict), as on the Loop page.
     try { d.loopRun?.reportIncident?.(message); d.loopRun?.notify?.(false); } catch { /* a listener must not stop the run's end */ }
   }
+  const done = result.finished;
+  if (done) {
+    try {
+      const o = done.outcome;
+      d.onRunFinished?.({
+        runId: run.live.runId, itemKey: run.item.key, projectRoot: run.live.projectRoot, mode: run.live.mode, statusCode: runStatusCode(o), statusSummary: o.statusSummary,
+        item: run.item, steps: summarizeSteps(o.stages), stepReviews: countStepReviews(o.stepReviews),
+        durationSeconds: (d.now().getTime() - loopStarted.getTime()) / 1000, costUsd: o.costUsd ?? null, shipLine: "",
+      });
+    } catch { /* a listener must never change the run's own outcome */ }
+  }
   await boundedFlush(run.logWriter);
+  const finalLog = [...run.live.log];
   runs.delete(run.live.runId);
   emit();
   pump();
+  emitLoopEvent({ type: "finished", runId: run.live.runId, loopId: request.loopId, projectRoot: run.live.projectRoot, notice, log: finalLog, refused, manualShip: done?.manualShip ?? null });
 }
 
 async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Promise<Finished | null> {
@@ -612,46 +745,22 @@ async function runInWorktree(d: RunManagerDeps, run: ManagedRun, fs: FsApi): Pro
     isCancelled: () => run.cancelled, markCancelled: () => { run.cancelled = true; },
   };
   log(`▶ ${loop.name} (${run.live.mode})`);
-  const progress: NonNullable<LiveRun["progress"]> = { stageName: null, stageIndex: 0, stageCount: config.stages.filter((s) => s.enabled).length, iteration: 0, maxIterations: clampIterations(config.maxIterations), repairs: 0, stages: [], startedAt: run.live.startedAt, substate: null, model: null };
+  const progress = newProgress(config, run.live.startedAt);
   run.live.progress = progress;
   // Not awaited: the routing read may wait for a CLI probe, and a label must never delay the run's first step.
   const models = createModelTracker(d.core, config.repairModel);
   models.onChange(() => { if (run.live.progress === progress) { progress.model = models.label(); emit(); } });
   const onProgress = (e: RunProgressEvent) => {
     progress.model = models.onEvent(e);
-    if (e.type === "iteration") progress.iteration = e.iteration;
-    else if (e.type === "stage-start") {
+    if (e.type === "stage-start") {
       const stage = e.stage.name;
       markerWrites = markerWrites.then(() => writeMarker(fs, marker, JSON.stringify({ ...markerBase, stage }), true));
-      progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
-      // A new step starts with no review in progress, so a sub-state from the previous step cannot carry over.
-      progress.substate = null;
-      const row = progress.stages.find((r) => r.id === e.stage.id);
-      if (row) row.state = "running"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "running" });
     } else if (e.type === "stage-result") {
-      const row = progress.stages.find((r) => r.id === e.stage.id);
-      if (row) row.state = e.ok ? "passed" : "failed";
       try {
         d.onStageResult?.({ runId: run.live.runId, projectRoot: run.live.projectRoot, mode: run.live.mode, item: run.item, stage: e.stage, ok: e.ok, iteration: e.iteration, runPrefix: repoPrefixFor(run.live.projectRoot, info.worktree) });
       } catch { /* a listener must not stop the run */ }
-    } else if (e.type === "stage-skipped") {
-      progress.stageName = e.stage.name; progress.stageIndex = e.index; progress.stageCount = e.count; progress.iteration = e.iteration;
-      const row = progress.stages.find((r) => r.id === e.stage.id);
-      if (row) row.state = "skipped"; else progress.stages.push({ id: e.stage.id, name: e.stage.name, state: "skipped" });
-    } else if (e.type === "step-review") {
-      progress.substate = e.phase === "fixing" ? "fixing review" : "reviewing";
-    } else if (e.type === "step-review-result") {
-      progress.substate = null;
-    } else if (e.type === "loopback") {
-      // The run goes back to the code step, so the check that failed must not keep showing as running or reviewing.
-      const row = progress.stages.find((r) => r.id === e.stage.id);
-      if (row) row.state = "failed";
-      progress.substate = null;
-    } else if (e.type === "repair") {
-      progress.repairs += 1;
-      const row = progress.stages.find((r) => r.id === e.stage.id);
-      if (row && row.state !== "passed") row.state = "repaired";
     }
+    applyProgress(progress, e);
     emit();
   };
   const outcome = await d.runLoop(config, { ...withBaselineFor(d.createStageDeps(ctx, loop), run.reuse), log, isCancelled: () => run.cancelled, holdWhilePaused: holdForProject(d, run), onProgress }).finally(() => markerWrites);
@@ -918,29 +1027,60 @@ async function writeHeld(d: RunManagerDeps, fs: FsApi, held: PendingRecord): Pro
 }
 
 /**
- * The runner's `holdWhilePaused`: at a stage boundary a run whose project is not the open one holds ("paused") until
- * that project is open again or the run is cancelled (cancelRun calls `run.wake`). Never times out (`configFor` sets
- * pauseTimeoutSeconds 0).
+ * The runner's `holdWhilePaused`: at a stage boundary a loop run whose Pause was pressed holds until Resume, and a run whose
+ * project is not the open one holds ("paused") until that project is open again or the run is cancelled (cancelRun calls
+ * `run.wake`). Never times out (`configFor` sets pauseTimeoutSeconds 0).
  */
-function holdForProject(d: RunManagerDeps, run: ManagedRun): () => Promise<"ok" | "timedOut"> {
-  return async () => {
-    if (d.activeProject() === run.live.projectRoot || run.cancelled) return "ok";
+function holdForProject(d: RunManagerDeps, run: ManagedRun): (timeoutSeconds?: number) => Promise<"ok" | "timedOut"> {
+  return (timeoutSeconds = 0) => holdAt(d, run, false, timeoutSeconds);
+}
+
+/** `ignoreCancel`: the wait for the project is not cut short by Cancel (the end of a run writes into its project, cancelled or not). */
+async function holdAt(d: RunManagerDeps, run: ManagedRun, ignoreCancel: boolean, timeoutSeconds = 0): Promise<"ok" | "timedOut"> {
+  const since = Date.now();
+  const away = () => d.activeProject() !== run.live.projectRoot && !(run.cancelled && !ignoreCancel) && !run.dropped;
+  for (;;) {
+    // A user Pause times out like the runner's pause always did (0 = never); the project-away hold below never does.
+    while (run.userPaused && !run.cancelled && !run.dropped) {
+      const remaining = timeoutSeconds > 0 ? timeoutSeconds * 1000 - (Date.now() - since) : 0;
+      if (timeoutSeconds > 0 && remaining <= 0) {
+        run.userPaused = false;
+        run.live.pauseRequested = undefined;
+        run.live.state = "running";
+        run.live.note = null;
+        emit();
+        return "timedOut";
+      }
+      run.live.state = "paused";
+      run.live.note = USER_PAUSE_NOTE;
+      emit();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await new Promise<void>((resolve) => {
+        run.wake = resolve;
+        if (timeoutSeconds > 0) { timer = setTimeout(resolve, remaining); (timer as { unref?: () => void }).unref?.(); }
+      });
+      if (timer !== undefined) clearTimeout(timer);
+      run.wake = undefined;
+    }
+    if (run.live.note === USER_PAUSE_NOTE) { run.live.state = "running"; run.live.note = null; emit(); }
+    if (!away()) return "ok";
     run.live.state = "paused";
     run.live.note = "Waiting for its project";
     emit();
     pump(); // its slot is free now: a queued run of the open project may start
-    await new Promise<void>((resolve) => {
-      const off = d.subscribeProject(() => {
-        if (run.cancelled || d.activeProject() === run.live.projectRoot) { off(); resolve(); }
+    while (away()) {
+      await new Promise<void>((resolve) => {
+        const off = d.subscribeProject(() => { if (!away()) { off(); resolve(); } });
+        run.wake = () => { off(); resolve(); };
       });
-      run.wake = () => { off(); resolve(); };
-    });
-    run.wake = undefined;
+      run.wake = undefined;
+    }
     run.live.state = "running";
     run.live.note = null;
     emit();
-    return "ok";
-  };
+    // A Pause pressed while the run waited for its project still holds it.
+    if (!(run.userPaused && !run.cancelled && !run.dropped)) return "ok";
+  }
 }
 
 /** Writes the records of runs that ended while their project was closed (this session's and stored ones), once it is open again. */

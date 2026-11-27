@@ -17,7 +17,7 @@ import { persistEnsuredDefaults } from "./defaults-save.ts";
 import { MAX_ITERATIONS, MIN_ITERATIONS, clampIterations, isNativeRunnable, maxPassesOf, reviewEveryRunsOf, stepLimitOf, type LoopDefinition, type LoopProjectStore, type LoopStage } from "./model.ts";
 import { MAX_LESSON_CHARS, setLearnedWriteHook } from "./lessons.ts";
 import { REVIEW_MODE_OPTIONS, reviewSwitch, setReviewAfter, setReviewMode } from "./review-ui.ts";
-import { RUN_COMMAND_MAX, isOneItemRun } from "./run-command.ts";
+import { RUN_COMMAND_MAX } from "./run-command.ts";
 import { loopbackLogLine } from "./loopback.ts";
 import { loopUsesInputPath, normalizeInputPath } from "./input-path.ts";
 import { pickInputPath } from "./pick-input-path.ts";
@@ -27,22 +27,19 @@ import { runStatusCode, type RunnerDeps } from "./runner.ts";
 import { runLoopWithDriver, withBaselineFor } from "./loop-drivers.ts";
 import { shellBus } from "../../shell/bus";
 import { approvalStatus, approveLoop, approveStage, revokeApprovals, type LoopApprovalStatus } from "./approvals.ts";
-import { faultPathsFromOutput, reopenFault } from "./regression.ts";
 import { writeRunArchive } from "./summary.ts";
-import { clearQueue, fromQueued, loadQueue, saveQueue, toQueued } from "./queue.ts";
+import { takeLegacyQueue } from "./queue.ts";
 import { cronMatches, describeCron, validateCron } from "../../autotasks/native/cron.ts";
 import { decodePrefsView, type LoopDefaults } from "../../shell/host-prefs.ts";
 import { loopEditSignals, postSignal, runSignalPayload } from "./improve/signals.ts";
 import { ImprovementsPanel } from "./improve/ImprovementsPanel.tsx";
 import { runningLoopIdsOf } from "./improve/panel-model.ts";
-import { liveRuns, subscribe as subscribeRuns, trackExternalRun } from "./run-manager.ts";
-import { createModelTracker } from "./step-model.ts";
+import { cancelRun, isLoopRun, liveRuns, loopIdOfRun, loopRunItem, setRunPaused, startRun, subscribe as subscribeRuns, subscribeLoopRunEvents, trackExternalRun } from "./run-manager.ts";
 import { appendRunRecord, decodeFactoryFields, loadRunRecord, readRecentRuns, runRecordPath, runTrigger, setRunRecordShip, type FactoryRunFields, type LoopRunIndexEntry } from "./history.ts";
-import { copyStateBackIfMissed } from "./run-end.ts";
 import { finishLoopRun } from "./run-finish.ts";
 import { prepareLoopRun } from "./run-start.ts";
 import { branchDiscardRefusal, lastShipUrl } from "./loop-branch.ts";
-import { isSetupStage, markSetupDone, setupNeeded } from "./loop-setup.ts";
+import { setupNeeded } from "./loop-setup.ts";
 import { changedPathArgs, loopBranchSlug, newRunId, repoPrefixFor, runRoot, runsInWorktree, stageHostArgs, worktreeBlockedStage, type RunInfo } from "./worktree-run.ts";
 import { FACTORY_INTAKE_SKILL, FACTORY_TEMPLATE, configFor, factoryStartRefusal, factoryVerifyProblem, isFactoryLoop, needsDecisionSummary, taskMarkdown, withDetectedVerify, type WorkItem } from "./factory.ts";
 import { createStageDeps, runOneStage, type StageExecContext } from "./stage-exec.ts";
@@ -52,7 +49,6 @@ import { copyReadiness, readinessCopyPath } from "./readiness-copy.ts";
 import { detachedFields, followsRegistry, registrySource, shownStagePrompt } from "./default-stage.ts";
 import { shipTarget, type WorktreeDiff } from "./ship-model.ts";
 import { stageIdForLogLine } from "./stage-follow.ts";
-import { clearLiveCard, setLiveCard, updateLiveModel, updateLiveStage } from "./live-card.ts";
 import { runSummaryBody, stepCommentBody, summarizeSteps, trailForRun, type TrailDeps } from "./issue-trail.ts";
 import { readRepoConfig } from "../../settings/repo-config";
 import { appendRunLog, capRunLog } from "./run-log.ts";
@@ -143,16 +139,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   }, [active]);
   const [saving, setSaving] = useState(false);
   const [notice, setNoticeState] = useState<string | null>(null);
-  // Loop id/name of a board-requested start that has not become a run yet. While it is open every notice is also sent
-  // to that board, synchronously, so a refusal inside executeLoopGated is not lost. Closed when the run begins (the
-  // board shows its live card from then on) and when the start gate releases.
-  const boardWatchRef = useRef<{ loopId: string; loopName: string } | null>(null);
-  const tellBoard = (loopName: string, message: string, loopId?: string) => window.dispatchEvent(new CustomEvent("llmide-loop-board-notice", { detail: { loopName, message, ...(loopId ? { loopId } : {}) } }));
-  const setNotice = (text: string | null) => {
-    setNoticeState(text);
-    const watch = boardWatchRef.current;
-    if (watch && text) tellBoard(watch.loopName, text, watch.loopId);
-  };
+  const setNotice = setNoticeState;
   /** What the input-path field shows while typing; the loop keeps only the last valid value. */
   const [inputDraft, setInputDraft] = useState<{ loopId: string; text: string; error: string | null } | null>(null);
   const [ask, setAsk] = useState<Ask | null>(null);
@@ -191,11 +178,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   /** True while a run is being set up (approval done, worktree being prepared); blocks a double start. */
   const startingRef = useRef(false);
   const startGateRef = useRef(createStartGate());
-  // True once the gated start reached the point where the run is marked running (see executeLoop).
-  const ranRef = useRef(false);
-  // Loop ids queued while a start held the gate. Only these may start by themselves when that start never becomes a
-  // run; a queue restored after a remount waits for the user's "Resume".
-  const waitingRef = useRef(new Set<string>());
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
   // A project change remounts this screen: the run in flight is cancelled and unsaved loop edits are gone. The shell
@@ -214,6 +196,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const [improveCounts, setImproveCounts] = useState<Record<string, number>>({});
   const [, setRunsTick] = useState(0);
   useEffect(() => subscribeRuns(() => setRunsTick((t) => t + 1)), []);
+  // A non-Factory loop's run executes in the background run manager (run-manager.ts); this page starts it and observes it.
+  const managedRuns = projectRoot ? liveRuns().filter((r) => r.projectRoot === projectRoot && isLoopRun(r)) : [];
+  const managedActive = managedRuns.find((r) => r.state !== "queued") ?? null;
+  const managedQueued = managedRuns.filter((r) => r.state === "queued");
+  const queued = managedQueued.length;
+  const managedActiveRef = useRef(managedActive);
+  managedActiveRef.current = managedActive;
+  const [finishedTick, setFinishedTick] = useState(0);
   // While this project's Loop page is open, the desktop's own writes to system/self-improvement/ are announced to the
   // core first (its shell guard then never undoes them) and a folder it creates is claimed with the real root.
   useEffect(() => {
@@ -221,23 +211,15 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setLearnedWriteHook(() => core.request("/kb/agent/self-improvement/claim", { method: "POST", body: { workspaceRoot: projectRoot } }));
     return () => setLearnedWriteHook(null);
   }, [projectRoot]);
-  const queueRef = useRef<Array<{ loop: LoopDefinition; scheduled: boolean; command?: string; inputOverride?: string }>>([]);
   // "One item I name": the task text per loop id. Component state only, never saved to loop.json.
   const [runCommands, setRunCommands] = useState<Record<string, string>>({});
   const runCommandsRef = useRef(runCommands);
   runCommandsRef.current = runCommands;
-  const queueRestored = useRef(false);
-  const persistQueue = () => {
-    if (!projectRoot) return;
-    saveQueue(projectRoot, queueRef.current.map((x) => toQueued(x, new Date().toISOString())));
-  };
-  const [queued, setQueued] = useState(0);
+  const queueMigrated = useRef(false);
   const runLoopRef = useRef<(l: LoopDefinition, scheduled?: boolean) => void>(() => undefined);
   const [scheduleCron, setScheduleCron] = useState("");
   const [runs, setRuns] = useState<LoopRunIndexEntry[]>([]);
   const [workRoot, setWorkRoot] = useState<string | null>(null);
-  // False until loop_work_root answered (or failed), so a board request never runs with a not-yet-known work root.
-  const [workRootKnown, setWorkRootKnown] = useState(false);
   const [selectedRun, setSelectedRun] = useState<LoopRunIndexEntry | null>(null);
   // Back from a past run, the live log is mounted again at its top: show its end and follow it.
   useEffect(() => {
@@ -297,10 +279,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }
       setLoad(next);
       if (next.kind === "ok") {
-        // A board's Run request that started this mount names the loop to show: selecting the primary one first
-        // would make the board flip to another loop's board before the request is processed.
-        const wanted = boardRequestRef.current?.loopId;
-        const loop = next.store.loops.find((l) => l.id === wanted) ?? primaryLoop(next.store);
+        const loop = primaryLoop(next.store);
         setSelectedLoopId(loop?.id ?? null);
         setSelectedStageId(loop?.config.stages[0]?.id ?? null);
         setDirty(added.length > 0 && !saved);
@@ -344,31 +323,18 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   }, []);
 
   useEffect(() => {
-    if (!projectRoot) { setWorkRoot(null); setWorkRootKnown(true); return; }
+    if (!projectRoot) { setWorkRoot(null); return; }
     let live = true;
-    setWorkRootKnown(false);
-    void invokeHost<string>("loop_work_root").then((p) => { if (live) { setWorkRoot(p); setWorkRootKnown(true); } }).catch(() => { if (live) { setWorkRoot(null); setWorkRootKnown(true); } });
+    void invokeHost<string>("loop_work_root").then((p) => { if (live) setWorkRoot(p); }).catch(() => { if (live) setWorkRoot(null); });
     return () => { live = false; };
   }, [projectRoot]);
 
+  // The queue an older build persisted for this project is answered once, never silently restarted.
   useEffect(() => {
-    if (!projectRoot || !load || load.kind !== "ok" || queueRestored.current) return;
-    queueRestored.current = true;
-    const byId = new Map(load.store.loops.map((l) => [l.id, l]));
-    const dropped: string[] = [];
-    const restored = loadQueue(projectRoot).flatMap((q) => {
-      const l = byId.get(q.loopId);
-      if (!l) return [];
-      const r = fromQueued(q, l);
-      if ("error" in r) { dropped.push(r.error); return []; }
-      return [r.entry];
-    });
-    if (restored.length || dropped.length) {
-      queueRef.current = restored;
-      setQueued(restored.length);
-      setNotice([...(restored.length ? [`${restored.length} queued run(s) restored. Resume them when ready.`] : []), ...dropped].join(" "));
-      persistQueue();
-    }
+    if (!projectRoot || !load || load.kind !== "ok" || queueMigrated.current) return;
+    queueMigrated.current = true;
+    const dropped = takeLegacyQueue(projectRoot, load.store.loops);
+    if (dropped) setNoticeState(dropped);
   }, [projectRoot, load]);
 
   useEffect(() => {
@@ -376,7 +342,36 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     let live = true;
     void readRecentRuns(fs).then((r) => { if (live) setRuns(r); }).catch(() => { if (live) setRuns([]); });
     return () => { live = false; };
-  }, [fs, projectRoot, notice]);
+  }, [fs, projectRoot, notice, finishedTick]);
+
+  // The run the manager is executing is mirrored into this page's run log (so Copy and Clear keep working) and its step is
+  // followed in the Process pane. The end of a run is announced as an event: its final log, notice and Ship offer.
+  const mirroredRef = useRef<{ runId: string; log: readonly string[] } | null>(null);
+  const loopIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const run = managedActive;
+    // A single "Run stage" owns the log while it runs.
+    if (!run || runningStageRef.current || mirroredRef.current?.log === run.log) return;
+    mirroredRef.current = { runId: run.runId, log: run.log };
+    setRunLogRaw(capRunLog([...run.log]));
+    const now = loadRef.current;
+    const runLoopId = loopIdOfRun(run);
+    const followed = runLoopId && now?.kind === "ok" ? now.store.loops.find((l) => l.id === runLoopId) : undefined;
+    const stageName = run.progress?.stageName;
+    const stageId = stageName ? followed?.config.stages.find((st) => st.enabled && st.name === stageName)?.id : undefined;
+    if (stageId && followed && loopIdRef.current === followed.id) setSelectedStageId(stageId);
+  }, [managedActive]);
+  useEffect(() => subscribeLoopRunEvents((e) => {
+    if (e.projectRoot !== projectRoot) return;
+    if (e.type === "signal") { setImproveTick((t) => t + 1); return; }
+    setFinishedTick((t) => t + 1);
+    mirroredRef.current = { runId: e.runId, log: e.log };
+    setRunLogRaw(capRunLog([...e.log]));
+    if (e.notice) setNoticeState(e.notice);
+    if (loopIdRef.current === e.loopId) void refreshApprovalRef.current(e.loopId);
+    const ship = e.manualShip;
+    if (ship) setShipRun({ info: ship.info, item: ship.item, entry: ship.entry, passed: true, reviewedPatchId: ship.reviewedPatchId, requestProvider: null, processName: ship.processName, branchDiscard: true, mergedMr: ship.mergedMr, ...(ship.diff ? { diff: ship.diff } : {}) });
+  }), [projectRoot]);
 
   const openRun = async (entry: LoopRunIndexEntry) => {
     const seq = ++openSeq.current;
@@ -407,7 +402,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     if (!info) { setNotice("This run's worktree was removed; only its record is left."); return; }
     // A loop's branch (loop/…) is shared by all its runs: no panel from an older run, and none while the loop runs or its worktree is in use.
     const inUse = activeRunRef.current?.runId === info.runId ? entry.loopId : null;
-    const refusal = branchDiscardRefusal(info, runs, entry, activeLoopId ?? inUse);
+    const refusal = branchDiscardRefusal(info, runs, entry, activeLoopId ?? (managedActive ? loopIdOfRun(managedActive) : null) ?? inUse);
     if (refusal) { setNotice(refusal); return; }
     const w = fields.workItem;
     const item: WorkItem = w ? { source: w.source, id: w.id, title: w.title, body: "", repo: null } : { source: "text", id: null, title: entry.loopName, body: "", repo: null };
@@ -472,12 +467,16 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     window.dispatchEvent(new CustomEvent("llmide-loop-selected", { detail: { id: loop.id, name: loop.name } }));
   }, [loop?.id, loop?.name]);
 
+  loopIdRef.current = loop?.id ?? null;
   const stage = loop?.config.stages.find((s) => s.id === selectedStageId) ?? loop?.config.stages[0] ?? null;
 
   /** Re-read the host's approval state (commands may have changed since the last dialog). */
   const refreshApproval = async (loopId: string) => {
     try { setApprovalState(await approvalStatus(loopId)); } catch { setApprovalState(null); }
   };
+
+  const refreshApprovalRef = useRef(refreshApproval);
+  refreshApprovalRef.current = refreshApproval;
 
   useEffect(() => {
     if (!loop) { setApprovalState(null); return undefined; }
@@ -598,22 +597,33 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   };
 
   const stopRun = () => {
-    // Stop ends the queue too: otherwise the run's finally would start the next queued loop right after the user stopped.
-    queueRef.current = [];
-    setQueued(0);
-    if (projectRoot) clearQueue(projectRoot);
-    cancelActiveRun();
+    // Stop ends the queue too: otherwise the manager would start the next queued loop right after the user stopped.
+    for (const r of liveRuns()) if (r.projectRoot === projectRoot && isLoopRun(r)) cancelRun(r.runId);
+    if (runningRef.current || runningStageRef.current) cancelActiveRun();
     setNotice("Stopping the current stage; the loop will end after it returns. Queued runs were cleared.");
   };
 
   // Pause holds the loop at the next stage boundary (the Mac's between-stages hold, not a mid-stage suspend).
   const pauseRun = () => {
+    const managed = managedActiveRef.current;
+    if (managed) {
+      if (managed.pauseRequested) return;
+      setRunPaused(managed.runId, true);
+      setNotice("Pausing: the loop holds once the current stage finishes. Resume to continue.");
+      return;
+    }
     if (!loopRunning || pausedRef.current) return;
     pausedRef.current = true;
     setPaused(true);
     setNotice("Pausing: the loop holds once the current stage finishes. Resume to continue.");
   };
   const resumeRun = () => {
+    const managed = managedActiveRef.current;
+    if (managed) {
+      setRunPaused(managed.runId, false);
+      setNotice("Resumed.");
+      return;
+    }
     if (!pausedRef.current) return;
     pausedRef.current = false;
     setPaused(false);
@@ -630,25 +640,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     return "ok";
   };
 
-  const executeLoopGated = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null, command?: string) => {
+  /** A Factory run started from this page's picker. It still runs here (its work item, board card and Ship panel are this page's); every other loop runs in the run manager. */
+  const executeFactoryGated = async (target: LoopDefinition, start: { repoRel: string; task: string; item: WorkItem }) => {
     if (dirty) return;
-    // A task named on the loop's Board makes the run one-item even for workMode "all".
-    const oneItem = isOneItemRun(target.config.workMode, command, isFactoryLoop(target));
-    // A "one item I name" run is the person's task; the schedule never has one, and a queue entry persisted before commands were saved has none.
-    if (oneItem && !command?.trim()) { setNotice(scheduled ? `“${target.name}” is set to one item you name; the schedule skipped it.` : `“${target.name}” is set to one item you name: type the task and press ▶ Run.`); return; }
     const unsupported = target.config.stages.find((s) => s.enabled && !isNativeRunnable(s));
     if (unsupported) { setNotice(`“${unsupported.name}” is a ${unsupported.kind} stage; it cannot run yet.`); return; }
-    // Every loop runs on its own branch unless it opted out or has a Regression stage (it works on the working tree).
-    const useWorktree = runsInWorktree(target.config, isFactoryLoop(target));
-    const worktreeBlocked = useWorktree && isFactoryLoop(target) ? worktreeBlockedStage(target.config.stages) : null;
+    const useWorktree = runsInWorktree(target.config, true);
+    const worktreeBlocked = useWorktree ? worktreeBlockedStage(target.config.stages) : null;
     if (worktreeBlocked) { setNotice(`“${worktreeBlocked.name}” re-checks faults in the main working tree, so it cannot run in an isolated worktree. Turn that stage off or turn off “Always run in an isolated worktree”.`); return; }
-    // A loop.json from a cloned repo can mark a code-applying loop runsOnSchedule; it still never runs unattended.
-    // A Factory run needs a picked work item; the schedule and the queue never have one.
-    if (isFactoryLoop(target) && !start) { setNotice(`“${target.name}” is a Factory loop: start it with ▶ Run and pick a work item.`); return; }
-    // A Factory run with a picked work item may still get Verify from the repo worktree below.
-    const verifyProblem = isFactoryLoop(target) && !start ? factoryVerifyProblem(target.config) : null;
-    if (verifyProblem) { setNotice(verifyProblem); return; }
-    if (scheduled && isManualOnly(target)) { setNotice(`“${target.name}” applies code and is manual-only; the schedule skipped it.`); return; }
     const batchBlock = batchRollbackReason(target);
     if (batchBlock) { setNotice(batchBlock); return; }
     const result = await prepareLoopRun({
@@ -667,12 +666,12 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       endStarting: () => { startingRef.current = false; },
       closePicker: () => setPickerLoop(null),
       log: (line) => setRunLog((l) => [...l, line]),
-    }, { target, scheduled, start, command, oneItem, useWorktree, projectRoot, workRoot, workRelative });
+    }, { target, scheduled: false, start, command: undefined, oneItem: false, useWorktree, projectRoot, workRoot, workRelative });
     if (!result.ok) { if (result.notice !== null) setNotice(result.notice); return; }
     const { info: activeRun, reusedWorktree, mergedMr, leftoverFiles, approvalToken } = result;
     let runConfig = result.runConfig;
     if (result.notice !== null) setNotice(result.notice);
-    if (isFactoryLoop(target) && activeRun) {
+    if (activeRun) {
       const detected = await detectTestCommand(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree)).catch(() => null);
       const filled = withDetectedVerify(target, detected?.command ?? null);
       runConfig = filled.loop.config;
@@ -680,13 +679,11 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       if (problem) { setNotice(`${problem} The run did not start.`); startingRef.current = false; return; }
     }
     const marker = activeRun ? `${repoPrefixFor(projectRoot ?? "", activeRun.worktree)}/.factory/RUN.json` : null;
-    if (activeRun && isFactoryLoop(target) && marker) {
-      try { await fs.write(marker, JSON.stringify({ runId: activeRun.runId, mode: "full", startedAt: new Date().toISOString(), itemKey: start ? (start.item.id ?? start.item.title) : null }), { expected_hash: null }); } catch { /* Resume marker only */ }
+    if (activeRun && marker) {
+      try { await fs.write(marker, JSON.stringify({ runId: activeRun.runId, mode: "full", startedAt: new Date().toISOString(), itemKey: start.item.id ?? start.item.title }), { expected_hash: null }); } catch { /* Resume marker only */ }
     }
     activeRunRef.current = activeRun;
     runningRef.current = true;
-    ranRef.current = true;
-    boardWatchRef.current = null;
     startingRef.current = false;
     cancelledRef.current = false;
     runAbortRef.current = new AbortController();
@@ -701,21 +698,16 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
     setRunLog((l) => [...l, ...result.logLines]);
     const started = Date.now();
     let summaryPath: string | null = null;
-    // Set once the Loop's saved state is back in the main tree; the finally block copies it back when the run threw first.
-    let stateSavedBack = false;
-    const archiveLog: string[] = oneItem ? [`Task: ${command?.trim()}`] : [];
+    const archiveLog: string[] = [];
     // Shown on the board as Working while it runs; released after the run record is saved (the finally below), so a
     // card can never be left behind. Loaded on demand, so the Loop screen does not hard-depend on the Factory chunk.
     let releaseBoardRun: (() => void) | null = null;
-    let liveRunId: string | null = null;
     try {
-      // The issue trail: a run started from an issue comments there; any other run opens one when the loop asks for it.
-      const trailRunId = activeRun && isFactoryLoop(target) ? activeRun.runId : newRunId(new Date(started), Math.random);
-      liveRunId = trailRunId;
-      setLiveCard({ loopName: target.name, runId: trailRunId, stageName: target.config.stages.find((st) => st.enabled)?.name ?? "", startedAt: new Date(started).toISOString() });
+      // The issue trail: a run started from an issue comments there.
+      const trailRunId = activeRun ? activeRun.runId : newRunId(new Date(started), Math.random);
       const trailRepo = shipTarget({ repo: activeRun?.repo ?? workRoot ?? projectRoot ?? "" }, readRepoConfig());
       const trail = await trailForRun({ ...loopTrailDeps, onError: (line) => setRunLog((l) => [...l, line]) }, {
-        item: start ? { ...start.item, provider: start.item.provider ?? null } : null,
+        item: { ...start.item, provider: start.item.provider ?? null },
         // Only open a fresh repo issue when the loop opted in (config.issueTrail, default off); a run started from an
         // issue still comments on that issue because the issue is the run's home.
         open: target.config.issueTrail === true,
@@ -725,7 +717,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       if (trail) setRunLog((l) => [...l, `issue trail: ${trail.target.repo}#${trail.target.number}`]);
       else if (!trailRepo) setRunLog((l) => [...l, `issue trail: no issue — ${activeRun?.repo ?? workRoot ?? projectRoot ?? "(no project)"} is not mapped in Settings → Repositories`]);
       else setRunLog((l) => [...l, `issue trail: no issue — ${trailRepo.provider} ${trailRepo.slug} could not be opened (see the line above)`]);
-      if (activeRun && isFactoryLoop(target) && start) {
+      if (activeRun) {
         try {
           const intake = await import("../../factory/intake.ts");
           const put = await intake.putRunOnBoard(fs, start.item, activeRun.runId);
@@ -742,29 +734,22 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         const stageId = stageIdForLogLine(target.config.stages, line);
         if (stageId !== null) setSelectedStageId(stageId);
       };
-      const models = createModelTracker(core, runConfig.repairModel);
-      models.onChange(() => updateLiveModel(trailRunId, models.label()));
       const runDeps: RunnerDeps = {
-        ...withBaselineFor(createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken, oneItem ? command?.trim() : undefined), log: followLog }, target), reusedWorktree),
+        ...withBaselineFor(createStageDeps({ ...stageContext(activeRun?.runId ?? null, runRoot(projectRoot ?? "", activeRun, workRoot), approvalToken), log: followLog }, target), reusedWorktree),
         isCancelled() { return cancelledRef.current; },
         log: followLog,
         holdWhilePaused,
         onProgress(e) {
-          if (e.type === "stage-start") updateLiveStage(trailRunId, e.stage.name);
-          updateLiveModel(trailRunId, models.onEvent(e));
           if (!trail) return;
           if (e.type === "stage-result") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: e.ok, runId: trailRunId, mode: "loop", iteration: e.iteration, durationSeconds: e.durationMs / 1000, costUsd: e.costUsd }));
           else if (e.type === "stage-skipped") trail.post(stepCommentBody({ process: target.name, stageName: e.stage.name, ok: true, skipped: true, runId: trailRunId, mode: "loop", iteration: e.iteration }));
         },
       };
       const outcome = await runLoopWithDriver({
-        target, runConfig, runDeps, activeRun, oneItem, projectRoot: projectRoot ?? "", fs, host: invokeHost,
+        target, runConfig, runDeps, activeRun, oneItem: false, projectRoot: projectRoot ?? "", fs, host: invokeHost,
         batchLog: (line) => setRunLog((l) => [...l, line]), passesLog: followLog,
       });
-      const setupStage = target.config.stages.find((st) => isSetupStage(st));
-      if (activeRun && setupStage && outcome.stages.some((o) => isSetupStage(o.stage) && o.ok)) await markSetupDone(fs, repoPrefixFor(projectRoot ?? "", activeRun.worktree), setupStage.command ?? "");
-      if (!outcome.passed && !outcome.cancelled && outcome.failedStage && isSetupStage(outcome.failedStage)) outcome.statusSummary = `Setting up the project's dependencies (${setupStage?.command ?? "install"}) failed, so the run stopped before its other steps.${activeRun ? ` Branch ${activeRun.branch} is kept.` : ""}`;
-      const needsDecision = isFactoryLoop(target) ? needsDecisionSummary(outcome) : null;
+      const needsDecision = needsDecisionSummary(outcome);
       if (needsDecision) outcome.statusSummary = needsDecision;
       if (activeRun) setRunLog((l) => [...l, `ran in system/loop-worktrees/${activeRun.runId} on branch ${activeRun.branch}; your main working tree was not touched`]);
       let changedPaths: string[] = [];
@@ -778,13 +763,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       // Do not finish the run before the issue comments are actually posted.
       await trail?.idle();
       setRunLog((l) => [...l, outcome.cancelled ? (cancelledRef.current ? "Loop cancelled." : `Loop aborted: ${outcome.statusSummary}`) : outcome.passed ? "Loop passed." : `Loop failed: ${outcome.statusSummary}`, ...(!outcome.passed && !outcome.cancelled && outcome.loopback ? [loopbackLogLine(outcome.loopback)] : [])]);
-      if (!outcome.cancelled && !outcome.passed && outcome.failedStage?.kind === "regressionSweep") {
-        const failedRun = [...outcome.stages].reverse().find((o) => o.stage.kind === "regressionSweep" && !o.ok);
-        const faultPaths = faultPathsFromOutput(failedRun?.output ?? "");
-        let reopened = 0;
-        for (const rel of faultPaths) if (await reopenFault(fs, rel)) reopened += 1;
-        if (reopened > 0) setRunLog((l) => [...l, `reopened ${reopened} fixed fault(s).`]);
-      }
       // Intake ran in this run, so the readiness report is copied to llm-doc/factory/ (the Review Conflicts tree).
       if (activeRun && outcome.stages.some((o) => o.stage.skillId === FACTORY_INTAKE_SKILL)) {
         const copyAt = new Date(started);
@@ -797,7 +775,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       }
       // Every run writes its report under llm-doc/loop/runs/ in the main project, with its plan and full log.
       try {
-        const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", target.defaultKey === "test" ? target.inputPath ?? "" : "");
+        const dir = await writeRunArchive(fs, target, outcome, archiveLog, new Date(), activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", "");
         if (dir) {
           summaryPath = `${dir}/run.md`;
           setRunLog((l) => [...l, `run archive: ${dir}/run.md`]);
@@ -813,18 +791,18 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         setRuns,
         postRunFinished: projectRoot ? (entry, record) => postSignal(core, { projectRoot, loopId: entry.loopId, kind: "run_finished", runId: entry.id, payload: () => runSignalPayload(entry, record) }) : null,
         onSignalPosted: () => setImproveTick((t) => t + 1),
-        syncStateBack: async () => { if (!activeRun) return; await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); stateSavedBack = true; },
+        syncStateBack: async () => { if (activeRun) await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); },
         ship: (e) => import("./run-manager-host.ts").then((m) => m.shipFinishedRun(e)),
         now: () => Date.now(),
         newId: () => crypto.randomUUID(),
         log: (line) => setRunLog((l) => [...l, line]),
         setNotice,
       }, {
-        loop: target, outcome, started, trigger: runTrigger(scheduled), activeRun, start, projectRoot: projectRoot ?? "",
+        loop: target, outcome, started, trigger: runTrigger(false), activeRun, start, projectRoot: projectRoot ?? "",
         runPrefix: activeRun ? repoPrefixFor(projectRoot ?? "", activeRun.worktree) : "", leftoverFiles, mergedMr, changedPaths, summaryPath, needsDecision, gitRoot: currentRunRoot,
       });
       const ship = finished.manualShip;
-      if (activeRun && ship) setShipRun({ info: activeRun, item: ship.item, entry: ship.entry, passed: true, reviewedPatchId: ship.reviewedPatchId, requestProvider: null, processName: isFactoryLoop(target) ? undefined : target.name, branchDiscard: !isFactoryLoop(target), mergedMr: ship.mergedMr, ...(ship.diff ? { diff: ship.diff } : {}) });
+      if (activeRun && ship) setShipRun({ info: activeRun, item: ship.item, entry: ship.entry, passed: true, reviewedPatchId: ship.reviewedPatchId, requestProvider: null, branchDiscard: false, mergedMr: ship.mergedMr, ...(ship.diff ? { diff: ship.diff } : {}) });
     } catch (e) {
       setRunLog((l) => [...l, e instanceof Error ? e.message : String(e)]);
       setNotice(e instanceof Error ? e.message : "The loop could not run.");
@@ -832,8 +810,6 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       reportUiIncident("loop", e instanceof Error ? e.message : String(e));
       void notifyTask("loop", false);
     } finally {
-      if (activeRun && !isFactoryLoop(target)) await copyStateBackIfMissed({ syncStateBack: async () => { await invokeHost("loop_worktree_state_sync", { runId: activeRun.runId, direction: "out" }); } }, stateSavedBack);
-      if (liveRunId) clearLiveCard(liveRunId);
       releaseBoardRun?.();
       runningRef.current = false;
       runAbortRef.current = null;
@@ -844,145 +820,55 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       setActiveLoopId(null);
       setRunningStage(false);
       void refreshApproval(target.id);
-      // A run ended by leaving the screen keeps the queue as persisted: the next mount restores it.
-      const next = unmountedRef.current ? undefined : queueRef.current.shift();
-      setQueued(queueRef.current.length);
-      persistQueue();
-      // A run drains the whole queue. What is left now waits behind `next`: if `next` never becomes a run (no grant,
-      // approval refused), the wrapper must still move on to these instead of leaving them for a manual Resume.
-      waitingRef.current = new Set(next ? queueRef.current.map((x) => x.loop.id) : []);
-      if (next) window.setTimeout(() => void executeLoop(next.loop, next.scheduled, null, next.command), 0);
     }
   };
 
-  const enqueueLoop = (target: LoopDefinition, scheduled: boolean, command?: string, inputOverride?: string) => {
-    if (!queueRef.current.some((x) => x.loop.id === target.id)) queueRef.current.push({ loop: target, scheduled, ...(command ? { command } : {}), ...(inputOverride !== undefined ? { inputOverride } : {}) });
-    setQueued(queueRef.current.length);
-    persistQueue();
-    setNotice(`Queued “${target.name}”.`);
-  };
-
-  // The only entry to a run. The gate is taken before the first await: `runningRef` is set only after the approval
-  // dialog and worktree setup, so without it two starts in that window ran two loops in one working tree.
-  const executeLoop = async (target: LoopDefinition, scheduled = false, start: { repoRel: string; task: string; item: WorkItem } | null = null, command?: string) => {
-    if (!startGateRef.current.tryAcquire()) {
-      // A picked Factory item cannot wait in the queue (the queue holds loops, not work items).
-      if (start) setNotice("Another run is starting; start this item again when it has begun.");
-      else { waitingRef.current.add(target.id); enqueueLoop(target, scheduled, command); }
-      return;
-    }
-    ranRef.current = false;
+  // The only entry to a Factory run started here. The gate is taken before the first await: `runningRef` is set only after the
+  // approval dialog and worktree setup, so without it two starts in that window ran two runs in one working tree.
+  const executeLoop = async (target: LoopDefinition, start: { repoRel: string; task: string; item: WorkItem }) => {
+    if (!startGateRef.current.tryAcquire()) { setNotice("Another run is starting; start this item again when it has begun."); return; }
     setStarting(true);
     try {
-      await executeLoopGated(target, scheduled, start, command);
+      await executeFactoryGated(target, start);
     } finally {
       startGateRef.current.release();
-      boardWatchRef.current = null;
       setStarting(false);
-      // After a real run, `waitingRef` was just set by the run's own drain (above) and must survive for the next start.
-      const waiting = ranRef.current ? new Set<string>() : waitingRef.current;
-      if (!ranRef.current) waitingRef.current = new Set();
-      // A start that never became a run (approval refused, worktree failed) must not strand what queued behind it
-      // while it held the gate. Nothing else starts by itself: a restored queue waits for Resume, and with unsaved
-      // loop edits every start returns at once, which would empty the queue without running anything. A real run
-      // drains the whole queue itself when it ends.
-      if (!ranRef.current && !unmountedRef.current && !dirtyRef.current) {
-        const at = queueRef.current.findIndex((x) => waiting.has(x.loop.id));
-        if (at >= 0) {
-          const [next] = queueRef.current.splice(at, 1);
-          for (const x of queueRef.current) if (waiting.has(x.loop.id)) waitingRef.current.add(x.loop.id);
-          setQueued(queueRef.current.length);
-          persistQueue();
-          window.setTimeout(() => void executeLoop(next!.loop, next!.scheduled, null, next!.command), 0);
-        }
-      }
     }
+  };
+
+  /** Hands a non-Factory loop to the run manager: it runs in the background, queues behind another loop run of this project, and survives leaving this page. */
+  const startManaged = (target: LoopDefinition, scheduled: boolean, command: string | undefined) => {
+    if (!projectRoot) return;
+    const root = projectRoot;
+    void import("./run-manager-host.ts").then((m) => {
+      // Read at the moment of starting: the click and this import are not the same instant.
+      const here = liveRuns().filter((r) => r.projectRoot === root && isLoopRun(r));
+      if (here.some((r) => loopIdOfRun(r) === target.id)) { setNotice(`“${target.name}” already has a run in progress or queued.`); return; }
+      m.installRunManagerHost();
+      startRun(root, loopRunItem(target, { ...(command ? { command } : {}), ...(scheduled ? { scheduled: true } : {}) }), "full");
+      if (here.some((r) => r.state !== "queued")) setNotice(`Queued “${target.name}”.`);
+    }, (e: unknown) => setNotice(e instanceof Error ? e.message : "The loop could not be started."));
   };
 
   const runLoop = (target: LoopDefinition | null = loop, scheduled = false) => {
     if (!target) return;
-    if (isFactoryLoop(target) && !scheduled) {
-      if (runningRef.current) { setNotice("A Factory run needs its own work item; wait for the current run to finish."); return; }
+    if (isFactoryLoop(target)) {
+      if (scheduled) { setNotice(`“${target.name}” is a Factory loop: start it with ▶ Run and pick a work item.`); return; }
+      if (runningRef.current || managedActiveRef.current) { setNotice("A Factory run needs its own work item; wait for the current run to finish."); return; }
       setPickerLoop(target);
       return;
     }
-    const command = !scheduled && !isFactoryLoop(target) && target.config.workMode === "one" ? runCommandsRef.current[target.id]?.trim() || undefined : undefined;
-    if (runningRef.current || startGateRef.current.held) {
-      enqueueLoop(target, scheduled, command);
-      return;
-    }
-    void executeLoop(target, scheduled, null, command);
+    if (dirty) return;
+    // A Factory run started on this page and a loop run would both copy state into the main tree: one at a time, as before.
+    if (runningRef.current || startGateRef.current.held) { setNotice("A Factory run is in progress on this page; start the loop when it has finished."); return; }
+    // A task named for a "one item I name" loop; the schedule never has one.
+    const command = !scheduled && target.config.workMode === "one" ? runCommandsRef.current[target.id]?.trim() || undefined : undefined;
+    const oneItem = target.config.workMode === "one";
+    if (oneItem && !command) { setNotice(scheduled ? `“${target.name}” is set to one item you name; the schedule skipped it.` : `“${target.name}” is set to one item you name: type the task and press ▶ Run.`); return; }
+    startManaged(target, scheduled, command);
   };
 
   runLoopRef.current = runLoop;
-
-  // A request from the loop's Board (shell bus "run-loop"). The board has no runner: it lands here so the run uses the
-  // same approval dialog, worktree, queue and ship path. The screen may be hidden or still loading, so the request
-  // waits in a ref until the store is loaded.
-  const boardRequestRef = useRef<{ loopId: string; inputPath?: string; task?: string } | null>(null);
-  const processBoardRequest = () => {
-    const req = boardRequestRef.current;
-    if (!req || !load) return;
-    if (load.kind !== "ok") {
-      // missing / corrupt: nothing will ever load for this request, so say so instead of leaving the board waiting.
-      boardRequestRef.current = null;
-      tellBoard(req.loopId, `The Loop page could not load its loops: ${load.kind === "corrupt" ? load.message : "no loop file yet."}`, req.loopId);
-      return;
-    }
-    if (!workRootKnown) return;
-    boardRequestRef.current = null;
-    const target = load.store.loops.find((l) => l.id === req.loopId);
-    if (!target) { tellBoard(req.loopId, "That loop no longer exists on the Loop page.", req.loopId); return; }
-    const refuse = (message: string) => tellBoard(target.name, message, target.id);
-    if (isFactoryLoop(target)) return refuse("Use the Factory board's + Add to start a Factory run.");
-    // executeLoopGated returns silently while there are unsaved edits, so refuse here where the board can hear it.
-    if (dirtyRef.current) return refuse("The Loop page has unsaved edits; save or discard them first.");
-    // A per-run override, never written to the store: saving would race the unsaved-edit guard.
-    let run = target;
-    let override: string | undefined;
-    if (req.inputPath !== undefined && loopUsesInputPath(target)) {
-      const n = normalizeInputPath(req.inputPath);
-      if ("error" in n) return refuse(n.error);
-      run = { ...target, inputPath: n.path };
-      override = n.path;
-    }
-    const command = req.task?.trim() || undefined;
-    // A fresh mount already selected the requested loop in the load effect; this covers a page that was loaded with
-    // another loop selected, so the scope effect re-broadcasts the requested one and the board does not jump.
-    if (selectedLoopId !== target.id) {
-      setSelectedLoopId(target.id);
-      setSelectedStageId(target.config.stages[0]?.id ?? null);
-    }
-    if (runningRef.current || startGateRef.current.held) {
-      // enqueueLoop keeps an existing entry for this loop, so a new task would be dropped: say so.
-      const already = queueRef.current.some((x) => x.loop.id === target.id);
-      enqueueLoop(run, false, command, override);
-      return refuse(already ? "Already queued; this run's task and input path were not added." : "Queued behind the current run.");
-    }
-    // Tell first: a refusal raised synchronously inside executeLoop then replaces this message, not the reverse.
-    // `started` lets the board keep ▶ Run disabled until the run shows up live (a later refusal still arrives).
-    window.dispatchEvent(new CustomEvent("llmide-loop-board-notice", { detail: { loopName: target.name, loopId: target.id, message: "Started on the Loop page. Approve the commands if a dialog asks.", started: true } }));
-    boardWatchRef.current = { loopId: target.id, loopName: target.name };
-    void executeLoop(run, false, null, command);
-  };
-  const processBoardRequestRef = useRef(processBoardRequest);
-  processBoardRequestRef.current = processBoardRequest;
-  useEffect(() => {
-    const take = (ev: { loopId: string; inputPath?: string; task?: string } | null) => {
-      if (!ev) return;
-      boardRequestRef.current = { loopId: ev.loopId, ...(ev.inputPath !== undefined ? { inputPath: ev.inputPath } : {}), ...(ev.task !== undefined ? { task: ev.task } : {}) };
-      processBoardRequestRef.current();
-    };
-    take(shellBus.takePending("run-loop"));
-    const off = shellBus.subscribe("run-loop", (ev) => { shellBus.takePending("run-loop"); take(ev); });
-    return off;
-  }, []);
-  useEffect(() => { processBoardRequestRef.current(); }, [load?.kind, workRootKnown]);
-  // A failed read (openError) never sets `load`: answer a waiting request here too.
-  useEffect(() => {
-    const req = boardRequestRef.current;
-    if (req && openError) { boardRequestRef.current = null; tellBoard(req.loopId, `The Loop page could not load its loops: ${openError}`, req.loopId); }
-  }, [openError]);
 
   // The loops the scheduler starts are read when it fires, not when its timer was created.
   const loadRef = useRef(load);
@@ -1001,7 +887,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       const now = loadRef.current;
       const scheduled = (now?.kind === "ok" ? now.store.loops : []).filter((l) => l.runsOnSchedule);
       if (scheduled.length === 0) { setNotice("The schedule fired, but no loop is marked Run on schedule."); return; }
-      if (runningRef.current) { setNotice("The schedule fired while a run is active; scheduled loops were skipped."); return; }
+      if (runningRef.current || managedActiveRef.current) { setNotice("The schedule fired while a run is active; scheduled loops were skipped."); return; }
       setNotice(`Schedule fired: running ${scheduled.length} loop(s).`);
       for (const l of scheduled) runLoopRef.current(l, true);
     };
@@ -1030,30 +916,15 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   /** Removes only this loop's queued run; the others keep their place. */
   const leaveQueue = () => {
     if (!loop) return;
-    const before = queueRef.current.length;
-    queueRef.current = queueRef.current.filter((x) => x.loop.id !== loop.id);
-    setQueued(queueRef.current.length);
-    persistQueue();
-    setNotice(queueRef.current.length < before ? `Left the queue: “${loop.name}”.` : `“${loop.name}” is not queued.`);
+    const mine = managedQueued.filter((r) => loopIdOfRun(r) === loop.id);
+    for (const r of mine) cancelRun(r.runId);
+    setNotice(mine.length > 0 ? `Left the queue: “${loop.name}”.` : `“${loop.name}” is not queued.`);
   };
 
-  const clearQueued = () => {
-    queueRef.current = [];
-    setQueued(0);
-    if (projectRoot) clearQueue(projectRoot);
-  };
-
-  const resumeQueue = () => {
-    if (runningRef.current || startGateRef.current.held) return;
-    const next = queueRef.current.shift();
-    if (!next) return;
-    setQueued(queueRef.current.length);
-    persistQueue();
-    void executeLoop(next.loop, next.scheduled, null, next.command);
-  };
+  const clearQueued = () => { for (const r of managedQueued) cancelRun(r.runId); };
 
   const runSelectedStage = async () => {
-    if (!loop || !stage || dirty || runningStage) return;
+    if (!loop || !stage || dirty || runningStage || managedActive !== null || managedQueued.some((r) => loopIdOfRun(r) === loop.id)) return;
     if (!isNativeRunnable(stage)) { setNotice("This stage kind cannot run in the native runner yet."); return; }
     if (stage.kind === "shellCommand" && !stage.command) { setNotice("This stage has no command yet."); return; }
     if (stage.kind === "skill" && !stage.skillId) { setNotice("This skill stage has no skill id."); return; }
@@ -1139,6 +1010,10 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
   const needsTask = oneItemLoop && !(runCommands[loop.id] ?? "").trim();
   const regressionOnTree = loop !== null && !isFactoryLoop(loop) && loop.config.alwaysUseWorktree && worktreeBlockedStage(loop.config.stages) !== null;
   const pastFactory = runRecord ? decodeFactoryFields(runRecord) : null;
+  // The page's own run (a Factory run or one stage) or a loop run in the manager.
+  const busy = runningStage || managedActive !== null;
+  const loopHasManaged = managedRuns.some((r) => loopIdOfRun(r) === loop.id);
+  const pausedNow = managedActive ? managedActive.pauseRequested === true : paused;
   return (
     <div className="loop-native" data-active={active}>
       <aside className="loop-pane loop-loops" aria-label="Loops">
@@ -1175,7 +1050,7 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
         <div className="loop-pane-head"><span>Process</span><span className="loop-pane-sub">{loop.name}</span></div>
         {isFactoryLoop(loop) ? <p className="loop-native-hint" role="note">The Factory's steps come from system/factory-template.json (Factory → Process). Edits here are replaced at the next Factory run.</p> : null}
         <div className="loop-actions">
-          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || !isNativeRunnable(stage) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
+          <button type="button" className="loop-btn" onClick={() => void runSelectedStage()}  disabled={!stage || dirty || runningStage || managedActive !== null || managedQueued.some((r) => loopIdOfRun(r) === loop.id) || !isNativeRunnable(stage) || (stage.kind === "shellCommand" && !stage.command) || (stage.kind === "skill" && !stage.skillId)}>Run stage</button>
         </div>
         <ul className="loop-list loop-steps">
           {loop.config.stages.map((s, i) => (
@@ -1193,14 +1068,14 @@ export function NativeLoopScreen({ projectRoot, active, mode }: SectionProps): R
       </aside>
 
       <main className="loop-run" aria-label="Run">
-        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && queueRef.current.some((x) => x.loop.id === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{queued > 0 && !runningStage ? <button type="button" className="loop-btn" onClick={resumeQueue}>Resume {queued} queued</button> : null}{loopRunning ? <button type="button" className="loop-btn" title={paused ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (paused ? resumeRun() : pauseRun())}>{paused ? "Resume" : "Pause"}</button> : null}{runningStage ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}{dirty ? <button type="button" className="loop-btn loop-save-btn" data-dirty="true" disabled={saving} title="Save the Loop changes" onClick={() => void save()}>{saving ? "Saving…" : "● Save changes"}</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty || needsTask} title={dirty ? "Save the Loop first" : needsTask ? "Type what this run should do first" : runningStage ? "Queue another run" : "Run the loop"} onClick={() => runLoop()}>{runningStage ? (queued > 0 ? `Queued ${queued}` : "Running… · Queue") : "▶ Run"}</button></div>
+        <div className="loop-run-tabs"><span className="loop-run-tab" data-on="true">Run</span><span className="loop-spacer" />{queued > 0 && loop && managedQueued.some((r) => loopIdOfRun(r) === loop.id) ? <button type="button" className="loop-btn" onClick={leaveQueue}>Leave queue</button> : null}{queued > 0 ? <button type="button" className="loop-btn" onClick={clearQueued}>Clear queue</button> : null}{loopRunning || managedActive ? <button type="button" className="loop-btn" title={pausedNow ? "Continue with the next stage" : "Hold the loop once the current stage finishes"} onClick={() => (pausedNow ? resumeRun() : pauseRun())}>{pausedNow ? "Resume" : "Pause"}</button> : null}{busy || queued > 0 ? <button type="button" className="loop-btn" onClick={stopRun}>■ Stop</button> : null}{dirty ? <button type="button" className="loop-btn loop-save-btn" data-dirty="true" disabled={saving} title="Save the Loop changes" onClick={() => void save()}>{saving ? "Saving…" : "● Save changes"}</button> : null}<button type="button" className="loop-btn loop-run-btn" disabled={dirty || needsTask || loopHasManaged} title={dirty ? "Save the Loop first" : needsTask ? "Type what this run should do first" : loopHasManaged ? "This loop already has a run in progress or queued" : busy ? "Queue this loop behind the running one" : "Run the loop"} onClick={() => runLoop()}>{loopHasManaged ? (managedActive && loopIdOfRun(managedActive) === loop.id ? "Running…" : "Queued") : busy ? "▶ Queue" : "▶ Run"}</button></div>
         {oneItemLoop ? <div className="loop-run-command"><label className="loop-field"><span>What should this run do?</span><input value={runCommands[loop.id] ?? ""} maxLength={RUN_COMMAND_MAX} placeholder="One item, one line" onChange={(e) => { const v = e.target.value.replace(/\s+/g, " ").slice(0, RUN_COMMAND_MAX); setRunCommands((c) => ({ ...c, [loop.id]: v })); }} /></label>{needsTask ? <p className="loop-native-hint">Required: ▶ Run starts once you name the item.</p> : null}</div> : null}
         {notice ? <StatusBanner severity={notice.startsWith("Loop configuration saved") || notice.startsWith("Added and saved") ? "info" : "warning"} message={notice} onDismiss={() => setNotice(null)} /> : null}
         {shipRun ? <ShipPanel key={shipRun.info.runId} info={shipRun.info} initialDiff={shipRun.diff} item={shipRun.item} passed={shipRun.passed} reviewedPatchId={shipRun.reviewedPatchId ?? shipRun.diff?.patchId ?? null} requestProvider={shipRun.requestProvider ?? null} processName={shipRun.processName} branchDiscard={shipRun.branchDiscard} mergedMr={shipRun.mergedMr ?? null} fs={fs} runPrefix={repoPrefixFor(projectRoot, shipRun.info.worktree)} onShipped={(r) => { setRunLog((l) => [...l, `shipped: ${r.url}`]); void setRunRecordShip(fs, shipRun.entry, r).catch(() => false).then((ok) => { if (!ok) setNotice("Shipped, but the run record could not be updated."); }); }} onDiscarded={() => { setShipRun(null); setNotice("The run's worktree and branch were removed."); }} onClose={() => setShipRun(null)} /> : null}
-        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, false, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
+        {pickerLoop ? <FactoryPicker fs={fs} projectRoot={projectRoot} workRoot={workRoot} onCancel={() => setPickerLoop(null)} onStart={(item, repoRel) => { const picked = pickerLoop; setPickerLoop(null); if (!picked) return; const current = store?.loops.find((l) => l.id === picked.id) ?? null; const refusal = factoryStartRefusal({ running: runningRef.current || managedActive !== null, starting: startingRef.current || startGateRef.current.held, dirty, loopExists: current !== null }); if (refusal || current === null) { setNotice(refusal ?? "That Factory loop no longer exists."); return; } void executeLoop(current, { repoRel, task: taskMarkdown(item), item }); }} /> : null}
         <ImprovementsPanel fs={fs} core={core} projectRoot={projectRoot} loop={loop} load={{ store: load.store, hash: load.hash }} dirty={dirty}
           runningLoopIds={runningLoopIdsOf({ store: load.store, projectRoot, activeLoopId: activeLoopId ?? (runningStage || starting ? loop.id : null), liveRuns: liveRuns() })}
-          isRunning={() => runningRef.current || startingRef.current || startGateRef.current.held || runningStageRef.current}
+          isRunning={() => runningRef.current || startingRef.current || startGateRef.current.held || runningStageRef.current || managedActiveRef.current !== null}
           refreshKey={improveTick} onCounts={setImproveCounts} onNotice={setNotice}
           onApplied={(r) => { setLoad({ kind: "ok", store: r.store, hash: r.hash }); }} />
         <section className="loop-card loop-overview">

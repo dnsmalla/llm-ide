@@ -198,3 +198,11 @@ test("when the change log cannot be written the DB keeps its copy (no logged fla
   assert.deepEqual(d.core.calls[0].body, { projectRoot: "/p", action: "accept", id: "11", scope: "project" });
   assert.match(out.notice, /changes\.jsonl could not be written/);
 });
+
+test("runningLoopIdsOf marks every loop the manager runs or queues, and the Factory loop only for a Factory run", () => {
+  const store = { loops: [{ id: "t", name: "Test", defaultKey: "test", config: { stages: [] } }, { id: "f", name: "Factory", defaultKey: "factory", config: { stages: [] } }] };
+  const loopRun = { projectRoot: "/p", itemKey: "loop:t" };
+  assert.deepEqual([...runningLoopIdsOf({ store, projectRoot: "/p", activeLoopId: null, liveRuns: [loopRun] })], ["t"]);
+  assert.deepEqual([...runningLoopIdsOf({ store, projectRoot: "/p", activeLoopId: null, liveRuns: [loopRun, { projectRoot: "/p", itemKey: "issue:1" }] })].sort(), ["f", "t"]);
+  assert.deepEqual([...runningLoopIdsOf({ store, projectRoot: "/p", activeLoopId: null, liveRuns: [{ projectRoot: "/q", itemKey: "loop:t" }] })], []);
+});

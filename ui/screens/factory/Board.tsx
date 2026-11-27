@@ -7,7 +7,7 @@ import { StatusBanner } from "@llmide/ui-kit";
 import { createHostFs } from "../explorer/fs";
 import { invokeHost } from "../shell/host";
 import { setRunRecordShip } from "../loop/native/history.ts";
-import { LOOP_PAGE_NOTE, cancelRun, concurrency, dropHeldRecords, heldAndStuckRunIds, retryHeldRecords, liveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
+import { LOOP_PAGE_NOTE, cancelRun, concurrency, dropHeldRecords, heldAndStuckRunIds, retryHeldRecords, factoryLiveRuns, setConcurrency, shipHeldRun, startRun, subscribe as subscribeRuns, takeRunNotice, type LiveRun } from "../loop/native/run-manager.ts";
 import { installRunManagerHost } from "../loop/native/run-manager-host.ts";
 import { ShipPanel } from "../loop/native/ShipPanel.tsx";
 import { decodeWorktreeDiff } from "../loop/native/ship-model.ts";
@@ -72,7 +72,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
   const heldKey = useRef("");
   const [interruptedStages, setInterruptedStages] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [ship, setShip] = useState<Map<string, ShipStatus | "error">>(() => new Map());
-  const [live, setLive] = useState<readonly LiveRun[]>(() => liveRuns());
+  const [live, setLive] = useState<readonly LiveRun[]>(() => factoryLiveRuns());
   // One board timer for “4m 12s”, not one per card.
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [offline, setOffline] = useState(false);
@@ -247,7 +247,7 @@ export default function Board({ active, projectRoot, focus }: BoardProps): React
 
   // The run manager notifies on every log line; facts are re-read only when the set of runs or a run's state changes.
   useEffect(() => subscribeRuns(() => {
-    const now = liveRuns();
+    const now = factoryLiveRuns();
     setLive(now);
     const why = takeRunNotice();
     if (why) setNotice(why);

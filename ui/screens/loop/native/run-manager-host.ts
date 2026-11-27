@@ -137,6 +137,8 @@ export function installRunManagerHost(): void {
     autoShip: shipFinishedRun,
     // The bus runner reports a finished Factory run to the phone's claimed command (B5).
     onRunFinished: (info) => {
+      // A loop run is no phone claim and has no Factory issue trail; keeping it out of the bus runner's map stops it growing per run.
+      if (info.itemKey.startsWith("loop:")) return;
       noteRunFinished(info.runId, info.statusCode, info.statusSummary);
       // The run summary is the trail's last comment; the trail is then dropped.
       const trail = trailFor(info.runId, info.item);

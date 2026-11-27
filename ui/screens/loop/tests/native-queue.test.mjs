@@ -1,16 +1,31 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadQueue, saveQueue, clearQueue } from "../native/queue.ts";
+import { loadQueue, takeLegacyQueue } from "../native/queue.ts";
 import { createStartGate } from "../native/start-gate.ts";
 
-test("Loop queue persists ids per project and clears", () => {
+function memoryStorage() {
   const map = new Map();
-  const storage = { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k) };
-  saveQueue("/p", [{ loopId: "a", scheduled: false, at: "t" }, { loopId: "b", scheduled: true, at: "t" }], storage);
-  assert.deepEqual(loadQueue("/p", storage).map((x) => x.loopId), ["a", "b"]);
-  assert.deepEqual(loadQueue("/other", storage), []);
-  clearQueue("/p", storage);
-  assert.deepEqual(loadQueue("/p", storage), []);
+  return { getItem: (k) => map.get(k) ?? null, setItem: (k, v) => map.set(k, v), removeItem: (k) => map.delete(k), map };
+}
+
+test("an old persisted queue is answered once, removed, and never restarted", () => {
+  const storage = memoryStorage();
+  const key = (root) => `llmide.loopQueue.v1.${root}`;
+  storage.setItem(key("/p"), JSON.stringify([{ loopId: "a", scheduled: false, at: "t" }, { loopId: "b", scheduled: true, at: "t", command: "x" }, { loopId: "gone", scheduled: false, at: "t" }]));
+  storage.setItem(key("/other"), JSON.stringify([{ loopId: "z", scheduled: false, at: "t" }]));
+  const loops = [{ id: "a", name: "Plan" }, { id: "b", name: "Test" }];
+  assert.deepEqual(loadQueue("/p", storage).map((x) => x.loopId), ["a", "b", "gone"]);
+  const notice = takeLegacyQueue("/p", loops, storage);
+  assert.match(notice, /^3 runs queued by an older version were not restarted/);
+  assert.match(notice, /“Plan”, “Test”/);
+  assert.match(notice, /Start them again with ▶ Run\./);
+  assert.deepEqual(loadQueue("/p", storage), [], "the stored queue is gone");
+  assert.equal(takeLegacyQueue("/p", loops, storage), null, "answered once");
+  assert.deepEqual(loadQueue("/other", storage).map((x) => x.loopId), ["z"], "another project's queue is untouched");
+  const one = memoryStorage();
+  one.setItem(key("/p"), JSON.stringify([{ loopId: "a", scheduled: false, at: "t" }]));
+  assert.match(takeLegacyQueue("/p", loops, one), /^1 run queued by an older version was not restarted \(“Plan”\)\. Start it again/);
+  assert.equal(takeLegacyQueue("/p", loops, memoryStorage()), null);
 });
 
 test("the start gate lets one start through until it is released", () => {
@@ -23,36 +38,29 @@ test("the start gate lets one start through until it is released", () => {
   assert.equal(gate.tryAcquire(), true);
 });
 
-test("every Loop start goes through the gate before its first await, and blocked starts queue", async () => {
+test("a Factory start still goes through the gate before its first await, and a blocked one is refused", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
-  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const runLoop ="));
+  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const startManaged ="));
   assert.ok(wrapper.indexOf("tryAcquire()") < wrapper.indexOf("await "), "the gate is taken before any await");
-  assert.match(wrapper, /enqueueLoop\(target, scheduled, command\)/);
   assert.match(wrapper, /finally \{\s*startGateRef\.current\.release\(\)/);
-  assert.match(src, /if \(runningRef\.current \|\| startGateRef\.current\.held\) \{\s*enqueueLoop/);
+  assert.match(wrapper, /Another run is starting/);
 });
 
-test("a start that never ran drains only what queued behind it, and nothing while the editor has unsaved changes", async () => {
+test("a non-Factory run goes to the run manager through loopRunItem, and the page keeps no queue of its own", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
-  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const runLoop ="));
-  // Only ids recorded while the gate was held are eligible; a restored queue (never recorded) waits for Resume.
-  assert.match(wrapper, /else \{ waitingRef\.current\.add\(target\.id\); enqueueLoop\(target, scheduled, command\); \}/);
-  assert.match(wrapper, /findIndex\(\(x\) => waiting\.has\(x\.loop\.id\)\)/);
-  assert.doesNotMatch(wrapper, /queueRef\.current\.shift\(\)/, "the head of the queue is never taken blindly");
-  assert.match(wrapper, /if \(!ranRef\.current && !unmountedRef\.current && !dirtyRef\.current\)/);
-});
-
-test("what is left after a run's drain still waits behind the next start, so a start that fails moves on", async () => {
-  const { readFileSync } = await import("node:fs");
-  const src = readFileSync(new URL("../native/NativeLoopScreen.tsx", import.meta.url), "utf8");
-  // The run-end drain hands the rest of the queue to waitingRef...
-  assert.match(src, /waitingRef\.current = new Set\(next \? queueRef\.current\.map\(\(x\) => x\.loop\.id\) : \[\]\);/);
-  // ...and the wrapper, which runs after it, does not wipe that when the start was a real run.
-  const wrapper = src.slice(src.indexOf("const executeLoop = async"), src.indexOf("const runLoop ="));
-  assert.match(wrapper, /if \(!ranRef\.current\) waitingRef\.current = new Set\(\);/);
-  assert.doesNotMatch(wrapper, /\n\s*waitingRef\.current = new Set\(\);\n/, "no unconditional reset");
+  const start = src.slice(src.indexOf("const startManaged ="), src.indexOf("const runLoop ="));
+  assert.match(start, /startRun\(root, loopRunItem\(target, \{ \.\.\.\(command \? \{ command \} : \{\}\), \.\.\.\(scheduled \? \{ scheduled: true \} : \{\}\) \}\), "full"\)/);
+  assert.match(start, /installRunManagerHost\(\)/, "the host is wired before startRun");
+  for (const gone of ["queueRef", "saveQueue", "persistQueue", "enqueueLoop", "waitingRef", "resumeQueue", "llmide-loop-board-notice", "shellBus.takePending", "setLiveCard", "runLoopWithDriver\\(\\{\\s*target, runConfig, runDeps, activeRun, oneItem: p"]) {
+    assert.equal(new RegExp(gone).test(src), false, `${gone} is gone from the page`);
+  }
+  // the page observes the manager: run log, pause, stop, queue, end event
+  assert.match(src, /subscribeLoopRunEvents\(\(e\) =>/);
+  assert.match(src, /setRunPaused\(managed\.runId, true\)/);
+  assert.match(src, /cancelRun\(r\.runId\)/);
+  assert.match(src, /if \(ship\) setShipRun\(\{ info: ship\.info,/, "a held run opens the Ship panel from the end event");
 });
 
 test("the Loop schedule is read on every pass: an edit applies, a cleared one stays cleared, a minute fires once", async () => {

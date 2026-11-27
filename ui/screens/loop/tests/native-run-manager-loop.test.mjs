@@ -17,11 +17,13 @@ const PASSED = { passed: true, iterationsUsed: 1, stages: [], iterations: [], fa
 const FAILED = { passed: false, iterationsUsed: 1, stages: [], iterations: [], failedStage: null, statusSummary: "failed" };
 
 let world;
+const endOf = () => world.events.filter((e) => e.type === "finished").at(-1);
 function setup(over = {}, hostOver = {}) {
-  world = { active: "/p", listeners: new Set(), incidents: [], calls: [], drivers: [], records: [], gates: [], approvals: 0, shipped: [], loops: [], status: { changedFiles: 0, localCommits: 0, pushed: false }, diffFiles: [] };
+  world = { active: "/p", listeners: new Set(), incidents: [], calls: [], drivers: [], records: [], gates: [], approvals: 0, shipped: [], loops: [], events: [], stages: [], finishedInfo: [], status: { changedFiles: 0, localCommits: 0, pushed: false }, diffFiles: [] };
   let ids = 0;
   let seed = 1;
   rm.resetRunManagerForTests();
+  rm.subscribeLoopRunEvents((e) => world.events.push(e));
   const driver = (kind) => (config, deps) => { world.drivers.push(kind); const g = deferred(); world.gates.push({ kind, deps, ...g }); return g.promise; };
   rm.configureRunManager({
     host: async (command, args) => {
@@ -49,6 +51,8 @@ function setup(over = {}, hostOver = {}) {
     activeProject: () => world.active,
     subscribeProject: (l) => { world.listeners.add(l); return () => world.listeners.delete(l); },
     storage: memoryStorage(),
+    onStage: (runId) => world.stages.push(runId),
+    onRunFinished: (info) => world.finishedInfo.push(info),
     now: () => new Date("2026-11-09T10:00:00Z"),
     rand: () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; },
     newId: () => `e${++ids}`,
@@ -163,7 +167,9 @@ test("a refused approval ends the run without a record or a worktree", async () 
   await settle();
   assert.equal(world.records.length, 0);
   assert.equal(world.calls.filter(([c]) => c === "loop_worktree_prepare").length, 0);
-  assert.match(rm.takeRunNotice() ?? "", /not approved/);
+  assert.match(endOf().notice ?? "", /not approved/);
+  assert.equal(endOf().refused, true);
+  assert.equal(rm.takeRunNotice(), null, "a loop's refusal is not the Factory board's notice");
   assert.deepEqual(rm.liveRuns(), []);
 });
 
@@ -172,7 +178,7 @@ test("a scheduled run needs a standing grant and never opens the approval dialog
   start(byKey("test"), { scheduled: true });
   await settle();
   assert.equal(world.approvals, 0);
-  assert.match(rm.takeRunNotice() ?? "", /needs a native host approval/);
+  assert.match(endOf().notice ?? "", /needs a native host approval/);
   assert.equal(world.records.length, 0);
 
   setup({}, { approvalStatus: async () => ({ approved: true, pending: 0, expiresAtMs: null, token: "grant" }) });
@@ -223,7 +229,7 @@ test("the Factory loop is refused here: it has its own board", async () => {
   setup();
   start(byKey("factory"));
   await settle();
-  assert.match(rm.takeRunNotice() ?? "", /Factory board/);
+  assert.match(endOf().notice ?? "", /Factory board/);
   assert.equal(world.records.length, 0);
 });
 
@@ -280,10 +286,160 @@ test("the run end waits for the run's project: no record while another project i
   assert.equal(world.records.length, 1);
 });
 
-test("the outcome becomes the board's notice", async () => {
+test("the outcome is announced to the Loop page and the boards, with the run's whole log", async () => {
   setup();
-  start(byKey("test"));
+  const runId = start(byKey("test"));
   await settle();
   await finish(0, FAILED);
-  assert.equal(rm.takeRunNotice(), "failed");
+  const end = endOf();
+  assert.equal(end.runId, runId);
+  assert.equal(end.loopId, byKey("test").id);
+  assert.equal(end.projectRoot, "/p");
+  assert.equal(end.notice, "failed");
+  assert.equal(end.refused, false);
+  assert.ok(end.log.some((l) => l.startsWith("Loop failed")), "the lines written after the last live snapshot are in the event");
+  assert.equal(rm.takeRunNotice(), null);
+});
+
+test("the run end waits for the run's project even when the run was cancelled while it was closed", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  world.active = "/other";
+  rm.cancelRun(runId);
+  world.gates[0].resolve({ ...FAILED, cancelled: true, statusSummary: "cancelled" });
+  await settle();
+  assert.equal(world.records.length, 0, "no record is written into another project");
+  assert.equal(stateOf(runId), "paused");
+  assert.equal(rm.liveRuns().find((r) => r.runId === runId).note, "Waiting for its project");
+  await switchProject("/p");
+  assert.equal(world.records.length, 1);
+  assert.deepEqual(rm.liveRuns(), []);
+});
+
+test("loop runs report each step to onStage and their end to onRunFinished, like Factory runs", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  world.gates[0].deps.log("$ Verify");
+  world.gates[0].deps.log("plain line");
+  assert.deepEqual(world.stages, [runId]);
+  await finish(0, PASSED);
+  assert.equal(world.finishedInfo.length, 1);
+  const info = world.finishedInfo[0];
+  assert.equal(info.runId, runId);
+  assert.equal(info.itemKey, `loop:${byKey("test").id}`);
+  assert.equal(info.statusCode, runStatusCode(PASSED));
+  assert.equal(info.mode, "full");
+});
+
+test("a refused run reports no finished info; a loop run has a progress value like a Factory run", async () => {
+  setup({ approve: async () => null });
+  start(byKey("test"));
+  await settle();
+  assert.equal(world.finishedInfo.length, 0);
+
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  const cfg = byKey("test").config;
+  const stage = cfg.stages.find((st) => st.enabled);
+  world.gates[0].deps.onProgress({ type: "stage-start", stage, index: 1, count: 4, iteration: 1 });
+  const live = rm.liveRuns().find((r) => r.runId === runId);
+  assert.equal(live.progress.stageName, stage.name);
+  assert.equal(live.progress.stageIndex, 1);
+  assert.equal(live.progress.stageCount, 4);
+  assert.equal(live.progress.maxIterations >= 1, true);
+  await finish(0, PASSED);
+});
+
+test("Pause holds the run at the next step boundary and Resume continues it", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  rm.setRunPaused(runId, true);
+  assert.equal(rm.liveRuns().find((r) => r.runId === runId).pauseRequested, true);
+  let passed = false;
+  const hold = world.gates[0].deps.holdWhilePaused(0).then((r) => { passed = true; return r; });
+  await settle();
+  assert.equal(passed, false);
+  assert.equal(stateOf(runId), "paused");
+  rm.setRunPaused(runId, false);
+  assert.equal(await hold, "ok");
+  assert.equal(stateOf(runId), "running");
+  assert.equal(rm.liveRuns().find((r) => r.runId === runId).pauseRequested, undefined);
+  await finish(0, PASSED);
+});
+
+test("a run held for review tells its observers so the Ship panel can open", async () => {
+  setup();
+  world.diffFiles = ["src/a.ts"];
+  world.status = { changedFiles: 2, localCommits: 0, pushed: false };
+  start(byKey("test"));
+  await settle();
+  await finish(0, PASSED);
+  const ship = endOf().manualShip;
+  assert.ok(ship, "a held run offers the manual Ship");
+  assert.equal(ship.processName, "Test");
+  assert.match(ship.info.runId, /^test-[0-9a-f]{8}$/);
+  assert.equal(ship.entry.statusCode, "awaiting_review");
+});
+
+test("a signal event follows the run_finished signal; the Factory board ignores loop runs", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  const live = rm.liveRuns();
+  assert.equal(rm.isLoopRun(live[0]), true);
+  assert.equal(rm.loopIdOfRun(live[0]), byKey("test").id);
+  assert.deepEqual(rm.factoryLiveRuns(), []);
+  assert.equal(rm.factoryLiveRuns(), rm.factoryLiveRuns(), "stable between changes");
+  await finish(0, PASSED);
+  assert.equal(world.events.some((e) => e.type === "signal"), true);
+  assert.equal(runId.length > 0, true);
+});
+
+test("a user Pause times out like the runner's pause: the hold returns timedOut and the run goes on", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  rm.setRunPaused(runId, true);
+  const started = Date.now();
+  assert.equal(await world.gates[0].deps.holdWhilePaused(1), "timedOut");
+  assert.ok(Date.now() - started >= 900);
+  const live = rm.liveRuns().find((r) => r.runId === runId);
+  assert.equal(live.state, "running");
+  assert.equal(live.pauseRequested, undefined);
+  await finish(0, PASSED);
+});
+
+test("a Pause pressed while the run waits for its project still holds it afterwards", async () => {
+  setup();
+  const runId = start(byKey("test"));
+  await settle();
+  world.active = "/other";
+  let released = false;
+  const hold = world.gates[0].deps.holdWhilePaused(0).then(() => { released = true; });
+  await settle();
+  rm.setRunPaused(runId, true);
+  await switchProject("/p");
+  assert.equal(released, false);
+  assert.equal(stateOf(runId), "paused");
+  rm.setRunPaused(runId, false);
+  await hold;
+  assert.equal(stateOf(runId), "running");
+  await finish(0, PASSED);
+});
+
+test("cancelling a queued loop run tells its listeners", async () => {
+  setup();
+  start(byKey("test"));
+  const queued = start(byKey("plan"));
+  rm.cancelRun(queued);
+  const end = endOf();
+  assert.equal(end.runId, queued);
+  assert.equal(end.refused, true);
+  assert.equal(end.notice, "Cancelled while queued");
+  await settle();
+  await finish(0, PASSED);
 });

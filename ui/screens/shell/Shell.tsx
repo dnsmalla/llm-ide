@@ -23,7 +23,7 @@ import { StatusBar } from "./StatusBar";
 import { SshBadge } from "./SshBadge";
 import { ShellTerminalDock, ShellTerminalItem } from "./ShellTerminalDock";
 import { chatApprovalStore, sectionForSurface } from "./chat-approvals";
-import { clearLiveCard } from "../loop/native/live-card.ts";
+import { forgetLegacyLiveCard } from "../loop/native/live-card.ts";
 import { ChatDockSlot } from "./chat-dock";
 import { menuAction } from "./menu-model";
 import { useSyncExternalStore } from "react";
@@ -384,13 +384,18 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   useEffect(() => {
     const offOpen = shellBus.subscribe("open-file", () => dispatch({ type: "select", id: "explorer" }));
     const offGoto = shellBus.subscribe("goto-section", (ev) => dispatch({ type: "select", id: ev.section }));
-    // A board's ▶ Run needs the Loop page alive (it owns the run path) even if it was never opened.
-    const offRun = shellBus.subscribe("run-loop", () => dispatch({ type: "mount", id: "loop" }));
     return () => {
       offOpen();
       offGoto();
-      offRun();
     };
+  }, []);
+
+  // A loop board's ▶ Run request is answered here, through the run manager: the Loop page need not be open.
+  useEffect(() => {
+    let off: (() => void) | null = null;
+    let gone = false;
+    void import("../loop/native/board-run-wiring.ts").then((m) => { if (gone) return; off = m.installBoardRunHandler(); }).catch(() => undefined);
+    return () => { gone = true; off?.(); };
   }, []);
 
   const onSelect = useCallback((id: SectionId) => dispatch({ type: "select", id }), []);
@@ -423,8 +428,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     return () => { gone = true; off?.(); };
   }, []);
 
-  // A process restart cannot have a running loop: any card left by a quit mid-run is stale.
-  useEffect(() => { clearLiveCard(); }, []);
+  // Older builds kept the live loop card in localStorage; the run manager is the only source now.
+  useEffect(() => { forgetLegacyLiveCard(); }, []);
 
   const overlay = hasOverlayTitlebar(platform, hostAvailable);
   return (
