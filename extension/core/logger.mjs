@@ -86,7 +86,8 @@ function writeToFile(line) {
     if (_fileBytes === 0) {
       try { mkdirSync(dirname(logFilePath), { recursive: true }); } catch { /* ignore */ }
     }
-    appendFileSync(logFilePath, line);
+    // Owner-only on creation: the log carries password-reset tokens, and a source-checkout run has no private data dir.
+    appendFileSync(logFilePath, line, { mode: 0o600 });
     _fileBytes += Buffer.byteLength(line);
   } catch { /* sink disabled for this line — never throw from logging */ }
 }
