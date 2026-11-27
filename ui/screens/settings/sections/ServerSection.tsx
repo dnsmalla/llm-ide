@@ -14,7 +14,8 @@ import SshServerCard from "./SshServerCard.tsx";
 import type { ServerMode } from "../host.ts";
 
 /**
- * The Mac's "Server & Backend" group: the core's status, version, identity and log file, plus the log itself
+ * The Mac's "Server & Backend" group: the core's status, version, identity and log file, then the server-mode chooser with
+ * only the chosen mode's settings under it (managed backend, hub fields or SSH card), then the log itself
  * (the Mac's live log viewer). Start, Stop and Kill & Restart are offered when the host can run them; the app owns the core.
  */
 export default function ServerSection() {
@@ -126,6 +127,39 @@ export default function ServerSection() {
     }
   };
 
+  // Rendered by the server-mode card only while Local is chosen, so the other modes' settings stay hidden.
+  const managedBackend = (
+    <div className="st-note">
+      <span className="st-label">Managed backend</span>
+      {serverMode !== "remote" && serverMode !== "ssh" && host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
+      {info?.coreUrl ? (
+        <div className="st-row">
+          <span className="st-hint">Server URL</span>
+          <code className="st-pre st-grow">{info.coreUrl}</code>
+          <Button onClick={() => void host.copyText(info.coreUrl ?? "").then(() => setNotice("Copied."), () => setLogError("The clipboard is not available."))}>Copy</Button>
+        </div>
+      ) : <p className="st-hint">Server URL: starting…</p>}
+      <p className="st-hint">
+        The default backend is the core bundled inside the app. Turn on a source checkout to run the core from a
+        checkout with its own Node binary, project folder and loopback port. Changes to those paths apply on Kill &amp; Restart; the launch toggle applies on the next app start.
+      </p>
+      {host.coreStart || host.coreStop || host.coreRestart ? (
+        <div className="st-row">
+          {!info || info.coreState === "stopped" || info.coreState === "failed" ? (
+            <Button tone="primary" disabled={coreBusy !== null} onClick={() => void coreAction("start")}>{coreBusy === "start" ? "Starting…" : "Start backend"}</Button>
+          ) : (
+            <>
+              <Button disabled={coreBusy !== null} onClick={() => void coreAction("stop")}>{coreBusy === "stop" ? "Stopping…" : "Stop backend"}</Button>
+              <Button tone={!health ? "primary" : undefined} disabled={coreBusy !== null} onClick={() => void coreAction("restart")}>{coreBusy === "restart" ? "Restarting…" : "Kill & Restart"}</Button>
+            </>
+          )}
+          <span className="st-hint">{!health && info && info.coreState !== "stopped" && info.coreState !== "failed" ? "The backend is not answering. Kill & Restart replaces it. " : ""}Stop leaves the app open; Start brings the core back. Kill &amp; Restart stops and starts it in one step.</span>
+        </div>
+      ) : null}
+      {notice ? <p className="st-ok" role="status">{notice}</p> : null}
+    </div>
+  );
+
   return (
     <div className="st-stack">
       <ErrorText text={error} />
@@ -138,39 +172,7 @@ export default function ServerSection() {
       ) : <p className="st-hint" role="status">Loading...</p>}
       <div className="st-row"><Button label="Refresh backend status" onClick={load}>Refresh</Button></div>
 
-      <div className="st-note">
-        <span className="st-label">Managed backend</span>
-        {serverMode !== "remote" && serverMode !== "ssh" && host.getBackendConfig && host.setBackendConfig ? <BackendForm host={host} onSaved={load} /> : null}
-        {info?.coreUrl ? (
-          <div className="st-row">
-            <span className="st-hint">Server URL</span>
-            <code className="st-pre st-grow">{info.coreUrl}</code>
-            <Button onClick={() => void host.copyText(info.coreUrl ?? "").then(() => setNotice("Copied."), () => setLogError("The clipboard is not available."))}>Copy</Button>
-          </div>
-        ) : <p className="st-hint">Server URL: starting…</p>}
-        <p className="st-hint">
-          The default backend is the core bundled inside the app. Turn on a source checkout to run the core from a
-          checkout with its own Node binary, project folder and loopback port. Changes to those paths apply on Kill &amp; Restart; the launch toggle applies on the next app start.
-        </p>
-        {host.coreStart || host.coreStop || host.coreRestart ? (
-          <div className="st-row">
-            {!info || info.coreState === "stopped" || info.coreState === "failed" ? (
-              <Button tone="primary" disabled={coreBusy !== null} onClick={() => void coreAction("start")}>{coreBusy === "start" ? "Starting…" : "Start backend"}</Button>
-            ) : (
-              <>
-                <Button disabled={coreBusy !== null} onClick={() => void coreAction("stop")}>{coreBusy === "stop" ? "Stopping…" : "Stop backend"}</Button>
-                <Button tone={!health ? "primary" : undefined} disabled={coreBusy !== null} onClick={() => void coreAction("restart")}>{coreBusy === "restart" ? "Restarting…" : "Kill & Restart"}</Button>
-              </>
-            )}
-            <span className="st-hint">{!health && info && info.coreState !== "stopped" && info.coreState !== "failed" ? "The backend is not answering. Kill & Restart replaces it. " : ""}Stop leaves the app open; Start brings the core back. Kill &amp; Restart stops and starts it in one step.</span>
-          </div>
-        ) : null}
-        {notice ? <p className="st-ok" role="status">{notice}</p> : null}
-      </div>
-
-      <RemoteServerCard chosen={chosen} onChoose={setChosen} live={serverMode} />
-      {chosen === "ssh" ? <SshServerCard /> : null}
-
+      <RemoteServerCard chosen={chosen} onChoose={setChosen} live={serverMode} modeSettings={chosen === "ssh" ? <SshServerCard /> : managedBackend} />
 
       {host.coreLog ? (
         <div className="st-stack">

@@ -38,7 +38,7 @@ test("the primary URL/email/password flow is visible and Advanced SSH is hidden 
   };
   const client = { requestRaw: async () => ({ status: 200, body: null }), login: async () => {}, logout: async () => {} };
   const env = { client, host, serverMode: "local" };
-  const html = renderToStaticMarkup(React.createElement(m.SettingsEnvProvider, { env }, React.createElement(m.RemoteServerCard)));
+  const html = renderToStaticMarkup(React.createElement(m.SettingsEnvProvider, { env }, React.createElement(m.RemoteServerCard, { chosen: "remote", onChoose() {} })));
   for (const text of ["Server URL", "Email", "Password", "Connect", "Test connection", "Local desktop", "Remote server"]) {
     assert.match(html, new RegExp(text), text);
   }
@@ -51,6 +51,41 @@ test("the primary URL/email/password flow is visible and Advanced SSH is hidden 
 
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
+
+// ---- only the selected mode's settings render ------------------------------------------------------------------------
+const MODE_HOST = { getRemoteServer: async () => config, setRemoteServer: async (c) => c, remoteHubCheck: async () => ({}), remoteHubLogin: async () => ({}), copyText: async () => {} };
+function renderCard(props) {
+  const env = { client: {}, host: MODE_HOST, serverMode: "local" };
+  const slot = React.createElement("p", null, "MODE-SLOT");
+  return renderToStaticMarkup(React.createElement(m.SettingsEnvProvider, { env }, React.createElement(m.RemoteServerCard, { onChoose() {}, modeSettings: slot, ...props })));
+}
+
+test("the mode chooser is always shown, and only the selected mode's settings render", () => {
+  const remoteOnly = [/Server URL/, /type="password"/, /Test connection/];
+  for (const chosen of ["local", "remote", "ssh"]) {
+    const html = renderCard({ chosen });
+    assert.match(html, /role="radiogroup"[^>]*aria-label="Server mode"/, `${chosen}: chooser present`);
+    for (const value of ["local", "remote", "ssh"]) assert.match(html, new RegExp(`value="${value}"`), `${chosen}: ${value} radio`);
+    if (chosen === "remote") {
+      for (const re of remoteOnly) assert.match(html, re, `remote: ${re}`);
+      assert.match(html, /aria-label="Remote server"/);
+      assert.doesNotMatch(html, /MODE-SLOT/, "remote: the local and SSH settings are hidden");
+      assert.doesNotMatch(html, /MEGA sync/, "remote: the Local hint is hidden");
+    } else {
+      for (const re of remoteOnly) assert.doesNotMatch(html, re, `${chosen}: hub fields hidden (${re})`);
+      assert.doesNotMatch(html, /aria-label="Remote server"/, `${chosen}: no Remote server group`);
+      assert.match(html, /MODE-SLOT/, `${chosen}: the host-provided settings render`);
+      assert.equal(/MEGA sync/.test(html), chosen === "local", `${chosen}: the Local hint shows only for Local`);
+    }
+  }
+});
+
+test("without props the settings follow the saved mode and no SSH settings appear", () => {
+  const env = { client: {}, host: MODE_HOST, serverMode: "local" };
+  const html = renderToStaticMarkup(React.createElement(m.SettingsEnvProvider, { env }, React.createElement(m.RemoteServerCard)));
+  assert.match(html, /role="radiogroup"/);
+  assert.doesNotMatch(html, /type="password"/, "local is the saved mode: hub fields hidden");
+});
 
 // ---- an SSH session: the live mode, not the saved one, is what the card shows ----------------------------------------
 // A launch in SSH mode writes the saved mode back to Local, so the saved mode says "local" during the session.
@@ -66,7 +101,7 @@ test("the applied mode is the live mode in an SSH or hub session, and the saved 
 
 test("an SSH session shows the SSH server line, not Local desktop", () => {
   const html = renderToStaticMarkup(React.createElement(m.ConnectionState, { s: { hubLogin: null }, me: null, applied: "ssh" }));
-  assert.match(html, /Using the <strong>SSH server<\/strong> below/);
+  assert.match(html, /Using the <strong>SSH server<\/strong>\. Connecting to a hub switches/);
   assert.doesNotMatch(html, /Local desktop/);
 });
 

@@ -96,19 +96,22 @@ function TestResult({ m, s }: { m: RemoteServerModel; s: RemoteServerState }): R
 
 /** The hub card's one-line status. Exported for the SSR test; `ssh` is the SSH server card's job, so this line only points there. */
 export function ConnectionState({ s, me, applied }: { s: RemoteServerState; me: Me | null; applied: ServerMode | null }): ReactNode {
-  if (applied === "ssh") return <p className="st-hint" role="status">Using the <strong>SSH server</strong> below. Connecting to a hub here switches the backend after a restart.</p>;
-  if (applied !== "remote") return <p className="st-hint" role="status">Using <strong>Local desktop</strong>. Connecting to a hub below switches the backend after a restart.</p>;
+  if (applied === "ssh") return <p className="st-hint" role="status">Using the <strong>SSH server</strong>. Connecting to a hub switches the backend after a restart.</p>;
+  if (applied !== "remote") return <p className="st-hint" role="status">Using <strong>Local desktop</strong>. Connecting to a hub switches the backend after a restart.</p>;
   const user = me ? `${me.email} (${me.role})` : s.hubLogin ? `${s.hubLogin.user.email} (${s.hubLogin.role})` : null;
   if (user) return <p className="st-ok" role="status">Connected as {user}. {s.hubLogin ? `${s.hubLogin.projects.length} project${s.hubLogin.projects.length === 1 ? "" : "s"} available.` : ""}</p>;
-  return <p className="st-hint" role="status">Remote mode is selected. Sign in below if you are not connected.</p>;
+  return <p className="st-hint" role="status">Remote mode is selected. Sign in under Remote server if you are not connected.</p>;
 }
 
 /**
- * The card. Hidden behind a "needs the desktop host" note in a plain browser. It also holds the server-mode choice:
- * `chosen` / `onChoose` come from Server & Backend, which also shows the SSH server card under the choice. Without them
- * the choice follows the saved mode. Choosing a mode is a UI change only; nothing restarts or stops the core until the user acts.
+ * The server-mode card. Hidden behind a "needs the desktop host" note in a plain browser. It always shows the mode choice
+ * and what concerns the switch itself (this launch's mode, the leave-confirm, notices); below that only the chosen
+ * mode's settings render: the hub fields here, or `modeSettings` (Server & Backend passes the managed-backend block for
+ * Local and the SSH server card for SSH). Hidden modes are not rendered, but this component stays mounted so the hub
+ * model and typed email survive a switch. `chosen` / `onChoose` come from Server & Backend; without them the choice follows
+ * the saved mode. Choosing a mode is a UI change only; nothing restarts or stops the core until the user acts.
  */
-export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: ServerMode; onChoose?: (mode: ServerMode) => void; live?: ServerMode | null } = {}): ReactNode {
+export default function RemoteServerCard({ chosen, onChoose, live, modeSettings }: { chosen?: ServerMode; onChoose?: (mode: ServerMode) => void; live?: ServerMode | null; modeSettings?: ReactNode } = {}): ReactNode {
   const { host, client } = useEnv();
   const available = Boolean(host.getRemoteServer && host.setRemoteServer && host.remoteHubCheck && host.remoteHubLogin);
   const io = useMemo<RemoteServerIo>(() => ({
@@ -208,7 +211,8 @@ export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: 
     }
   };
 
-  if (!available) return <p className="st-hint">Remote server mode needs the desktop host, which is not connected in this build.</p>;
+  // Without the host the hub card is unusable, but the chosen mode's own settings (e.g. the managed backend) still show.
+  if (!available) return <><p className="st-hint">Remote server mode needs the desktop host, which is not connected in this build.</p>{modeSettings}</>;
 
   const busy = s.hubBusy !== null;
   const shown: ServerMode = chosen ?? s.mode;
@@ -216,10 +220,9 @@ export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: 
   const advancedId = "remote-advanced-panel";
 
   return (
-    <div className="st-note" role="group" aria-label="Remote server">
-      <span className="st-label">Remote server</span>
-      <p className="st-hint">{REMOTE_TEXT.hint}</p>
-
+    <div className="st-stack">
+    <div className="st-note" role="group" aria-label="Server mode">
+      <span className="st-label">Server mode</span>
       <div className="st-stack" role="radiogroup" aria-label="Server mode">
         <label className="st-row">
           <input
@@ -246,7 +249,7 @@ export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: 
       </div>
 
       <ConnectionState s={s} me={me} applied={appliedMode} />
-      {appliedMode !== "remote" && appliedMode !== "ssh" ? <p className="st-hint">{LOCAL_COPY}</p> : null}
+      {shown === "local" ? <p className="st-hint">{LOCAL_COPY}</p> : null}
 
       {confirmLocal ? (
         <div className="st-dialog" role="alertdialog" aria-label="Switch to Local desktop">
@@ -258,6 +261,25 @@ export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: 
           </div>
         </div>
       ) : null}
+
+      {appliedMode === "remote" || appliedMode === "ssh" ? (
+        <div className="st-row">
+          <button type="button" className="st-btn" data-tone="danger" disabled={busy} onClick={() => setConfirmLocal(true)}>Switch to Local desktop…</button>
+          <span className="st-hint">{appliedMode === "ssh" ? "Explicit: the SSH server is left behind and the local core restarts." : "Explicit: the hub is left behind and the local core restarts."}</span>
+        </div>
+      ) : null}
+
+      {/* With Remote chosen these lines stay beside the buttons that cause them (Connect, Save), further down. */}
+      {shown !== "remote" && notice ? <p className="st-ok" role="status">{notice}</p> : null}
+      {shown !== "remote" ? <ErrorText text={s.error} /> : null}
+    </div>
+
+    {shown !== "remote" ? modeSettings : null}
+
+    {shown === "remote" ? (
+    <div className="st-note" role="group" aria-label="Remote server">
+      <span className="st-label">Remote server</span>
+      <p className="st-hint">{REMOTE_TEXT.hint}</p>
 
       <Field label="Server URL" hint="The https:// address of a running hub. Public domain only; localhost is accepted in development builds.">
         <input className="st-input" value={s.hubUrl} onChange={(e) => m.setHubUrl(e.currentTarget.value)} placeholder="https://hub.example.com" autoComplete="off" spellCheck={false} />
@@ -337,16 +359,11 @@ export default function RemoteServerCard({ chosen, onChoose, live }: { chosen?: 
         </div>
       ) : null}
 
-      {appliedMode === "remote" || appliedMode === "ssh" ? (
-        <div className="st-row">
-          <button type="button" className="st-btn" data-tone="danger" disabled={busy} onClick={() => setConfirmLocal(true)}>Switch to Local desktop…</button>
-          <span className="st-hint">{appliedMode === "ssh" ? "Explicit: the SSH server is left behind and the local core restarts." : "Explicit: the hub is left behind and the local core restarts."}</span>
-        </div>
-      ) : null}
-
       {s.saved && !advanced ? <p className="st-ok" role="status">Saved.</p> : null}
       <ErrorText text={s.error} />
       {s.loadFailed ? <p className="st-hint">The saved remote settings could not be read. You can enter them again and connect.</p> : null}
+    </div>
+    ) : null}
     </div>
   );
 }
