@@ -50,14 +50,19 @@ const SPAWN_PORTS: [u16; 4] = [3456, 3457, 3458, 3459];
 /// `LLMIDE_EXT_ACTIVE_SET`: an extension switched on in Library → Extensions loads into Claude chats (the catalog's
 /// active set); with it off the core ignores those switches. Installing an item whose kind and name another item
 /// already holds is refused by the core, so a shared switch never turns an existing plugin off.
+/// `LLMIDE_REGISTRATION_SINGLE_OWNER`: this core serves one person, so a no-invite sign-up is refused once an owner exists
+/// (`selfRegistrationOpen` in `extension/server/users.mjs`); the first account on a fresh install still registers and becomes
+/// the owner. Without it any process that can reach the loopback port could register a second account with `maxMode: execute`.
+/// SSH mode sets the same flag in `ssh_server_scripts.rs`.
 /// NOTE: `LLMIDE_HOST_API_READ` / `_COMPOSE` / `_TOOL_APPROVALS` are NOT here: they are Settings switches, on by default,
 /// and `prefs::core_env_pairs` passes each one as an explicit `1` or `0` so turning one off is honoured.
-const SPAWNED_CORE_FLAGS: [(&str, &str); 5] = [
+const SPAWNED_CORE_FLAGS: [(&str, &str); 6] = [
     ("LLMIDE_ENGINE_PREWARM", "0"),
     ("LLMIDE_BACKUP_INTERVAL_HOURS", "0"),
     ("LLMIDE_LIVE_ACK", "1"),
     ("LLMIDE_HOST_API_CHAT_CLEAR", "1"),
     ("LLMIDE_EXT_ACTIVE_SET", "1"),
+    ("LLMIDE_REGISTRATION_SINGLE_OWNER", "1"),
 ];
 /// On a supervised restart, how long the port our just-exited core held may stay busy before it is skipped.
 const RESTART_PORT_WAIT: Duration = Duration::from_secs(3);

@@ -1316,6 +1316,12 @@ fn the_spawned_core_loads_switched_on_catalog_extensions() {
     assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
 }
 #[test]
+fn the_spawned_core_is_single_owner_and_ignores_the_host_env() {
+    assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_REGISTRATION_SINGLE_OWNER", "1")));
+    let host = vec![("LLMIDE_REGISTRATION_SINGLE_OWNER".to_string(), "0".to_string())];
+    assert!(crate::core_env::scrub(&host, crate::fsutil::Os::Mac).is_empty(), "never taken from the host env");
+}
+#[test]
 fn the_spawned_core_forces_only_chat_clear_and_leaves_switchable_capabilities_to_prefs() {
     assert!(SPAWNED_CORE_FLAGS.contains(&("LLMIDE_HOST_API_CHAT_CLEAR", "1")));
     // Forcing these would override the Settings switch; prefs::core_env_pairs owns them (default on).
