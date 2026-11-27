@@ -60,6 +60,10 @@ is_core() {
   # line, so its own pid is excluded explicitly.
   [ "$1" != "$$" ] || return 1
   [ -r "/proc/$1/cmdline" ] || return 1
+  # cmdline is world-readable and pids get reused, so a process of another account that runs a server.mjs is
+  # never the core: it must belong to the user running this script. Fail closed if the owner cannot be read.
+  OWNER=$(stat -c %u "/proc/$1" 2>/dev/null) || return 1
+  [ -n "$OWNER" ] && [ "$OWNER" = "$(id -u)" ] || return 1
   tr '\0' ' ' < "/proc/$1/cmdline" | grep -F -q server.mjs
 }
 is_alive() {
@@ -1112,6 +1116,20 @@ mod tests {
     #[test]
     fn state_missing_marker_is_error() {
         assert!(parse_core_state("nothing here\n").is_err());
+    }
+
+    #[test]
+    fn is_core_requires_the_process_owner() {
+        // cmdline is world-readable and pids are reused: the helper every script shares must also check the owner.
+        for (name, script) in all_scripts().into_iter().filter(|(_, script)| script.contains("is_core() {")) {
+            let start = script.find("is_core() {").unwrap();
+            let body = &script[start..start + script[start..].find("\n}\n").unwrap()];
+            assert!(body.contains(r#"OWNER=$(stat -c %u "/proc/$1" 2>/dev/null) || return 1"#), "{name}: is_core has no owner check");
+            assert!(body.contains(r#"[ -n "$OWNER" ] && [ "$OWNER" = "$(id -u)" ] || return 1"#), "{name}: is_core lacks the non-empty guard");
+            let owner = body.find("OWNER=$(stat -c %u").unwrap();
+            assert!(owner < body.find("grep -F -q server.mjs").unwrap(), "{name}: the owner is checked before the command line");
+        }
+        assert!(STATUS.contains("is_core() {"), "STATUS must carry the shared helper");
     }
 
     #[test]
