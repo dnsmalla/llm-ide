@@ -1057,7 +1057,8 @@ async function holdAt(d: RunManagerDeps, run: ManagedRun, ignoreCancel: boolean,
       let timer: ReturnType<typeof setTimeout> | undefined;
       await new Promise<void>((resolve) => {
         run.wake = resolve;
-        if (timeoutSeconds > 0) { timer = setTimeout(resolve, remaining); (timer as { unref?: () => void }).unref?.(); }
+        // Not unref'd: in Node an unref'd timer lets the process exit before the timeout resolves the hold.
+        if (timeoutSeconds > 0) timer = setTimeout(resolve, remaining);
       });
       if (timer !== undefined) clearTimeout(timer);
       run.wake = undefined;
