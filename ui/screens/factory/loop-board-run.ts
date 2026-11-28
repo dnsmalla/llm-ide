@@ -249,12 +249,13 @@ export interface LoopRunCardInput {
 /**
  * What a finished card means for the Done lane, or null when the run is not finished (finished = passed, or held and
  * then shipped / superseded). Needs the MR's live status when the record names one:
- * - `mrOpen`: the MR is open (or its status is not known yet): the card stays until it is merged.
+ * - `mrOpen`: the MR is open (or its status is not known yet): the card stays until it is merged. `statusError`: the
+ *   status check failed (MR deleted, token removed, provider down), so Done is offered too and only hides the card.
  * - `mrMerged`: merged: the card goes away by itself.
  * - `mrClosed`: closed without merging: the person ends the card with Done.
  * - `noMr`: the run opened no MR (the setting is off, a blocked ship, or a check-only loop): Done ends the card.
  */
-export type DoneState = { kind: "mrOpen"; url: string } | { kind: "mrMerged" } | { kind: "mrClosed" } | { kind: "noMr" };
+export type DoneState = { kind: "mrOpen"; url: string; statusError?: true } | { kind: "mrMerged" } | { kind: "mrClosed" } | { kind: "noMr" };
 
 export function doneState(
   run: Pick<LoopRunIndexEntry, "statusCode">,
@@ -266,7 +267,8 @@ export function doneState(
   if (!finished) return null;
   const url = decodeFactoryFields(record).ship?.url ?? null;
   if (!url) return { kind: "noMr" };
-  if (shipStatus && shipStatus !== "error") {
+  if (shipStatus === "error") return { kind: "mrOpen", url, statusError: true };
+  if (shipStatus) {
     if (shipStatus.state === "merged") return { kind: "mrMerged" };
     if (shipStatus.state === "closed") return { kind: "mrClosed" };
   }
@@ -276,7 +278,9 @@ export function doneState(
 function doneCardView(done: DoneState | null, checkOnly: boolean, hasWorktree: boolean): { actions: CardAction[]; note: string | null; request: { label: string } | null } | null {
   if (!done) return null;
   switch (done.kind) {
-    case "mrOpen": return { actions: ["openRequest", "openLog"], note: null, request: { label: "MR open — shown until merged" } };
+    case "mrOpen": return done.statusError
+      ? { actions: ["done", "openRequest", "openLog"], note: "Its MR status could not be read; Done clears this card and keeps the branch.", request: { label: "MR status unknown" } }
+      : { actions: ["openRequest", "openLog"], note: null, request: { label: "MR open — shown until merged" } };
     case "mrMerged": return { actions: ["openLog"], note: null, request: null };
     case "mrClosed": return { actions: ["done", "openLog", "discard"], note: "Its MR was closed without merging.", request: null };
     // A check-only run made before they moved to the project folder may still have its worktree: Discard removes it.

@@ -19,10 +19,6 @@
     "errors": 0,
     "warnings": 4
   },
-  "ui/screens/factory/LoopRuns.tsx": {
-    "errors": 0,
-    "warnings": 1
-  },
   "ui/screens/gantt/GanttScreen.tsx": {
     "errors": 0,
     "warnings": 2
@@ -41,7 +37,7 @@
   },
   "ui/screens/loop/native/NativeLoopScreen.tsx": {
     "errors": 0,
-    "warnings": 5
+    "warnings": 4
   },
   "ui/screens/settings/index.tsx": {
     "errors": 0,

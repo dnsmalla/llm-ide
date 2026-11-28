@@ -208,7 +208,7 @@ test("doneState: only finished runs have one", () => {
 
 test("doneState: MR open / unknown / error keep the card, merged and closed follow the status", () => {
   assert.deepEqual(doneState(DONE_RUN, withShip, null, null), { kind: "mrOpen", url: MR_URL });
-  assert.deepEqual(doneState(DONE_RUN, withShip, null, "error"), { kind: "mrOpen", url: MR_URL });
+  assert.deepEqual(doneState(DONE_RUN, withShip, null, "error"), { kind: "mrOpen", url: MR_URL, statusError: true });
   assert.deepEqual(doneState(DONE_RUN, withShip, null, st("open")), { kind: "mrOpen", url: MR_URL });
   assert.deepEqual(doneState(DONE_RUN, withShip, null, st("merged")), { kind: "mrMerged" });
   assert.deepEqual(doneState(DONE_RUN, withShip, null, st("closed")), { kind: "mrClosed" });
@@ -225,6 +225,9 @@ test("card actions per Done state", () => {
   const open = doneView({ kind: "mrOpen", url: MR_URL });
   assert.deepEqual(open.actions, ["openRequest", "openLog"]);
   assert.deepEqual(open.request, { label: "MR open — shown until merged" });
+  const unknown = doneView({ kind: "mrOpen", url: MR_URL, statusError: true });
+  assert.deepEqual(unknown.actions, ["done", "openRequest", "openLog"], "an MR whose status cannot be read must not trap the card");
+  assert.match(unknown.note, /could not be read/);
   const closed = doneView({ kind: "mrClosed" });
   assert.deepEqual(closed.actions, ["done", "openLog", "discard"]);
   assert.match(closed.note, /closed without merging/);

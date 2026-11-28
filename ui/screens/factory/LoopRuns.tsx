@@ -190,20 +190,32 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   // MR status of finished cards that opened a merge request, keyed by url; a card stays on the board until its MR is merged.
   const [statusDown, setStatusDown] = useState(false);
   const [ship, setShip] = useState<ReadonlyMap<string, ShipStatus | "error">>(() => new Map());
-  const cardsRef = useRef(cards);
-  cardsRef.current = cards;
-  const hiddenRef = useRef(hidden);
-  hiddenRef.current = hidden;
+  /** Hides cards from this board's view (the journal entry itself is never deleted). */
+  const hideRuns = useCallback((entryIds: readonly string[]) => {
+    setHidden((h) => {
+      const next = new Set(h);
+      for (const id of entryIds) next.add(id);
+      saveHiddenRunIds(scope, next, storage());
+      return next;
+    });
+  }, [scope]);
+  // One pass per card: its MR url and Done state, read by the poll, the merged-card cleanup and the board.
+  const cardInfo = useMemo(() => cards.map((card) => {
+    const url = decodeFactoryFields(card.record).ship?.url ?? null;
+    return { card, url, done: doneState(card.run, card.record, card.held, url === null ? null : ship.get(url)) };
+  }), [cards, ship]);
+  // Polled: every shown finished card with an MR, whatever its last status (each poll replaces the whole status map).
+  const polled = cardInfo.filter((i) => i.url !== null && i.done !== null && !hidden.has(i.card.run.id));
+  const polledRef = useRef(polled);
+  polledRef.current = polled;
   const lastStatusAt = useRef(0);
   const statusBusy = useRef(false);
-  const mrUrlsKey = cards.filter((c) => !hidden.has(c.run.id) && doneState(c.run, c.record, c.held, null)?.kind === "mrOpen")
-    .map((c) => decodeFactoryFields(c.record).ship?.url ?? "").join("\n");
+  const mrUrlsKey = polled.map((i) => i.url).join("\n");
   const refreshStatus = useCallback(async (force = false) => {
     const seen = new Set<string>();
     const requests: { url: string; since: string }[] = [];
-    for (const c of cardsRef.current) {
-      const url = decodeFactoryFields(c.record).ship?.url;
-      if (!url || seen.has(url) || hiddenRef.current.has(c.run.id) || doneState(c.run, c.record, c.held, null)?.kind !== "mrOpen") continue;
+    for (const { card: c, url } of polledRef.current) {
+      if (url === null || seen.has(url)) continue;
       seen.add(url);
       requests.push({ url, since: typeof c.record?.endedAt === "string" ? c.record.endedAt : c.run.startedAt });
     }
@@ -238,9 +250,9 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   }, [active, mrUrlsKey, refreshStatus]);
   // Merged cards are hidden for good, so the next poll leaves them out.
   useEffect(() => {
-    const merged = cards.filter((c) => !hidden.has(c.run.id) && doneState(c.run, c.record, c.held, ship.get(decodeFactoryFields(c.record).ship?.url ?? ""))?.kind === "mrMerged").map((c) => c.run.id);
+    const merged = cardInfo.filter((i) => !hidden.has(i.card.run.id) && i.done?.kind === "mrMerged").map((i) => i.card.run.id);
     if (merged.length > 0) hideRuns(merged);
-  }, [cards, ship]);
+  }, [cardInfo, hidden, hideRuns]);
 
   const liveRun: LoopRunIndexEntry | null = live && loopId ? {
     id: live.runId, loopId, loopName: scope, startedAt: live.startedAt,
@@ -249,13 +261,12 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   } : null;
 
   const checkOnly = boardLoop !== null && isCheckOnlyLoop(boardLoop);
-  const doneOf = (c: RunCard) => doneState(c.run, c.record, c.held, ship.get(decodeFactoryFields(c.record).ship?.url ?? ""));
-  // A merged MR's card leaves the board by itself (hidden below, and remembered so it is not polled again).
-  const shownCards = cards.filter((c) => !hidden.has(c.run.id) && doneOf(c)?.kind !== "mrMerged");
-  const listed = shownCards.filter((c) => c.run.id !== liveRun?.id);
-  const runById = new Map<string, LoopRunIndexEntry>([...(liveRun ? [liveRun] : []), ...listed.map((c) => c.run)].map((r) => [r.id, r]));
+  // A merged MR's card leaves the board by itself (hidden above, and remembered so it is not polled again).
+  const shownCards = cardInfo.filter((i) => !hidden.has(i.card.run.id) && i.done?.kind !== "mrMerged");
+  const listed = shownCards.filter((i) => i.card.run.id !== liveRun?.id);
+  const runById = new Map<string, LoopRunIndexEntry>([...(liveRun ? [liveRun] : []), ...listed.map((i) => i.card.run)].map((r) => [r.id, r]));
   const liveView = liveRun && live ? loopRunCardView({ run: liveRun, record: null, steps, held: null, live: { lane: live.stageName || steps[0] || "Running", note: liveCardNote(live), progress: live.progress } }) : null;
-  const views = [...(liveView ? [liveView] : []), ...listed.map((c) => loopRunCardView({ ...c, steps, done: doneOf(c), checkOnly }))];
+  const views = [...(liveView ? [liveView] : []), ...listed.map((i) => loopRunCardView({ ...i.card, steps, done: i.done, checkOnly }))];
   const lanes = loopRunLanes(steps, views);
 
   const openRun = async (id: string, startedAt: string) => {
@@ -267,15 +278,6 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
   };
 
-  /** Hides cards from this board's view (the journal entry itself is never deleted). */
-  const hideRuns = (entryIds: readonly string[]) => {
-    setHidden((h) => {
-      const next = new Set(h);
-      for (const id of entryIds) next.add(id);
-      saveHiddenRunIds(scope, next, storage());
-      return next;
-    });
-  };
   const hideRun = (entryId: string) => hideRuns([entryId]);
 
   /** Opens the inline confirm for one card's Discard, after checking it is actually safe to offer (a worktree
@@ -353,6 +355,8 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
    *  loop's worktree is removed only when nothing in it is unshipped. A card that is not the loop's newest run, or any
    *  card while the loop runs, is only hidden: a worktree is shared by every run of a loop. */
   const finishCard = async (run: LoopRunIndexEntry) => {
+    // Done on an MR card (offered only when its status cannot be read) just hides it: the MR may still be open, so its shared branch stays.
+    if (cardInfo.find((i) => i.card.run.id === run.id)?.done?.kind === "mrOpen") { hideRun(run.id); return; }
     if (discardBusy.current) { setDiscardMsg({ text: "Another worktree is still being removed; try again when it is done.", kind: "info" }); return; }
     discardBusy.current = true;
     setDiscardMsg(null);
@@ -381,8 +385,7 @@ export function LoopRuns({ projectRoot, scope, scopeId = null, active }: LoopRun
   };
 
   const openMergeRequest = (run: LoopRunIndexEntry) => {
-    const card = cards.find((c) => c.run.id === run.id);
-    const url = safeRequestUrl(decodeFactoryFields(card?.record ?? null).ship?.url ?? null);
+    const url = safeRequestUrl(cardInfo.find((i) => i.card.run.id === run.id)?.url ?? null);
     if (url) void invokeHost("open_external_url", { url }).catch(() => setError("The PR/MR link could not be opened."));
   };
 
